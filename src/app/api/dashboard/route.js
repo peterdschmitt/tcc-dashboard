@@ -45,9 +45,11 @@ export async function GET(request) {
 
     const allAgentNames = [...new Set(salesRaw.map(r => r['Agent']?.trim()).filter(Boolean))];
 
+    console.log('[dashboard] Commission rates:', commissionRates.map(r => `${r.carrier}/${r.product}/${r.ageRange}=${(r.commissionRate*100).toFixed(0)}%`).join(', '));
     console.log('[dashboard] Sales columns:', salesRaw.length > 0 ? Object.keys(salesRaw[0]).join(', ') : 'NO DATA');
     console.log('[dashboard] First row carrier field:', salesRaw.length > 0 ? JSON.stringify(salesRaw[0]['Carrier + Product + Payout']) : 'N/A');
 
+    let _dbgIdx = 0;
     let policies = salesRaw
       .filter(r => r['Agent'] && r['Application Submitted Date'])
       .map(r => {
@@ -63,11 +65,13 @@ export async function GET(request) {
         const cpParts = carrierProductRaw.split(',').map(s => s.trim());
         const carrier = cpParts[0] || '';
         const product = cpParts.slice(1).join(', ').trim() || '';
-        const commission = calcCommission(premium, carrier, product, age, commissionRates);
+        const isGIWL = (carrier + ' ' + product).toLowerCase().includes('giwl');
+        const commission = isGIWL ? premium * 1.5 : premium * 3;
         const leadSource = r['Lead Source']?.trim() || '';
         const months = advanceMonths(carrier);
         const grossAdvancedRevenue = premium * months;
-        const advancedCommission = 0;
+
+        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} commission=${commission} ${isGIWL ? '(GIWL)' : ''}`);
 
         return {
           agent: r['Agent']?.trim(), leadSource, carrier, product,
@@ -77,7 +81,7 @@ export async function GET(request) {
           placed: normalizePlacedStatus(r['Placed?']),
           submitDate, effectiveDate: parseFlexDate(r['Effective Date']),
           state: r['State']?.trim(), gender: r['Gender']?.trim(),
-          age, commission: advancedCommission, advanceMonths: months,
+          age, commission, advanceMonths: months,
           grossAdvancedRevenue,
         };
       })

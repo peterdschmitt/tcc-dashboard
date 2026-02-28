@@ -246,6 +246,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
           { key: 'leadSpend', label: 'Spend', render: r => fmtDollar(r.leadSpend || 0), color: r => (r.leadSpend || 0) > 0 ? C.yellow : C.muted },
           { key: 'rpc', label: 'RPC', render: r => r.totalCalls > 0 ? fmtDollar(r.leadSpend / r.totalCalls, 2) : '—' },
           { key: 'cpa', label: 'CPA', render: r => r.placed > 0 && r.leadSpend ? fmtDollar(r.leadSpend / r.placed) : '—' },
+          { key: 'commission', label: 'Comm', render: r => fmtDollar(r.commission), color: () => C.accent },
           { key: 'net', label: 'Net Rev', render: r => fmtDollar(r.gar - (r.leadSpend || 0) - r.commission), color: r => (r.gar - (r.leadSpend || 0) - r.commission) > 0 ? C.green : C.red },
         ]} rows={dailyRows} />
       </Section>

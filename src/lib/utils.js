@@ -75,23 +75,63 @@ export function parseDuration(raw) {
 }
 
 export function calcCommission(premium, carrier, product, age, commissionRates) {
-  if (!commissionRates || !carrier || !product) return 0;
-  const matches = commissionRates.filter(r => {
-    const carrierMatch = carrier.toLowerCase().includes(r.carrier.toLowerCase()) ||
-                          r.carrier.toLowerCase().includes(carrier.toLowerCase());
-    const productMatch = product.toLowerCase().includes(r.product.toLowerCase()) ||
-                          r.product.toLowerCase().includes(product.toLowerCase());
-    return carrierMatch && productMatch;
-  });
-  if (matches.length === 0) return 0;
-  if (age && matches.some(m => m.ageRange !== 'n/a')) {
-    const ageMatch = matches.find(m => {
-      if (m.ageRange === 'n/a') return false;
-      const range = m.ageRange.match(/(\d+)\s*-\s*(\d+)/);
-      if (range) return age >= parseInt(range[1]) && age <= parseInt(range[2]);
-      return false;
-    });
-    if (ageMatch) return premium * ageMatch.commissionRate;
+  if (!commissionRates || !carrier) return 0;
+  const NOISE = new Set(['the','a','an','of','and','or','for','-','–','life','insurance','final','expense']);
+  function getWords(s) { return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !NOISE.has(w)); }
+  function wordOverlap(a, b) {
+    const wa = getWords(a), wb = getWords(b);
+    if (wa.length === 0 || wb.length === 0) return 0;
+    const shared = wa.filter(w => wb.includes(w)).length;
+    return shared / Math.min(wa.length, wb.length);
   }
-  return premium * matches[0].commissionRate;
+
+  const policyHasGraded = (product || '').toLowerCase().includes('graded');
+  const policyHasRop = (product || '').toLowerCase().includes('rop');
+  const carrierWords = getWords(carrier);
+
+  // Score each commission rate entry
+  const scored = commissionRates.map(r => {
+    // Carrier match: word overlap
+    const cOverlap = wordOverlap(carrier, r.carrier);
+    if (cOverlap < 0.4) return null; // must share significant carrier words
+
+    // Product match: word overlap between policy product and commission product
+    const pOverlap = wordOverlap(product || '', r.product);
+
+    // Bonus: if graded/rop alignment
+    const commHasGraded = r.product.toLowerCase().includes('graded');
+    const commHasRop = r.product.toLowerCase().includes('rop');
+    const commHasImmediate = r.product.toLowerCase().includes('immediate') || r.product.toLowerCase().includes('standard');
+    let typeBonus = 0;
+    if (policyHasGraded && commHasGraded) typeBonus = 0.3;
+    else if (policyHasRop && commHasRop) typeBonus = 0.3;
+    else if (!policyHasGraded && !policyHasRop && commHasImmediate) typeBonus = 0.2;
+    else if (!policyHasGraded && !policyHasRop && !commHasGraded && !commHasRop) typeBonus = 0.1;
+    // Penalty if type mismatch
+    if (policyHasGraded && !commHasGraded) typeBonus = -0.5;
+    if (!policyHasGraded && !policyHasRop && commHasGraded) typeBonus = -0.3;
+
+    const score = cOverlap * 0.4 + pOverlap * 0.4 + typeBonus * 0.2;
+
+    // Age match
+    let ageOk = true;
+    if (age && r.ageRange !== 'n/a') {
+      const range = r.ageRange.match(/(\d+)\s*-\s*(\d+)/);
+      if (range) ageOk = age >= parseInt(range[1]) && age <= parseInt(range[2]);
+      else ageOk = false;
+    }
+
+    return { rate: r, score, ageOk, cOverlap, pOverlap };
+  }).filter(Boolean).filter(s => s.score > 0.15);
+
+  if (scored.length === 0) return 0;
+
+  // Prefer age-matched entries, then by score
+  scored.sort((a, b) => {
+    if (a.ageOk !== b.ageOk) return a.ageOk ? -1 : 1;
+    return b.score - a.score;
+  });
+
+  const best = scored[0];
+  return premium * best.rate.commissionRate;
 }
