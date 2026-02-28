@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { fetchSheet } from '@/lib/sheets';
 import { parseFlexDate, normalizeCampaign, parseDuration } from '@/lib/utils';
 import { NextResponse } from 'next/server';

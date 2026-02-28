@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic';
 import { fetchSheet } from '@/lib/sheets';
 import { parseFlexDate, normalizePlacedStatus, normalizeCampaign, parseDuration, fuzzyMatchAgent, calcCommission } from '@/lib/utils';
 import { NextResponse } from 'next/server';
@@ -99,7 +101,8 @@ export async function GET(request) {
         const rep = fuzzyMatchAgent(r['Rep']?.trim(), allAgentNames);
         const priceInfo = pricing[normalized] || {};
         const callDuration = parseDuration(r['Duration']);
-        const isBillable = callDuration > (priceInfo.buffer || 0);
+        const callTypeRaw = (r['Call Type'] || '').trim().toLowerCase();
+        const isBillable = callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
         return {
           date, rep, campaign: rawCampaign, campaignCode: normalized,
           vendor: priceInfo.vendor || '', isBillable,

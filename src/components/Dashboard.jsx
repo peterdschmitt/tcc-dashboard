@@ -278,6 +278,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
                 { key: 'campaign', label: 'Campaign', align: 'left', bold: true, mono: false },
                 { key: 'rep', label: 'Agent', align: 'left', mono: false },
                 { key: 'callStatus', label: 'Status', align: 'left', mono: false, color: r => r.callStatus?.toLowerCase() === 'sale' ? C.green : r.isBillable ? C.text : C.muted },
+                { key: 'callType', label: 'Call Type', align: 'left', mono: false, color: r => r.callType === 'Inbound' ? C.green : C.muted },
                 { key: 'duration', label: 'Duration', render: r => fmtDur(r.duration), color: r => r.isBillable ? C.green : C.red },
                 { key: 'buffer', label: 'Buffer', render: r => fmtDur(r.buffer), color: () => C.muted },
                 { key: 'isBillable', label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO', color: r => r.isBillable ? C.green : C.red },

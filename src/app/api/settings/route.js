@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic';
 import { readRawSheet, appendRow, updateRow, deleteRow, invalidateCache } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
 
