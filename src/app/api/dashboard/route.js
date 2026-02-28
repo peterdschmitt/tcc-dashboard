@@ -2,6 +2,11 @@ import { fetchSheet } from '@/lib/sheets';
 import { parseFlexDate, normalizePlacedStatus, normalizeCampaign, parseDuration, fuzzyMatchAgent, calcCommission } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
+function advanceMonths(carrier) {
+  if (!carrier) return 9;
+  return carrier.toLowerCase().includes('cica') ? 6 : 9;
+}
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -15,7 +20,6 @@ export async function GET(request) {
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing'),
     ]);
 
-    // Parse commission rates
     const commissionRates = commRaw
       .filter(r => r['Carrier'] && r['Commission Rate'])
       .map(r => ({
@@ -25,7 +29,6 @@ export async function GET(request) {
         commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
       }));
 
-    // Parse pricing - handle $ in price values
     const pricing = {};
     pricingRaw.forEach(r => {
       const code = (r['Campaign Code'] || '').trim();
@@ -33,14 +36,17 @@ export async function GET(request) {
       pricing[code] = {
         vendor: (r['Vendor'] || '').trim(),
         pricePerCall: parseFloat((r['Price per Billable Call ($)'] || '0').replace(/[$,]/g, '')) || 0,
+        buffer: parseInt(r['Buffer (seconds)'] || '0') || 0,
         category: (r['Category'] || '').trim(),
       };
     });
 
-    console.log('[dashboard] Pricing loaded:', Object.entries(pricing).map(([k,v]) => k + '=$' + v.pricePerCall).join(', '));
+    console.log('[dashboard] Pricing loaded:', Object.entries(pricing).map(([k,v]) => k + '=$' + v.pricePerCall + '/buf=' + v.buffer + 's').join(', '));
 
-    // Parse policies
     const allAgentNames = [...new Set(salesRaw.map(r => r['Agent']?.trim()).filter(Boolean))];
+
+    console.log('[dashboard] Sales columns:', salesRaw.length > 0 ? Object.keys(salesRaw[0]).join(', ') : 'NO DATA');
+    console.log('[dashboard] First row carrier field:', salesRaw.length > 0 ? JSON.stringify(salesRaw[0]['Carrier + Product + Payout']) : 'N/A');
 
     let policies = salesRaw
       .filter(r => r['Agent'] && r['Application Submitted Date'])
@@ -53,25 +59,26 @@ export async function GET(request) {
           if (birthYear > 1900) age = new Date().getFullYear() - birthYear;
         }
         const premium = parseFloat(r['Monthly Premium']) || 0;
-        const carrier = r['Carrier']?.trim() || '';
-        const product = r['Product']?.trim() || '';
+        const carrierProductRaw = r['Carrier + Product + Payout'] || r['Carrier'] || '';
+        const cpParts = carrierProductRaw.split(',').map(s => s.trim());
+        const carrier = cpParts[0] || '';
+        const product = cpParts.slice(1).join(', ').trim() || '';
         const commission = calcCommission(premium, carrier, product, age, commissionRates);
         const leadSource = r['Lead Source']?.trim() || '';
+        const months = advanceMonths(carrier);
+        const grossAdvancedRevenue = premium * months;
+        const advancedCommission = 0;
 
         return {
-          agent: r['Agent']?.trim(),
-          leadSource,
-          carrier, product,
+          agent: r['Agent']?.trim(), leadSource, carrier, product,
           faceAmount: parseFloat(r['Face Amount']) || 0,
           premium, outcome: r['Outcome at Application Submission']?.trim(),
-          benefit: r['Benefit Payout']?.trim(),
+          benefit: '',
           placed: normalizePlacedStatus(r['Placed?']),
-          submitDate,
-          effectiveDate: parseFlexDate(r['Effective Date']),
-          state: r['State']?.trim(),
-          gender: r['Gender']?.trim(),
-          age, commission,
-          advanceAmount: commission * 0.75,
+          submitDate, effectiveDate: parseFlexDate(r['Effective Date']),
+          state: r['State']?.trim(), gender: r['Gender']?.trim(),
+          age, commission: advancedCommission, advanceMonths: months,
+          grossAdvancedRevenue,
         };
       })
       .filter(p => p.submitDate);
@@ -79,7 +86,6 @@ export async function GET(request) {
     console.log('[dashboard] Policies:', policies.length, '| Placed:', policies.filter(p => ['Advance Released','Active - In Force','Submitted - Pending'].includes(p.placed)).length);
     console.log('[dashboard] Lead sources:', [...new Set(policies.map(p => p.leadSource))].join(', '));
 
-    // Parse call logs
     let calls = callsRaw
       .filter(r => r['Date'])
       .map(r => {
@@ -87,18 +93,15 @@ export async function GET(request) {
         const rawCampaign = r['Campaign']?.trim() || '';
         const normalized = normalizeCampaign(rawCampaign);
         const rep = fuzzyMatchAgent(r['Rep']?.trim(), allAgentNames);
-        const isBillable = ['yes', '1', 'true'].includes((r['Is Callable'] || '').trim().toLowerCase());
         const priceInfo = pricing[normalized] || {};
-
+        const callDuration = parseDuration(r['Duration']);
+        const isBillable = callDuration > (priceInfo.buffer || 0);
         return {
-          date, rep,
-          campaign: rawCampaign,
-          campaignCode: normalized,
-          vendor: priceInfo.vendor || '',
-          isBillable,
+          date, rep, campaign: rawCampaign, campaignCode: normalized,
+          vendor: priceInfo.vendor || '', isBillable,
           isSale: (r['Call Status'] || '').trim().toLowerCase() === 'sale',
           callStatus: r['Call Status']?.trim(),
-          duration: parseDuration(r['Duration']),
+          duration: callDuration,
           callType: r['Call Type']?.trim(),
           cost: isBillable ? (priceInfo.pricePerCall || 0) : 0,
           pricePerCall: priceInfo.pricePerCall || 0,
@@ -107,38 +110,23 @@ export async function GET(request) {
       })
       .filter(c => c.date);
 
-    // Apply date filters
-    if (startDate) {
-      policies = policies.filter(p => p.submitDate >= startDate);
-      calls = calls.filter(c => c.date >= startDate);
-    }
-    if (endDate) {
-      policies = policies.filter(p => p.submitDate <= endDate);
-      calls = calls.filter(c => c.date <= endDate);
-    }
+    if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
+    if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }
 
-    // Build P&L by publisher
     const pnlByPublisher = {};
-
     calls.forEach(c => {
       const key = c.campaignCode || 'Unknown';
       if (!pnlByPublisher[key]) {
-        pnlByPublisher[key] = {
-          campaign: key, vendor: c.vendor, pricePerCall: c.pricePerCall,
-          totalCalls: 0, billableCalls: 0, leadSpend: 0,
-          sales: 0, totalPremium: 0, totalCommission: 0,
-          placedCount: 0, totalFace: 0, appCount: 0, agents: {},
-        };
+        pnlByPublisher[key] = { campaign: key, vendor: c.vendor, pricePerCall: c.pricePerCall,
+          totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0,
+          totalCommission: 0, placedCount: 0, totalFace: 0, appCount: 0, grossAdvancedRevenue: 0, agents: {} };
       }
       const p = pnlByPublisher[key];
       p.totalCalls++;
       if (c.isBillable) { p.billableCalls++; p.leadSpend += c.cost; }
       if (c.isSale) p.sales++;
       if (c.rep) {
-        if (!p.agents[c.rep]) {
-          p.agents[c.rep] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0,
-                              totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0 };
-        }
+        if (!p.agents[c.rep]) p.agents[c.rep] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0, grossAdvancedRevenue: 0 };
         p.agents[c.rep].totalCalls++;
         if (c.isBillable) { p.agents[c.rep].billableCalls++; p.agents[c.rep].leadSpend += c.cost; }
         if (c.isSale) p.agents[c.rep].sales++;
@@ -148,12 +136,9 @@ export async function GET(request) {
     policies.forEach(pol => {
       const key = pol.leadSource || 'Unknown';
       if (!pnlByPublisher[key]) {
-        pnlByPublisher[key] = {
-          campaign: key, vendor: (pricing[key] || {}).vendor || '', pricePerCall: (pricing[key] || {}).pricePerCall || 0,
-          totalCalls: 0, billableCalls: 0, leadSpend: 0,
-          sales: 0, totalPremium: 0, totalCommission: 0,
-          placedCount: 0, totalFace: 0, appCount: 0, agents: {},
-        };
+        pnlByPublisher[key] = { campaign: key, vendor: (pricing[key] || {}).vendor || '', pricePerCall: (pricing[key] || {}).pricePerCall || 0,
+          totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0,
+          totalCommission: 0, placedCount: 0, totalFace: 0, appCount: 0, grossAdvancedRevenue: 0, agents: {} };
       }
       const pub = pnlByPublisher[key];
       pub.appCount++;
@@ -163,40 +148,38 @@ export async function GET(request) {
         pub.totalCommission += pol.commission;
         pub.placedCount++;
         pub.totalFace += pol.faceAmount;
+        pub.grossAdvancedRevenue += pol.grossAdvancedRevenue;
       }
       if (pol.agent) {
-        if (!pub.agents[pol.agent]) {
-          pub.agents[pol.agent] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0,
-                                     totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0 };
-        }
+        if (!pub.agents[pol.agent]) pub.agents[pol.agent] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0, grossAdvancedRevenue: 0 };
         pub.agents[pol.agent].appCount++;
         if (isPlaced) {
           pub.agents[pol.agent].totalPremium += pol.premium;
           pub.agents[pol.agent].totalCommission += pol.commission;
           pub.agents[pol.agent].placedCount++;
+          pub.agents[pol.agent].grossAdvancedRevenue += pol.grossAdvancedRevenue;
         }
       }
     });
 
     const pnl = Object.values(pnlByPublisher).map(p => {
-      const annualPremium = p.totalPremium * 12;
-      const grossRevenue = annualPremium;
-      const netRevenue = grossRevenue - p.leadSpend - p.totalCommission;
-      return {
-        ...p,
+      const netRevenue = p.grossAdvancedRevenue - p.leadSpend - p.totalCommission;
+      return { ...p,
         billableRate: p.totalCalls > 0 ? p.billableCalls / p.totalCalls * 100 : 0,
         rpc: p.totalCalls > 0 ? p.leadSpend / p.totalCalls : 0,
         closeRate: p.billableCalls > 0 ? p.placedCount / p.billableCalls * 100 : 0,
         cpa: p.placedCount > 0 ? p.leadSpend / p.placedCount : 0,
         avgPremium: p.placedCount > 0 ? p.totalPremium / p.placedCount : 0,
         premiumToCost: p.leadSpend > 0 ? p.totalPremium / p.leadSpend : 0,
-        grossRevenue,
-        advancedRevenue: grossRevenue - p.leadSpend,
         netRevenue,
         agentBreakdown: Object.entries(p.agents || {}).map(([name, a]) => ({
           agent: name, ...a,
           closeRate: a.billableCalls > 0 ? a.placedCount / a.billableCalls * 100 : 0,
           cpa: a.placedCount > 0 ? a.leadSpend / a.placedCount : 0,
+          rpc: a.totalCalls > 0 ? a.leadSpend / a.totalCalls : 0,
+          billableRate: a.totalCalls > 0 ? a.billableCalls / a.totalCalls * 100 : 0,
+          avgPremium: a.placedCount > 0 ? a.totalPremium / a.placedCount : 0,
+          netRevenue: a.grossAdvancedRevenue - a.leadSpend - a.totalCommission,
         })),
       };
     }).sort((a, b) => b.totalPremium - a.totalPremium);
