@@ -106,10 +106,13 @@ export async function GET(request) {
           isSale: (r['Call Status'] || '').trim().toLowerCase() === 'sale',
           callStatus: r['Call Status']?.trim(),
           duration: callDuration,
+          buffer: priceInfo.buffer || 0,
           callType: r['Call Type']?.trim(),
           cost: isBillable ? (priceInfo.pricePerCall || 0) : 0,
           pricePerCall: priceInfo.pricePerCall || 0,
           state: r['State']?.trim(),
+          callerName: r['Name']?.trim() || r['Caller Name']?.trim() || '',
+          phone: r['Phone']?.trim() || r['Phone Number']?.trim() || '',
         };
       })
       .filter(c => c.date);

@@ -1,107 +1,84 @@
 import { fetchSheet } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
 
-function parseGoalRow(row, metricColumns) {
-  const goals = {};
-  metricColumns.forEach(({ key, column }) => {
-    const val = parseFloat(row[column]);
-    if (!isNaN(val)) goals[key] = val;
-  });
-  return goals;
-}
-
 export async function GET() {
   try {
-    const sheetId = process.env.GOALS_SHEET_ID;
+    const goals = { company: {}, agents: {} };
 
-    const [companyRows, agentRows, carrierRows, publisherRows, pricingRows] = await Promise.all([
-      fetchSheet(sheetId, process.env.GOALS_COMPANY_TAB || 'Company Daily Goals'),
-      fetchSheet(sheetId, process.env.GOALS_AGENT_TAB || 'Agent Daily Goals'),
-      fetchSheet(sheetId, process.env.GOALS_CARRIER_TAB || 'Carrier Daily Goals'),
-      fetchSheet(sheetId, process.env.GOALS_PUBLISHER_TAB || 'Publisher Daily Goals'),
-      fetchSheet(sheetId, process.env.GOALS_PRICING_TAB || 'Publisher Pricing'),
-    ]);
+    // Try loading Company Goals tab
+    try {
+      const companyRaw = await fetchSheet(
+        process.env.GOALS_SHEET_ID,
+        process.env.COMPANY_GOALS_TAB || 'Company Daily Goals'
+      );
+      // Expect rows like: { Metric: "CPA", Value: "250" }
+      companyRaw.forEach(r => {
+        const rawKey = (r['Metric'] || r['Goal'] || r['Name'] || '').trim();
+        const rawVal = (r['Value'] || r['Target'] || '0').replace(/[$,%x]/g, '');
+        const val = parseFloat(rawVal) || 0;
+        if (!rawKey || !val) return;
+        const key = rawKey.toLowerCase().replace(/[:/]+/g, '_').replace(/[\s/]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+        goals.company[key] = val;
+      });
+    } catch (e) {
+      console.log('[goals] Company Goals tab not found:', e.message);
+    }
 
-    // Company goals
-    const company = {};
-    companyRows.forEach(row => {
-      const metric = row['Metric'] || '';
-      const value = parseFloat(row['Daily Goal']);
-      if (isNaN(value)) return;
-      if (metric.includes('Premium')) company.premiumTarget = value;
-      if (metric.includes('Applications')) company.appsSubmitted = value;
-      if (metric.includes('Policies Placed')) company.policiesPlaced = value;
-      if (metric.includes('Placement Rate')) company.placementRate = value;
-      if (metric.includes('CPA')) company.cpa = value;
-      if (metric.includes('Conversion')) company.conversionRate = value;
+    // Alias mapping: support both old camelCase sheet values and new snake_case keys
+    const aliases = {
+      conversionrate: 'close_rate', conversion_rate: 'close_rate',
+      placementrate: 'placement_rate', closerate: 'close_rate',
+      billablerate: 'billable_rate', avgpremium: 'avg_premium',
+      avg_prem: 'avg_premium', monthlypremium: 'monthly_premium',
+      premium_target: 'monthly_premium', premiumtarget: 'monthly_premium',
+      grossadvrevenue: 'gross_adv_revenue', gross_advanced_revenue: 'gross_adv_revenue',
+      agentcommission: 'agent_commission', netrevenue: 'net_revenue',
+      leadspend: 'lead_spend', totalcalls: 'total_calls',
+      billablecalls: 'billable_calls', appssubmitted: 'apps_submitted',
+      apps_per_day: 'apps_submitted', policiesplaced: 'policies_placed',
+      policies_per_day: 'policies_placed', premiumcost: 'premium_cost_ratio',
+      premium_cost: 'premium_cost_ratio', 'premium:cost': 'premium_cost_ratio',
+    };
+    // Apply aliases
+    Object.entries(goals.company).forEach(([k, v]) => {
+      const normalized = k.replace(/_/g, '');
+      if (aliases[k] && !goals.company[aliases[k]]) goals.company[aliases[k]] = v;
+      if (aliases[normalized] && !goals.company[aliases[normalized]]) goals.company[aliases[normalized]] = v;
     });
 
-    // Agent/Carrier/Publisher goals
-    const agentCols = [
-      { key: 'premiumTarget', column: 'Premium/Day ($)' },
-      { key: 'appsSubmitted', column: 'Apps/Day' },
-      { key: 'policiesPlaced', column: 'Placed/Day' },
-      { key: 'placementRate', column: 'Placement Rate (%)' },
-      { key: 'cpa', column: 'CPA Target ($)' },
-      { key: 'conversionRate', column: 'Conversion Rate (%)' },
-    ];
-
-    const agentDefaults = {};
-    const agentOverrides = {};
-    agentRows.forEach(row => {
-      const name = (row['Agent Name'] || '').trim();
-      if (!name) return;
-      const goals = parseGoalRow(row, agentCols);
-      if (name === '(DEFAULT)') Object.assign(agentDefaults, goals);
-      else if (Object.keys(goals).length > 0) agentOverrides[name] = goals;
+    // Fallback defaults for any missing goals
+    const defaults = {
+      cpa: 250, rpc: 35, close_rate: 5, placement_rate: 80, billable_rate: 65,
+      avg_premium: 70, apps_submitted: 5, policies_placed: 3, total_calls: 50,
+      billable_calls: 35, monthly_premium: 500, gross_adv_revenue: 4000,
+      lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 2.5,
+    };
+    Object.entries(defaults).forEach(([k, v]) => {
+      if (!goals.company[k]) goals.company[k] = v;
     });
 
-    const carrierCols = agentCols.map(c => ({ ...c, column: c.column }));
-    const carrierDefaults = {};
-    const carrierOverrides = {};
-    carrierRows.forEach(row => {
-      const name = (row['Carrier'] || '').trim();
-      if (!name) return;
-      const goals = parseGoalRow(row, carrierCols);
-      if (name === '(DEFAULT)') Object.assign(carrierDefaults, goals);
-      else if (Object.keys(goals).length > 0) carrierOverrides[name] = goals;
-    });
+    // Try loading Agent Goals tab
+    try {
+      const agentRaw = await fetchSheet(
+        process.env.GOALS_SHEET_ID,
+        process.env.AGENT_GOALS_TAB || 'Agent Daily Goals'
+      );
+      agentRaw.forEach(r => {
+        const name = (r['Agent'] || r['Name'] || '').trim();
+        if (!name) return;
+        goals.agents[name] = {
+          appsPerDay: parseFloat(r['Apps/Day'] || r['Apps Per Day'] || '0') || 0,
+          premiumTarget: parseFloat((r['Premium Target'] || r['Premium'] || '0').replace(/[$,]/g, '')) || 0,
+          closeRate: parseFloat((r['Close Rate'] || '0').replace('%', '')) || 0,
+        };
+      });
+    } catch (e) {
+      console.log('[goals] Agent Goals tab not found:', e.message);
+    }
 
-    const publisherOverrides = {};
-    publisherRows.forEach(row => {
-      const name = (row['Publisher / Lead Source'] || '').trim();
-      if (!name) return;
-      const goals = parseGoalRow(row, agentCols);
-      if (Object.keys(goals).length > 0) publisherOverrides[name] = goals;
-    });
-
-    // Publisher pricing
-    const pricing = {};
-    pricingRows.forEach(row => {
-      const code = (row['Campaign Code'] || '').trim();
-      const status = (row['Status'] || '').trim();
-      if (!code || status === 'Inactive') return;
-      pricing[code] = {
-        campaignCode: code,
-        vendor: (row['Vendor'] || '').trim(),
-        fullName: (row['Full Campaign Name'] || '').trim(),
-        pricePerCall: parseFloat(row['Price per Billable Call ($)']) || 0,
-        buffer: parseInt(row['Buffer (seconds)']) || 0,
-        category: (row['Category'] || '').trim(),
-        did: (row['Assigned DID'] || '').trim(),
-        status,
-      };
-    });
-
-    return NextResponse.json({
-      company,
-      agent: { defaults: agentDefaults, overrides: agentOverrides },
-      carrier: { defaults: carrierDefaults, overrides: carrierOverrides },
-      publisher: { overrides: publisherOverrides },
-      pricing,
-    });
+    return NextResponse.json(goals);
   } catch (error) {
-    console.error('Goals API error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[goals] API error:', error);
+    return NextResponse.json({ company: {}, agents: {} });
   }
 }

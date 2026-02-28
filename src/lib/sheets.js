@@ -16,9 +16,92 @@ export async function getAuth() {
   }
   cachedAuth = new google.auth.GoogleAuth({
     credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
   return cachedAuth;
+}
+
+// ─── WRITE HELPERS ─────────────────────────────────
+
+export async function getSheetsClient() {
+  const auth = await getAuth();
+  return google.sheets({ version: 'v4', auth });
+}
+
+/** Read raw rows (with headers) from a tab */
+export async function readRawSheet(sheetId, tabName) {
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: tabName });
+  const rows = res.data.values || [];
+  if (rows.length < 1) return { headers: [], data: [], headerIdx: 0 };
+
+  // Find header row (same logic as fetchSheet)
+  let headerIdx = 0, bestScore = 0;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const score = (rows[i] || []).filter(c => { const t = (c || '').trim(); return t.length > 0 && t.length < 60; }).length;
+    if (score > bestScore) { bestScore = score; headerIdx = i; }
+  }
+  const headers = rows[headerIdx].map(h => (h || '').trim());
+  const data = rows.slice(headerIdx + 1).map((row, ri) => {
+    const obj = { _rowIndex: headerIdx + 1 + ri + 1 }; // 1-based sheet row number
+    headers.forEach((h, i) => { if (h) obj[h] = (row[i] || '').trim(); });
+    return obj;
+  });
+  return { headers, data, headerIdx };
+}
+
+/** Append a row to a tab */
+export async function appendRow(sheetId, tabName, headers, values) {
+  const sheets = await getSheetsClient();
+  const row = headers.map(h => values[h] || '');
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: tabName,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [row] },
+  });
+  invalidateCache(sheetId, tabName);
+}
+
+/** Update a specific row (1-based row number) */
+export async function updateRow(sheetId, tabName, rowNumber, headers, values) {
+  const sheets = await getSheetsClient();
+  const row = headers.map(h => values[h] ?? '');
+  const lastCol = String.fromCharCode(64 + headers.length); // A=1, B=2, etc
+  const range = `${tabName}!A${rowNumber}:${lastCol}${rowNumber}`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [row] },
+  });
+  invalidateCache(sheetId, tabName);
+}
+
+/** Delete a row by clearing it (or shifting up) */
+export async function deleteRow(sheetId, tabName, rowNumber) {
+  const sheets = await getSheetsClient();
+  // Get sheet GID first
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+  const sheet = meta.data.sheets.find(s => s.properties.title === tabName);
+  if (!sheet) throw new Error('Tab not found: ' + tabName);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId: sheet.properties.sheetId,
+            dimension: 'ROWS',
+            startIndex: rowNumber - 1, // 0-based
+            endIndex: rowNumber,
+          }
+        }
+      }]
+    }
+  });
+  invalidateCache(sheetId, tabName);
 }
 
 export async function fetchSheet(sheetId, tabName, ttl) {

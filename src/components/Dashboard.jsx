@@ -4,8 +4,8 @@ import { useState, useMemo } from 'react';
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
   text: '#f0f3f9', muted: '#8fa3be', accent: '#5b9fff', accentDim: '#1e3a5f',
-  green: '#22c55e', greenDim: '#0a2e1a', yellow: '#eab308', yellowDim: '#2e2a0a',
-  red: '#ef4444', redDim: '#2e0a0a', purple: '#a855f7',
+  green: '#4ade80', greenDim: '#0a2e1a', yellow: '#facc15', yellowDim: '#2e2a0a',
+  red: '#f87171', redDim: '#2e0a0a', purple: '#a855f7',
   mono: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
   sans: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
 };
@@ -54,8 +54,8 @@ function ProgressBar({ value, goal, lowerIsBetter = false, width = 100 }) {
   const color = pct >= 100 ? C.green : pct >= 80 ? C.yellow : C.red;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ width, height: 6, background: C.border, borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ width: `${clamped}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+      <div style={{ width, height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: `${clamped}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.5s ease' }} />
       </div>
       <span style={{ fontSize: 10, fontFamily: C.mono, color, minWidth: 36 }}>{pct.toFixed(0)}%</span>
     </div>
@@ -152,39 +152,72 @@ function Breadcrumb({ items }) {
 }
 
 function GoalComparison({ policies, calls, pnl, goals }) {
-  const companyGoals = goals?.company || {};
-  if (!companyGoals.cpa) return null;
+  const cg = goals?.company || {};
+  console.log('[GoalComparison] goals received:', JSON.stringify(goals));
+  console.log('[GoalComparison] company keys:', Object.keys(cg));
+  console.log('[GoalComparison] policies:', policies?.length, 'calls:', calls?.length, 'pnl:', pnl?.length);
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalLeadSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
+  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalComm = placed.reduce((s, p) => s + p.commission, 0);
   const billable = calls.filter(c => c.isBillable).length;
+  const totalCalls = calls.length;
   const cpa = placed.length > 0 ? totalLeadSpend / placed.length : 0;
   const closeRate = billable > 0 ? placed.length / billable * 100 : 0;
   const placementRate = policies.length > 0 ? placed.length / policies.length * 100 : 0;
   const avgPremium = placed.length > 0 ? totalPremium / placed.length : 0;
-  const billableRate = calls.length > 0 ? billable / calls.length * 100 : 0;
-  const rpc = calls.length > 0 ? totalLeadSpend / calls.length : 0;
+  const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
+  const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
+  const netRevenue = totalGAR - totalLeadSpend - totalComm;
+  const premCostRatio = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
 
-  const items = [
-    { label: 'CPA', actual: cpa, goal: companyGoals.cpa, lower: true, format: v => fmtDollar(v) },
-    { label: 'Close Rate', actual: closeRate, goal: companyGoals.conversionRate, format: fmtPct },
-    { label: 'Placement Rate', actual: placementRate, goal: companyGoals.placementRate, format: fmtPct },
-    { label: 'Avg Premium', actual: avgPremium, goal: 70, format: v => fmtDollar(v, 2) },
-    { label: 'Billable Rate', actual: billableRate, goal: 65, format: fmtPct },
-    { label: 'RPC', actual: rpc, goal: 35, lower: true, format: v => fmtDollar(v, 2) },
+  const rows = [
+    // Row 1 — Volume
+    [
+      { label: 'Apps Submitted', actual: policies.length, goal: cg.apps_submitted, format: v => fmt(v) },
+      { label: 'Policies Placed', actual: placed.length, goal: cg.policies_placed, format: v => fmt(v) },
+      { label: 'Total Calls', actual: totalCalls, goal: cg.total_calls, format: v => fmt(v) },
+      { label: 'Billable Calls', actual: billable, goal: cg.billable_calls, format: v => fmt(v) },
+      { label: 'Billable Rate', actual: billableRate, goal: cg.billable_rate, format: fmtPct },
+    ],
+    // Row 2 — Revenue & Spend
+    [
+      { label: 'Monthly Premium', actual: totalPremium, goal: cg.monthly_premium, format: v => fmtDollar(v, 2) },
+      { label: 'Gross Adv Revenue', actual: totalGAR, goal: cg.gross_adv_revenue, format: v => fmtDollar(v) },
+      { label: 'Lead Spend', actual: totalLeadSpend, goal: cg.lead_spend, lower: true, format: v => fmtDollar(v) },
+      { label: 'Agent Commission', actual: totalComm, goal: cg.agent_commission, format: v => fmtDollar(v) },
+      { label: 'Net Revenue', actual: netRevenue, goal: cg.net_revenue, format: v => fmtDollar(v) },
+    ],
+    // Row 3 — Efficiency
+    [
+      { label: 'CPA', actual: cpa, goal: cg.cpa, lower: true, format: v => fmtDollar(v) },
+      { label: 'RPC', actual: rpc, goal: cg.rpc, lower: true, format: v => fmtDollar(v, 2) },
+      { label: 'Close Rate', actual: closeRate, goal: cg.close_rate, format: fmtPct },
+      { label: 'Placement Rate', actual: placementRate, goal: cg.placement_rate, format: fmtPct },
+      { label: 'Premium:Cost', actual: premCostRatio, goal: cg.premium_cost_ratio, format: v => v.toFixed(2) + 'x' },
+      { label: 'Avg Premium', actual: avgPremium, goal: cg.avg_premium, format: v => fmtDollar(v, 2) },
+    ],
   ];
+
+  // Always render - fallback goals ensure data exists
+  if (!cg || Object.keys(cg).length === 0) return null;
 
   return (
     <Section title="Goal Comparison">
-      <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-        {items.map(g => (
-          <div key={g.label} style={{ background: goalBg(g.actual, g.goal, g.lower), borderRadius: 6, padding: '12px 16px', border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>{g.label}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 20, fontWeight: 700, fontFamily: C.mono, color: goalColor(g.actual, g.goal, g.lower) }}>{g.format(g.actual)}</span>
-              <span style={{ fontSize: 11, color: C.muted, fontFamily: C.mono }}>Goal: {g.format(g.goal)}</span>
-            </div>
-            <div style={{ marginTop: 8 }}><ProgressBar value={g.actual} goal={g.goal} lowerIsBetter={g.lower} width={140} /></div>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((row, ri) => (
+          <div key={ri} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: 8 }}>
+            {row.map(g => (
+              <div key={g.label} style={{ background: g.goal ? goalBg(g.actual, g.goal, g.lower) : C.surface, borderRadius: 5, padding: '8px 12px', border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 8, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{g.label}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: g.goal ? goalColor(g.actual, g.goal, g.lower) : '#ffffff', textShadow: '0 0 8px rgba(255,255,255,0.15)' }}>{g.format(g.actual)}</span>
+                  {g.goal && <span style={{ fontSize: 9, color: '#b0c4de', fontFamily: C.mono }}>Goal: {g.format(g.goal)}</span>}
+                </div>
+                {g.goal && <div style={{ marginTop: 5 }}><ProgressBar value={g.actual} goal={g.goal} lowerIsBetter={g.lower} width={140} /></div>}
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -194,6 +227,7 @@ function GoalComparison({ policies, calls, pnl, goals }) {
 
 // ─── DAILY ACTIVITY TAB ────────────────────────────
 function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
+  const [drillDay, setDrillDay] = useState(null);
   const days = calcDays(dateRange.start, dateRange.end);
   const cg = goals?.company || {};
   const placed = policies.filter(isPlaced);
@@ -223,17 +257,55 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
   return (
     <>
       <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} />
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <KPICard label="Apps Submitted" value={policies.length} goal={cg.appsSubmitted ? cg.appsSubmitted * days : null} subtitle={`${(policies.length / days).toFixed(1)}/day`} />
-        <KPICard label="Policies Placed" value={placed.length} goal={cg.policiesPlaced ? cg.policiesPlaced * days : null} subtitle={`${(placed.length / days).toFixed(1)}/day`} />
-        <KPICard label="Mo. Premium" value={fmtDollar(totalPremium, 2)} goal={cg.premiumTarget ? cg.premiumTarget * days : null} subtitle={`Avg: ${fmtDollar(avgPrem, 2)}`} />
-        <KPICard label="Gross Adv. Revenue" value={fmtDollar(totalGAR)} subtitle="9mo (6mo CICA)" />
-        <KPICard label="Lead Spend" value={fmtDollar(leadSpend)} subtitle={`RPC: ${fmtDollar(rpc, 2)} · Bill: ${fmtPct(billableRate)}`} />
-        <KPICard label="CPA" value={fmtDollar(cpa)} goal={cg.cpa} lowerIsBetter />
-        <KPICard label="Net Revenue" value={fmtDollar(totalGAR - leadSpend - totalComm)} subtitle={`Comm: ${fmtDollar(totalComm)}`} />
-      </div>
-      <Section title="Daily Breakdown">
-        <SortableTable defaultSort="date" columns={[
+      {drillDay ? (() => {
+        const dayCalls = calls.filter(c => c.date === drillDay).sort((a, b) => b.duration - a.duration);
+        const dayPolicies = policies.filter(p => p.submitDate === drillDay);
+        const dayBillable = dayCalls.filter(c => c.isBillable);
+        const daySpend = dayCalls.reduce((s, c) => s + c.cost, 0);
+        function fmtDur(s) { if (!s) return '0s'; const m = Math.floor(s / 60); const sec = s % 60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; }
+        return (
+          <>
+            <Breadcrumb items={[{ label: 'Daily Breakdown', onClick: () => setDrillDay(null) }, { label: drillDay }]} />
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+              <KPICard label="Total Calls" value={dayCalls.length} />
+              <KPICard label="Billable" value={dayBillable.length} subtitle={`${dayCalls.length > 0 ? (dayBillable.length / dayCalls.length * 100).toFixed(1) : 0}%`} />
+              <KPICard label="Lead Spend" value={fmtDollar(daySpend)} />
+              <KPICard label="Apps" value={dayPolicies.length} subtitle={`${dayPolicies.filter(isPlaced).length} placed`} />
+              <KPICard label="Non-Billable" value={dayCalls.length - dayBillable.length} subtitle="Under buffer threshold" />
+            </div>
+            <Section title={`All Calls — ${drillDay}`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>{dayCalls.length} calls · {dayBillable.length} billable · ${fmtDollar(daySpend)} spend</span>}>
+              <SortableTable defaultSort="duration" columns={[
+                { key: 'campaign', label: 'Campaign', align: 'left', bold: true, mono: false },
+                { key: 'rep', label: 'Agent', align: 'left', mono: false },
+                { key: 'callStatus', label: 'Status', align: 'left', mono: false, color: r => r.callStatus?.toLowerCase() === 'sale' ? C.green : r.isBillable ? C.text : C.muted },
+                { key: 'duration', label: 'Duration', render: r => fmtDur(r.duration), color: r => r.isBillable ? C.green : C.red },
+                { key: 'buffer', label: 'Buffer', render: r => fmtDur(r.buffer), color: () => C.muted },
+                { key: 'isBillable', label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO', color: r => r.isBillable ? C.green : C.red },
+                { key: 'cost', label: 'Cost', render: r => r.cost > 0 ? fmtDollar(r.cost) : '—', color: r => r.cost > 0 ? C.yellow : C.muted },
+                { key: 'pricePerCall', label: '$/Call', render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall) : '—' },
+                { key: 'state', label: 'State' },
+                { key: 'callerName', label: 'Caller', align: 'left', mono: false, color: () => C.muted },
+              ]} rows={dayCalls} />
+            </Section>
+            {dayPolicies.length > 0 && (
+              <Section title={`Policies Submitted — ${drillDay}`}>
+                <SortableTable defaultSort="premium" columns={[
+                  { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false },
+                  { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
+                  { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+                  { key: 'faceAmount', label: 'Face', render: r => fmtDollar(r.faceAmount) },
+                  { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
+                  { key: 'commission', label: 'Agent Comm', render: r => fmtDollar(r.commission), color: () => C.accent },
+                  { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => isPlaced(r) ? C.green : r.placed === 'Declined' ? C.red : C.yellow },
+                  { key: 'state', label: 'State' },
+                ]} rows={dayPolicies} />
+              </Section>
+            )}
+          </>
+        );
+      })() : (
+      <Section title="Daily Breakdown" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a day to see call details</span>}>
+        <SortableTable defaultSort="date" onRowClick={r => setDrillDay(r.date)} columns={[
           { key: 'date', label: 'Date', align: 'left', bold: true },
           { key: 'apps', label: 'Apps' },
           { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
@@ -250,6 +322,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
           { key: 'net', label: 'Net Rev', render: r => fmtDollar(r.gar - (r.leadSpend || 0) - r.commission), color: r => (r.gar - (r.leadSpend || 0) - r.commission) > 0 ? C.green : C.red },
         ]} rows={dailyRows} />
       </Section>
+      )}
     </>
   );
 }
@@ -332,6 +405,8 @@ function PublishersTab({ pnl, policies, goals, calls }) {
     );
   }
   return (
+    <>
+    <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} />
     <Section title="Publisher Performance" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="totalPremium" onRowClick={r => r.campaign !== 'TOTAL' && setDrill(r.campaign)} totalsRow={pubTotals} columns={[
         { key: 'campaign', label: 'Publisher', align: 'left', bold: true, mono: false },
@@ -351,11 +426,12 @@ function PublishersTab({ pnl, policies, goals, calls }) {
         { key: 'netRevenue', label: 'Net Rev', render: r => fmtDollar(r.netRevenue), color: r => r.netRevenue > 0 ? C.green : C.red, bold: true },
       ]} rows={pnl} />
     </Section>
+    </>
   );
 }
 
 // ─── AGENTS TAB ──────────────────────────────────────
-function AgentsTab({ policies, calls, goals, dateRange }) {
+function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
   const [drill, setDrill] = useState(null);
   const days = calcDays(dateRange.start, dateRange.end);
   const ag = goals?.agent || {};
@@ -441,6 +517,8 @@ function AgentsTab({ policies, calls, goals, dateRange }) {
     );
   }
   return (
+    <>
+    <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} />
     <Section title="Agent Rankings" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="premium" onRowClick={r => r.agent !== 'TOTAL' && setDrill(r.agent)} totalsRow={agentTotals} columns={[
         { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false },
@@ -456,11 +534,12 @@ function AgentsTab({ policies, calls, goals, dateRange }) {
         { key: 'placementRate', label: 'Place %', render: r => r.apps > 0 ? fmtPct(r.placed / r.apps * 100) : '—' },
       ]} rows={agentRows} />
     </Section>
+    </>
   );
 }
 
 // ─── CARRIERS TAB ────────────────────────────────────
-function CarriersTab({ policies, goals, calls, dateRange }) {
+function CarriersTab({ policies, goals, calls, dateRange, pnl }) {
   const [drill, setDrill] = useState(null);
 
   // Group by Carrier + Product + Payout
@@ -521,6 +600,8 @@ function CarriersTab({ policies, goals, calls, dateRange }) {
     );
   }
   return (
+    <>
+    <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} />
     <Section title="Carrier / Product Overview" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="premium" onRowClick={r => r.key !== 'TOTAL' && setDrill(r.key)} totalsRow={carrierTotals} columns={[
         { key: 'carrier', label: 'Carrier', align: 'left', bold: true, mono: false },
@@ -536,6 +617,7 @@ function CarriersTab({ policies, goals, calls, dateRange }) {
         { key: 'agentCount', label: 'Agents' }, { key: 'stateCount', label: 'States' },
       ]} rows={carrierRows} />
     </Section>
+    </>
   );
 }
 
@@ -557,32 +639,6 @@ function PnlTab({ pnl, policies, calls, goals }) {
   return (
     <>
       <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} />
-      <Section title="P&L Summary">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 1, padding: 1, background: C.border }}>
-          {[
-            { label: 'Total Calls', value: fmt(totalCalls) },
-            { label: 'Billable Calls', value: fmt(billable) },
-            { label: 'Billable Rate', value: fmtPct(billableRate) },
-            { label: 'Lead Spend', value: fmtDollar(totalSpend), color: C.yellow },
-            { label: 'RPC', value: fmtDollar(rpc, 2) },
-            { label: 'Applications', value: fmt(policies.length) },
-            { label: 'Policies Placed', value: fmt(placed.length), color: C.green },
-            { label: 'Close Rate', value: fmtPct(billable > 0 ? placed.length / billable * 100 : 0) },
-            { label: 'CPA', value: fmtDollar(cpa), color: goalColor(cpa, cg.cpa, true) },
-            { label: 'Monthly Premium', value: fmtDollar(totalPremium, 2), color: C.green },
-            { label: 'Avg Premium', value: fmtDollar(placed.length > 0 ? totalPremium / placed.length : 0, 2) },
-            { label: 'Premium:Cost', value: totalSpend > 0 ? (totalPremium / totalSpend).toFixed(2) + 'x' : '—' },
-            { label: 'Gross Adv Revenue', value: fmtDollar(totalGAR), color: C.green },
-            { label: 'Agent Commission', value: fmtDollar(totalComm), color: C.accent },
-            { label: 'Net Revenue', value: fmtDollar(netRev), color: netRev > 0 ? C.green : C.red },
-          ].map(item => (
-            <div key={item.label} style={{ background: C.card, padding: '14px 18px' }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: item.color || C.text, fontFamily: C.mono }}>{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </Section>
       <Section title="Publisher P&L Detail">
         <SortableTable defaultSort="netRevenue" columns={[
           { key: 'campaign', label: 'Publisher', align: 'left', bold: true, mono: false },
@@ -631,6 +687,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
               <p style={{ fontSize: 10, color: C.muted, margin: '2px 0 0' }}>{policies.length} policies · {calls.length} calls · {pnl.length} publishers</p>
             </div>
             <a href="/trends" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>📈 Trends</a>
+            <a href="/settings" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>⚙ Settings</a>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
@@ -660,8 +717,8 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
         {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />}
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} />}
-        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} />}
-        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
+        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
+        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
       </div>
     </div>
