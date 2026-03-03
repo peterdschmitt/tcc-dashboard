@@ -1,5 +1,4 @@
 export const dynamic = 'force-dynamic';
-export const dynamic = 'force-dynamic';
 import { fetchSheet } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
 

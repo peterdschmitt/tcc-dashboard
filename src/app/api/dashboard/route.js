@@ -1,5 +1,4 @@
 export const dynamic = 'force-dynamic';
-export const dynamic = 'force-dynamic';
 import { fetchSheet } from '@/lib/sheets';
 import { parseFlexDate, normalizePlacedStatus, normalizeCampaign, parseDuration, fuzzyMatchAgent, calcCommission } from '@/lib/utils';
 import { NextResponse } from 'next/server';
