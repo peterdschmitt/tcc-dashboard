@@ -148,3 +148,7 @@ export async function fetchSheet(sheetId, tabName, ttl) {
 export function invalidateCache(sheetId, tabName) {
   delete cache[`${sheetId}:${tabName}`];
 }
+
+export function clearAllCache() {
+  Object.keys(cache).forEach(k => delete cache[k]);
+}
