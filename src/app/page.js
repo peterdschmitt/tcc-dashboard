@@ -23,10 +23,10 @@ export default function Home() {
     } else if (preset === 'today') {
       start = fmt(today); end = fmt(today);
     } else if (preset === 'last7') {
-      const s = new Date(); s.setDate(s.getDate() - 7);
+      const s = new Date(); s.setDate(s.getDate() - 6);
       start = fmt(s); end = fmt(today);
     } else if (preset === 'last30') {
-      const s = new Date(); s.setDate(s.getDate() - 30);
+      const s = new Date(); s.setDate(s.getDate() - 29);
       start = fmt(s); end = fmt(today);
     } else if (preset === 'mtd') {
       start = fmt(new Date(today.getFullYear(), today.getMonth(), 1));

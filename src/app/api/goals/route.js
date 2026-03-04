@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const goals = { company: {}, agents: {} };
+    const goals = { company: {}, companyMeta: {}, agents: {} };
 
     // Try loading Company Goals tab
     try {
@@ -12,20 +12,26 @@ export async function GET() {
         process.env.GOALS_SHEET_ID,
         process.env.COMPANY_GOALS_TAB || 'Company Daily Goals'
       );
-      // Expect rows like: { Metric: "CPA", Value: "250" }
       companyRaw.forEach(r => {
         const rawKey = (r['Metric'] || r['Goal'] || r['Name'] || '').trim();
-        const rawVal = (r['Value'] || r['Target'] || '0').replace(/[$,%x]/g, '');
+        const rawVal = (r['Daily Goal'] || r['Value'] || r['Target'] || '0').replace(/[$,%x]/g, '');
         const val = parseFloat(rawVal) || 0;
         if (!rawKey || !val) return;
         const key = rawKey.toLowerCase().replace(/[:/]+/g, '_').replace(/[\s/]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
         goals.company[key] = val;
+
+        // Read metadata columns
+        const lowerRaw = (r['Lower is Better?'] || r['Lower Is Better'] || '').trim().toLowerCase();
+        const isLower = ['yes', 'true', '1', 'y', 'x'].includes(lowerRaw);
+        const yellowRaw = (r['Alert Threshold (Yellow)'] || r['Yellow Threshold'] || '').replace(/[%]/g, '');
+        const yellowPct = parseFloat(yellowRaw) || 80;
+        goals.companyMeta[key] = { lower: isLower, yellow: yellowPct };
       });
     } catch (e) {
       console.log('[goals] Company Goals tab not found:', e.message);
     }
 
-    // Alias mapping: support both old camelCase sheet values and new snake_case keys
+    // Alias mapping
     const aliases = {
       conversionrate: 'close_rate', conversion_rate: 'close_rate',
       placementrate: 'placement_rate', closerate: 'close_rate',
@@ -40,23 +46,41 @@ export async function GET() {
       policies_per_day: 'policies_placed', premiumcost: 'premium_cost_ratio',
       premium_cost: 'premium_cost_ratio', 'premium:cost': 'premium_cost_ratio',
     };
-    // Apply aliases
+    // Apply aliases to both company and companyMeta
     Object.entries(goals.company).forEach(([k, v]) => {
       const normalized = k.replace(/_/g, '');
-      if (aliases[k] && !goals.company[aliases[k]]) goals.company[aliases[k]] = v;
-      if (aliases[normalized] && !goals.company[aliases[normalized]]) goals.company[aliases[normalized]] = v;
+      const target = aliases[k] || aliases[normalized];
+      if (target && !goals.company[target]) {
+        goals.company[target] = v;
+        if (goals.companyMeta[k]) goals.companyMeta[target] = goals.companyMeta[k];
+      }
     });
 
-    // Fallback defaults for any missing goals
+    // Fallback defaults
     const defaults = {
       cpa: 250, rpc: 35, close_rate: 5, placement_rate: 80, billable_rate: 65,
       avg_premium: 70, apps_submitted: 5, policies_placed: 3, total_calls: 50,
       billable_calls: 35, monthly_premium: 500, gross_adv_revenue: 4000,
       lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 2.5,
     };
+    // Default meta (lower-is-better and yellow threshold)
+    const defaultMeta = {
+      cpa: { lower: true, yellow: 80 }, rpc: { lower: true, yellow: 80 },
+      lead_spend: { lower: true, yellow: 80 },
+      close_rate: { lower: false, yellow: 80 }, placement_rate: { lower: false, yellow: 80 },
+      billable_rate: { lower: false, yellow: 80 }, avg_premium: { lower: false, yellow: 80 },
+      apps_submitted: { lower: false, yellow: 80 }, policies_placed: { lower: false, yellow: 80 },
+      total_calls: { lower: false, yellow: 80 }, billable_calls: { lower: false, yellow: 80 },
+      monthly_premium: { lower: false, yellow: 80 }, gross_adv_revenue: { lower: false, yellow: 80 },
+      agent_commission: { lower: false, yellow: 80 }, net_revenue: { lower: false, yellow: 80 },
+      premium_cost_ratio: { lower: false, yellow: 80 },
+    };
     Object.entries(defaults).forEach(([k, v]) => {
       if (!goals.company[k]) goals.company[k] = v;
+      if (!goals.companyMeta[k]) goals.companyMeta[k] = defaultMeta[k] || { lower: false, yellow: 80 };
     });
+
+    console.log('[goals] Company meta:', JSON.stringify(goals.companyMeta));
 
     // Try loading Agent Goals tab
     try {
@@ -64,13 +88,20 @@ export async function GET() {
         process.env.GOALS_SHEET_ID,
         process.env.AGENT_GOALS_TAB || 'Agent Daily Goals'
       );
+      console.log('[sheets] Agent Daily Goals:', agentRaw.length > 0 ? Object.keys(agentRaw[0]).join(', ') : 'no data');
       agentRaw.forEach(r => {
-        const name = (r['Agent'] || r['Name'] || '').trim();
+        const name = (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim();
         if (!name) return;
+        const yellowRaw = (r['Yellow Threshold (%)'] || r['Alert Threshold'] || '').replace(/[%]/g, '');
         goals.agents[name] = {
           appsPerDay: parseFloat(r['Apps/Day'] || r['Apps Per Day'] || '0') || 0,
-          premiumTarget: parseFloat((r['Premium Target'] || r['Premium'] || '0').replace(/[$,]/g, '')) || 0,
-          closeRate: parseFloat((r['Close Rate'] || '0').replace('%', '')) || 0,
+          premiumTarget: parseFloat((r['Premium/Day ($)'] || r['Premium Target'] || r['Premium'] || '0').replace(/[$,]/g, '')) || 0,
+          placedPerDay: parseFloat(r['Placed/Day'] || r['Placed Per Day'] || '0') || 0,
+          placementRate: parseFloat((r['Placement Rate (%)'] || r['Placement Rate'] || '0').replace('%', '')) || 0,
+          cpaTarget: parseFloat((r['CPA Target ($)'] || r['CPA'] || '0').replace(/[$,]/g, '')) || 0,
+          closeRate: parseFloat((r['Conversion Rate (%)'] || r['Close Rate'] || '0').replace('%', '')) || 0,
+          yellowThreshold: parseFloat(yellowRaw) || 80,
+          notes: (r['Notes'] || '').trim(),
         };
       });
     } catch (e) {
@@ -80,6 +111,6 @@ export async function GET() {
     return NextResponse.json(goals);
   } catch (error) {
     console.error('[goals] API error:', error);
-    return NextResponse.json({ company: {}, agents: {} });
+    return NextResponse.json({ company: {}, companyMeta: {}, agents: {} });
   }
 }
