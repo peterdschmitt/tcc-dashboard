@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -15,7 +15,7 @@ const TABS = [
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
-  { id: 'pnl', label: 'P&L Report' },
+  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -153,7 +153,13 @@ function Breadcrumb({ items }) {
 function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
   const cg = goals?.company || {};
   const meta = goals?.companyMeta || {};
-  const days = calcDays(dateRange?.start, dateRange?.end);
+
+  // Count only days with actual activity (calls or policies)
+  const activeDays = new Set();
+  policies.forEach(p => { if (p.submitDate) activeDays.add(p.submitDate); });
+  calls.forEach(c => { if (c.date) activeDays.add(c.date); });
+  const days = Math.max(activeDays.size, 1);
+
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalLeadSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
@@ -170,7 +176,6 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
   const netRevenue = totalGAR - totalLeadSpend - totalComm;
   const premCostRatio = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
 
-  // Helper: get meta for a metric key
   const m = key => meta[key] || { lower: false, yellow: 80 };
 
   const rows = [
@@ -201,24 +206,26 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
   if (!cg || Object.keys(cg).length === 0) return null;
 
   return (
-    <Section title={`Goal Comparison — ${days} day${days !== 1 ? 's' : ''} selected`}>
+    <Section title={`Goal Comparison — ${days} active day${days !== 1 ? 's' : ''}`}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rows.map((row, ri) => (
           <div key={ri} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: 8 }}>
             {row.map(g => {
               const gm = m(g.key);
               const periodGoal = g.dailyGoal ? (g.isRate ? g.dailyGoal : g.dailyGoal * days) : null;
+              const ratio = periodGoal ? (gm.lower ? periodGoal / g.actual : g.actual / periodGoal) : null;
               const pctOff = periodGoal ? (gm.lower ? ((periodGoal - g.actual) / periodGoal * 100) : ((g.actual - periodGoal) / periodGoal * 100)) : null;
               const pctLabel = pctOff !== null ? (pctOff >= 0 ? '+' + pctOff.toFixed(1) + '%' : pctOff.toFixed(1) + '%') : null;
-              const color = periodGoal ? goalColor(g.actual, periodGoal, gm.lower, gm.yellow) : '#ffffff';
+              const tileColor = !periodGoal ? '#ffffff' : ratio >= 1 ? C.green : ratio >= (gm.yellow / 100) ? C.yellow : C.red;
+              const tileBg = !periodGoal ? C.surface : ratio >= 1 ? C.greenDim : ratio >= (gm.yellow / 100) ? C.yellowDim : C.redDim;
               return (
-                <div key={g.label} style={{ background: periodGoal ? goalBg(g.actual, periodGoal, gm.lower, gm.yellow) : C.surface, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}` }}>
+                <div key={g.label} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}` }}>
                   <div style={{ fontSize: 9, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{g.label}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color, lineHeight: 1 }}>{g.format(g.actual)}</span>
+                    <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color: tileColor, lineHeight: 1 }}>{g.format(g.actual)}</span>
                     {pctLabel && (
                       <span style={{
-                        fontSize: 11, fontWeight: 700, fontFamily: C.mono, color,
+                        fontSize: 11, fontWeight: 700, fontFamily: C.mono, color: tileColor,
                         background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: 4, lineHeight: 1.2,
                       }}>{pctLabel}</span>
                     )}
@@ -237,7 +244,14 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
                       </div>
                     </div>
                   )}
-                  {periodGoal && <ProgressBar value={g.actual} goal={periodGoal} lowerIsBetter={gm.lower} yellowPct={gm.yellow} width={'100%'} />}
+                  {periodGoal && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ flex: 1, height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min((ratio || 0) * 100, 100)}%`, height: '100%', background: tileColor, borderRadius: 2, transition: 'width 0.5s ease' }} />
+                      </div>
+                      <span style={{ fontSize: 10, fontFamily: C.mono, color: tileColor, minWidth: 36 }}>{ratio ? (ratio * 100).toFixed(0) + '%' : '—'}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -685,6 +699,310 @@ function PnlTab({ pnl, policies, calls, goals }) {
   );
 }
 
+
+
+// ─── AGENT PERFORMANCE TAB ──────────────────────────
+function AgentPerformanceTab({ dateRange }) {
+  const [perfData, setPerfData] = useState(null);
+  const [perfLoading, setPerfLoading] = useState(true);
+  const [view, setView] = useState('agents');
+  const [drillAgent, setDrillAgent] = useState(null);
+  const [drillDay, setDrillDay] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setPerfLoading(true);
+      try {
+        const res = await fetch('/api/agent-performance?start=' + dateRange.start + '&end=' + dateRange.end);
+        const data = await res.json();
+        if (!cancelled) setPerfData(data);
+      } catch (e) { console.error('[agent-perf] load error:', e); }
+      if (!cancelled) setPerfLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [dateRange]);
+
+  if (perfLoading || !perfData) {
+    return <div style={{ padding: 40, textAlign: 'center', color: C.muted }}>Loading agent performance data...</div>;
+  }
+
+  const { daily, agents } = perfData;
+
+  function fmtTime(s) {
+    if (!s) return '0:00:00';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  const availColor = pct => pct >= 85 ? C.green : pct >= 70 ? C.yellow : C.red;
+  const pauseColor = pct => pct <= 15 ? C.green : pct <= 30 ? C.yellow : C.red;
+
+  // Summary KPIs
+  const totalLoggedIn = agents.reduce((s, a) => s + a.loggedIn, 0);
+  const totalPaused = agents.reduce((s, a) => s + a.paused, 0);
+  const totalTalk = agents.reduce((s, a) => s + a.talkTime, 0);
+  const totalAvailable = totalLoggedIn - totalPaused;
+  const overallAvailPct = totalLoggedIn > 0 ? (totalAvailable / totalLoggedIn) * 100 : 0;
+  const overallPausePct = totalLoggedIn > 0 ? (totalPaused / totalLoggedIn) * 100 : 0;
+  const overallTalkPct = totalAvailable > 0 ? (totalTalk / totalAvailable) * 100 : 0;
+  const totalDialed = agents.reduce((s, a) => s + a.dialed, 0);
+  const totalConnects = agents.reduce((s, a) => s + a.connects, 0);
+  const totalSales = agents.reduce((s, a) => s + a.sales, 0);
+  const totalHours = agents.reduce((s, a) => s + a.hoursWorked, 0);
+
+  // Flagged agents (availability < 70%)
+  const flagged = agents.filter(a => a.availPct < 70 && a.loggedIn > 0).sort((a, b) => a.availPct - b.availPct);
+
+  // Aggregate by day
+  const byDay = {};
+  daily.forEach(r => {
+    if (!byDay[r.date]) {
+      byDay[r.date] = { date: r.date, agentCount: 0, dialed: 0, connects: 0, contacts: 0, sales: 0, talkTime: 0, paused: 0, waitTime: 0, wrapUp: 0, loggedIn: 0, hoursWorked: 0 };
+    }
+    const d = byDay[r.date];
+    d.agentCount++;
+    d.dialed += r.dialed;
+    d.connects += r.connects;
+    d.contacts += r.contacts;
+    d.sales += r.sales;
+    d.talkTime += r.talkTime;
+    d.paused += r.paused;
+    d.waitTime += r.waitTime;
+    d.wrapUp += r.wrapUp;
+    d.loggedIn += r.loggedIn;
+    d.hoursWorked += r.hoursWorked;
+  });
+  const dayRows = Object.values(byDay).map(d => {
+    const available = d.loggedIn - d.paused;
+    return {
+      ...d,
+      available,
+      availPct: d.loggedIn > 0 ? (available / d.loggedIn) * 100 : 0,
+      pausePct: d.loggedIn > 0 ? (d.paused / d.loggedIn) * 100 : 0,
+      talkPct: available > 0 ? (d.talkTime / available) * 100 : 0,
+      connectsPerHour: d.hoursWorked > 0 ? d.connects / d.hoursWorked : 0,
+      conversionRate: d.connects > 0 ? (d.sales / d.connects) * 100 : 0,
+      loggedInStr: fmtTime(d.loggedIn),
+      pausedStr: fmtTime(d.paused),
+      talkTimeStr: fmtTime(d.talkTime),
+      waitTimeStr: fmtTime(d.waitTime),
+      wrapUpStr: fmtTime(d.wrapUp),
+      availableStr: fmtTime(available),
+    };
+  }).sort((a, b) => b.date.localeCompare(a.date));
+
+  // View toggle button style
+  const togStyle = (active) => ({
+    padding: '6px 14px', borderRadius: 4, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+    background: active ? C.accent : 'transparent', color: active ? '#fff' : C.muted,
+  });
+
+  // ── Agent Drill-Down ──
+  if (drillAgent) {
+    const agentDays = daily.filter(d => d.rep === drillAgent).sort((a, b) => b.date.localeCompare(a.date));
+    const agg = agents.find(a => a.rep === drillAgent);
+    if (!agg) { setDrillAgent(null); return null; }
+    return (
+      <>
+        <Breadcrumb items={[{ label: 'All Agents', onClick: () => setDrillAgent(null) }, { label: drillAgent }]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Days Active" value={agg.days} />
+          <KPICard label="Availability" value={fmtPct(agg.availPct)} subtitle={`${fmtTime(agg.available)} of ${fmtTime(agg.loggedIn)}`} />
+          <KPICard label="Pause %" value={fmtPct(agg.pausePct)} subtitle={fmtTime(agg.paused)} />
+          <KPICard label="Talk Time" value={fmtTime(agg.talkTime)} subtitle={`${fmtPct(agg.talkPct)} utilization`} />
+          <KPICard label="Connects" value={fmt(agg.connects)} subtitle={`${agg.connectsPerHour.toFixed(1)}/hr`} />
+          <KPICard label="Sales" value={fmt(agg.sales)} subtitle={`${fmtPct(agg.conversionRate)} conv`} />
+        </div>
+        {agg.pausePct > 30 && (
+          <div style={{ background: C.redDim, border: `1px solid ${C.red}44`, borderRadius: 8, padding: '12px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.red }}>High Pause Time Alert</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{drillAgent} has been paused {fmtPct(agg.pausePct)} of logged-in time ({fmtTime(agg.paused)} total). Target is under 15%.</div>
+            </div>
+          </div>
+        )}
+        <Section title="Daily Breakdown">
+          <SortableTable defaultSort="date" columns={[
+            { key: 'date', label: 'Date', align: 'left', bold: true },
+            { key: 'dialed', label: 'Dialed' },
+            { key: 'connects', label: 'Connects' },
+            { key: 'contacts', label: 'Contacts' },
+            { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
+            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
+            { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
+            { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'wrapUpStr', label: 'Wrap Up' },
+          ]} rows={agentDays} />
+        </Section>
+      </>
+    );
+  }
+
+  // ── Day Drill-Down ──
+  if (drillDay) {
+    const dayAgents = daily.filter(d => d.date === drillDay).sort((a, b) => a.availPct - b.availPct);
+    const daySummary = byDay[drillDay];
+    if (!daySummary) { setDrillDay(null); return null; }
+    const dayAvail = daySummary.loggedIn > 0 ? ((daySummary.loggedIn - daySummary.paused) / daySummary.loggedIn) * 100 : 0;
+    const dayFlagged = dayAgents.filter(a => a.availPct < 70 && a.loggedIn > 0);
+    return (
+      <>
+        <Breadcrumb items={[{ label: 'Daily View', onClick: () => setDrillDay(null) }, { label: drillDay }]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Agents Active" value={daySummary.agentCount} subtitle={`${dayFlagged.length} flagged`} />
+          <KPICard label="Availability" value={fmtPct(dayAvail)} subtitle={`${fmtTime(daySummary.loggedIn - daySummary.paused)} of ${fmtTime(daySummary.loggedIn)}`} />
+          <KPICard label="Total Paused" value={fmtTime(daySummary.paused)} subtitle={fmtPct(daySummary.loggedIn > 0 ? (daySummary.paused / daySummary.loggedIn) * 100 : 0)} />
+          <KPICard label="Talk Time" value={fmtTime(daySummary.talkTime)} />
+          <KPICard label="Connects" value={fmt(daySummary.connects)} subtitle={`${daySummary.hoursWorked > 0 ? (daySummary.connects / daySummary.hoursWorked).toFixed(1) : 0}/hr`} />
+          <KPICard label="Sales" value={fmt(daySummary.sales)} subtitle={`${daySummary.connects > 0 ? ((daySummary.sales / daySummary.connects) * 100).toFixed(1) : 0}% conv`} />
+          <KPICard label="Dialed" value={fmt(daySummary.dialed)} />
+        </div>
+        {dayFlagged.length > 0 && (
+          <Section title={`⚠️ Availability Alerts — ${drillDay}`}>
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {dayFlagged.map(a => (
+                <div key={a.rep} onClick={() => { setDrillDay(null); setDrillAgent(a.rep); }} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px',
+                  background: a.availPct < 30 ? C.redDim : C.yellowDim, borderRadius: 6, cursor: 'pointer',
+                  border: `1px solid ${a.availPct < 30 ? C.red : C.yellow}33`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 16 }}>{a.availPct < 30 ? '🔴' : '🟡'}</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{a.rep}</div>
+                      <div style={{ fontSize: 10, color: C.muted }}>Logged in: {fmtTime(a.loggedIn)} · Paused: {fmtTime(a.paused)}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, fontFamily: C.mono, color: a.availPct < 30 ? C.red : C.yellow }}>{fmtPct(a.availPct)}</div>
+                    <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase' }}>Available</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+        <Section title={`All Agents — ${drillDay}`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click agent to see full history</span>}>
+          <SortableTable defaultSort="availPct" onRowClick={r => { setDrillDay(null); setDrillAgent(r.rep); }} columns={[
+            { key: 'rep', label: 'Agent', align: 'left', bold: true, mono: false },
+            { key: 'dialed', label: 'Dialed' },
+            { key: 'connects', label: 'Connects' },
+            { key: 'contacts', label: 'Contacts' },
+            { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
+            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
+            { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
+            { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'wrapUpStr', label: 'Wrap Up' },
+          ]} rows={dayAgents} />
+        </Section>
+      </>
+    );
+  }
+
+  // ── Main View ──
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <KPICard label="Agents" value={agents.length} subtitle={`${flagged.length} flagged`} />
+        <KPICard label="Overall Availability" value={fmtPct(overallAvailPct)} subtitle={`${fmtTime(totalAvailable)} avail of ${fmtTime(totalLoggedIn)}`} />
+        <KPICard label="Overall Pause %" value={fmtPct(overallPausePct)} subtitle={fmtTime(totalPaused)} />
+        <KPICard label="Talk Utilization" value={fmtPct(overallTalkPct)} subtitle={fmtTime(totalTalk)} />
+        <KPICard label="Total Connects" value={fmt(totalConnects)} subtitle={`${totalHours > 0 ? (totalConnects / totalHours).toFixed(1) : 0}/hr`} />
+        <KPICard label="Total Sales" value={fmt(totalSales)} subtitle={`${totalConnects > 0 ? ((totalSales / totalConnects) * 100).toFixed(1) : 0}% conv`} />
+        <KPICard label="Total Dialed" value={fmt(totalDialed)} />
+      </div>
+
+      {flagged.length > 0 && (
+        <Section title={`⚠️ Availability Alerts — ${flagged.length} agent${flagged.length > 1 ? 's' : ''} below 70%`}>
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {flagged.map(a => (
+              <div key={a.rep} onClick={() => setDrillAgent(a.rep)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px',
+                background: a.availPct < 30 ? C.redDim : C.yellowDim, borderRadius: 6, cursor: 'pointer',
+                border: `1px solid ${a.availPct < 30 ? C.red : C.yellow}33`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 16 }}>{a.availPct < 30 ? '🔴' : '🟡'}</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{a.rep}</div>
+                    <div style={{ fontSize: 10, color: C.muted }}>{a.days} day{a.days > 1 ? 's' : ''} · Logged in: {fmtTime(a.loggedIn)} · Paused: {fmtTime(a.paused)}</div>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, fontFamily: C.mono, color: a.availPct < 30 ? C.red : C.yellow }}>{fmtPct(a.availPct)}</div>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase' }}>Available</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}`, marginBottom: 16, width: 'fit-content' }}>
+        <button onClick={() => setView('agents')} style={togStyle(view === 'agents')}>By Agent</button>
+        <button onClick={() => setView('daily')} style={togStyle(view === 'daily')}>By Day</button>
+      </div>
+
+      {view === 'agents' && (
+        <Section title="Agent Performance" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
+          <SortableTable defaultSort="availPct" onRowClick={r => setDrillAgent(r.rep)} columns={[
+            { key: 'rep', label: 'Agent', align: 'left', bold: true, mono: false },
+            { key: 'days', label: 'Days' },
+            { key: 'dialed', label: 'Dialed' },
+            { key: 'connects', label: 'Connects' },
+            { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
+            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'connHr', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
+            { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
+            { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'wrapUpStr', label: 'Wrap Up' },
+          ]} rows={agents} />
+        </Section>
+      )}
+
+      {view === 'daily' && (
+        <Section title="Daily Agent Performance" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to see agent history</span>}>
+          <SortableTable defaultSort="date" onRowClick={r => setDrillAgent(r.rep)} columns={[
+            { key: 'date', label: 'Date', align: 'left', bold: true },
+            { key: 'rep', label: 'Agent', align: 'left', bold: true, mono: false },
+            { key: 'dialed', label: 'Dialed' },
+            { key: 'connects', label: 'Connects' },
+            { key: 'contacts', label: 'Contacts' },
+            { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
+            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
+            { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
+            { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'wrapUpStr', label: 'Wrap Up' },
+          ]} rows={daily.sort((a, b) => b.date.localeCompare(a.date) || a.rep.localeCompare(b.rep))} />
+        </Section>
+      )}
+    </>
+  );
+}
 // ─── MAIN DASHBOARD ──────────────────────────────────
 export default function Dashboard({ data, goals, loading, dateRange, applyPreset, setCustomRange }) {
   const [activeTab, setActiveTab] = useState('daily');
@@ -722,9 +1040,9 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
                 }}>{p.label}</button>
               ))}
             </div>
-            <input type="date" value={dateRange.start} onChange={e => setCustomRange('start', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', fontSize: 10, outline: 'none', width: 110 }} />
+            <input type="date" value={dateRange.start} onChange={e => setCustomRange('start', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: C.mono, outline: 'none', width: 150, cursor: 'pointer' }} />
             <span style={{ color: C.muted, fontSize: 10 }}>–</span>
-            <input type="date" value={dateRange.end} onChange={e => setCustomRange('end', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', fontSize: 10, outline: 'none', width: 110 }} />
+            <input type="date" value={dateRange.end} onChange={e => setCustomRange('end', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: C.mono, outline: 'none', width: 150, cursor: 'pointer' }} />
           </div>
         </div>
       </div>
@@ -743,7 +1061,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
+        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
       </div>
     </div>
   );
