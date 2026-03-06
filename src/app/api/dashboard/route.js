@@ -115,6 +115,8 @@ export async function GET(request) {
           state: r['State']?.trim(),
           callerName: r['Name']?.trim() || r['Caller Name']?.trim() || '',
           phone: (() => { const raw = String(r['Phone'] || r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, ''); if (raw.length === 10) return '(' + raw.slice(0,3) + ') ' + raw.slice(3,6) + '-' + raw.slice(6); if (raw.length === 11) return '(' + raw.slice(1,4) + ') ' + raw.slice(4,7) + '-' + raw.slice(7); return raw; })(),
+          leadId: r['Lead Id']?.toString().trim() || '',
+          clientId: r['Client ID']?.toString().trim() || '',
         };
       })
       .filter(c => c.date);

@@ -320,8 +320,9 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
                 { key: 'isBillable', label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO', color: r => r.isBillable ? C.green : C.red },
                 { key: 'cost', label: 'Cost', render: r => r.cost > 0 ? fmtDollar(r.cost) : '—', color: r => r.cost > 0 ? C.yellow : C.muted },
                 { key: 'pricePerCall', label: '$/Call', render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall) : '—' },
-                { key: 'state', label: 'State' },                { key: 'phone', label: 'Phone', align: 'left' },
-                { key: 'callerName', label: 'Caller', align: 'left', mono: false, color: () => C.muted },
+                { key: 'state', label: 'State' },
+                { key: 'phone', label: 'Phone', align: 'left' },
+                { key: 'leadId', label: 'Lead ID', align: 'left', color: () => C.muted },
               ]} rows={dayCalls} />
             </Section>
             {dayPolicies.length > 0 && (

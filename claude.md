@@ -20,11 +20,13 @@ tcc-dashboard/
 │   │   ├── trends/page.js             # Trends page — Recharts time-series charts
 │   │   ├── settings/page.js           # Settings page — edit sheets data in-browser
 │   │   └── api/
-│   │       ├── dashboard/route.js     # Main API — joins sales + calls + commissions + pricing
-│   │       ├── goals/route.js         # Goals API — company & agent daily targets
-│   │       └── settings/route.js      # Settings API — CRUD for sheet rows
+│   │       ├── dashboard/route.js         # Main API — joins sales + calls + commissions + pricing
+│   │       ├── goals/route.js             # Goals API — company & agent daily targets
+│   │       ├── settings/route.js          # Settings API — CRUD for sheet rows
+│   │       ├── agent-performance/route.js # Agent Performance API — reads AGENT_PERF_SHEET_ID
+│   │       └── clear-cache/route.js       # Cache invalidation endpoint
 │   ├── components/
-│   │   └── Dashboard.jsx              # All dashboard UI (760 lines, single-file component)
+│   │   └── Dashboard.jsx              # All dashboard UI (~1150 lines, single-file component)
 │   └── lib/
 │       ├── sheets.js                  # Google Sheets auth, read, write, cache
 │       └── utils.js                   # Date parsing, agent matching, commission calc
@@ -49,14 +51,18 @@ SALES_SHEET_ID=<Google Sheet ID for policy/sales tracker>
 CALLLOGS_SHEET_ID=<Google Sheet ID for call logs>
 COMMISSION_SHEET_ID=<Google Sheet ID for commission rate table>
 GOALS_SHEET_ID=<Google Sheet ID for goals + pricing>
+AGENT_PERF_SHEET_ID=<Google Sheet ID for agent performance dialer report>
 
 # Tab Names (optional — defaults shown)
 SALES_TAB_NAME=Sheet1
 CALLLOGS_TAB_NAME=Report
 COMMISSION_TAB_NAME=Sheet1
 GOALS_PRICING_TAB=Publisher Pricing
-COMPANY_GOALS_TAB=Company Daily Goals
-AGENT_GOALS_TAB=Agent Daily Goals
+GOALS_COMPANY_TAB=Company Daily Goals
+GOALS_AGENT_TAB=Agent Daily Goals
+GOALS_CARRIER_TAB=Carrier Daily Goals
+GOALS_PUBLISHER_TAB=Publisher Daily Goals
+AGENT_PERF_TAB_NAME=Report
 ```
 
 ---
@@ -67,7 +73,9 @@ AGENT_GOALS_TAB=Agent Daily Goals
 Columns: Agent, Lead Source, Application Submitted Date, Payment Type, Payment Frequency, Social Security Billing Match, First Name, Last Name, Gender, Date of Birth, Phone Number, Email Address, Street Address, City, State, Zip Code, Text Friendly, Policy #, Effective Date, Carrier + Product + Payout, Face Amount, Term Length, Monthly Premium, Outcome at Application Submission, Placed?, Sales Notes, Submission ID
 
 ### Call Logs (`CALLLOGS_SHEET_ID`)
-Columns: Date, Rep, Campaign, Subcampaign, Phone, State, Country, Attempt, Caller ID, Inbound Source, Lead ID, Client ID, Last, First, Import Date, Call Status, Is Callable, Duration, Call Type, Details, Hangup, HoldTime, Hangup Source, Recording
+Columns: Date, Rep, Campaign, Subcampaign, Phone, State, Country, Attempt, Caller ID, Inbound Source, Lead Id, Client ID, Last, First, Import Date, Call Status, Is Callable, Duration, Call Type, Details, Hangup, HoldTime, Hangup Source, Recording
+
+**Note:** The column header is `Lead Id` (capital I, lowercase d) — use `r['Lead Id']` when referencing in code.
 
 ### Commission Rates (`COMMISSION_SHEET_ID`)
 Columns: Carrier, Product, Age Range, Commission Rate
@@ -175,6 +183,8 @@ const C = {
 ### Tab Structure
 
 **Daily Activity** — GoalComparison (16 tiles) → Daily Breakdown table (click row → call-level drill-down with KPI cards + call detail table + policy table)
+
+**Daily drill-down call table columns:** Campaign, Agent, Status, Call Type, Duration, Buffer, Billable?, Cost, $/Call, State, Phone, Lead ID
 
 **Publishers** — GoalComparison (16 tiles) → Publisher Performance table with totals row (click row → publisher drill-down with KPI cards + agent breakdown + carrier breakdown)
 
@@ -323,3 +333,9 @@ Direct file downloads from Claude's interface may not overwrite existing files (
 7. **Commission Calculation Fix** — GIWL products use 1.5× multiplier instead of 3×.
 8. **Removed P&L Duplicate Tiles** — P&L tab shows only the Publisher P&L Detail table (old P&L Summary grid was removed as redundant with GoalComparison).
 9. **Removed Daily KPI Card Row** — Old row of 7 KPICards on Daily tab was removed as redundant with the 16 GoalComparison tiles above.
+
+## Recent Changes (Mar 2026)
+
+1. **Lead ID in Daily Drill-Down** — `Lead Id` field from call logs is now mapped in the call object and shown as a column in the daily drill-down calls table.
+2. **Removed Caller and Client ID columns** — Daily drill-down calls table now shows: Campaign, Agent, Status, Call Type, Duration, Buffer, Billable?, Cost, $/Call, State, Phone, Lead ID.
+3. **Agent Performance tab** — Reads from `AGENT_PERF_SHEET_ID` (dialer report sheet). Must be set in Vercel environment variables for the tab to work in production.
