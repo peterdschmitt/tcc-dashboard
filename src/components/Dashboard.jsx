@@ -264,6 +264,25 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
 // ─── DAILY ACTIVITY TAB ────────────────────────────
 function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
   const [drillDay, setDrillDay] = useState(null);
+  const [overrides, setOverrides] = useState({}); // rowIndex → 'N' | 'Y' | ''
+  const [flagging, setFlagging] = useState(null); // rowIndex currently being saved
+
+  const flagCall = async (rowIndex, value) => {
+    setFlagging(rowIndex);
+    setOverrides(prev => ({ ...prev, [rowIndex]: value }));
+    try {
+      const res = await fetch('/api/flag-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rowIndex, value }),
+      });
+      if (!res.ok) throw new Error('API error');
+    } catch {
+      setOverrides(prev => { const n = { ...prev }; delete n[rowIndex]; return n; });
+    }
+    setFlagging(null);
+  };
+
   const days = calcDays(dateRange.start, dateRange.end);
   const cg = goals?.company || {};
   const placed = policies.filter(isPlaced);
@@ -294,10 +313,18 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
     <>
       <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
       {drillDay ? (() => {
-        const dayCalls = calls.filter(c => c.date === drillDay).sort((a, b) => b.duration - a.duration);
+        const rawDayCalls = calls.filter(c => c.date === drillDay).sort((a, b) => b.duration - a.duration);
+        // Apply local overrides on top of server-side data
+        const dayCalls = rawDayCalls.map(c => {
+          const ov = overrides[c._rowIndex];
+          if (ov === undefined) return c;
+          const effBillable = ov === 'N' ? false : ov === 'Y' ? true : c.isBillable;
+          return { ...c, isBillable: effBillable, billableOverride: ov, cost: effBillable ? c.pricePerCall : 0 };
+        });
         const dayPolicies = policies.filter(p => p.submitDate === drillDay);
         const dayBillable = dayCalls.filter(c => c.isBillable);
         const daySpend = dayCalls.reduce((s, c) => s + c.cost, 0);
+        const dayFlagged = dayCalls.filter(c => (overrides[c._rowIndex] ?? c.billableOverride) === 'N').length;
         function fmtDur(s) { if (!s) return '0s'; const m = Math.floor(s / 60); const sec = s % 60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; }
         return (
           <>
@@ -307,9 +334,9 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
               <KPICard label="Billable" value={dayBillable.length} subtitle={`${dayCalls.length > 0 ? (dayBillable.length / dayCalls.length * 100).toFixed(1) : 0}%`} />
               <KPICard label="Lead Spend" value={fmtDollar(daySpend)} />
               <KPICard label="Apps" value={dayPolicies.length} subtitle={`${dayPolicies.filter(isPlaced).length} placed`} />
-              <KPICard label="Non-Billable" value={dayCalls.length - dayBillable.length} subtitle="Under buffer threshold" />
+              <KPICard label="Flagged Non-Bill" value={dayFlagged} subtitle="Manual overrides" />
             </div>
-            <Section title={`All Calls — ${drillDay}`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>{dayCalls.length} calls · {dayBillable.length} billable · ${fmtDollar(daySpend)} spend</span>}>
+            <Section title={`All Calls — ${drillDay}`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>{dayCalls.length} calls · {dayBillable.length} billable · {fmtDollar(daySpend)} spend{dayFlagged > 0 ? ` · ${dayFlagged} flagged` : ''}</span>}>
               <SortableTable defaultSort="duration" columns={[
                 { key: 'campaign', label: 'Campaign', align: 'left', bold: true, mono: false },
                 { key: 'rep', label: 'Agent', align: 'left', mono: false },
@@ -323,6 +350,21 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
                 { key: 'state', label: 'State' },
                 { key: 'phone', label: 'Phone', align: 'left' },
                 { key: 'leadId', label: 'Lead ID', align: 'left', color: () => C.muted },
+                { key: '_flag', label: 'Override', sortable: false, align: 'center', render: r => {
+                  const ov = overrides[r._rowIndex] !== undefined ? overrides[r._rowIndex] : (r.billableOverride || '');
+                  const pending = flagging === r._rowIndex;
+                  if (ov === 'N') return (
+                    <button disabled={pending} onClick={e => { e.stopPropagation(); flagCall(r._rowIndex, ''); }} style={{ fontSize: 10, padding: '3px 8px', background: C.redDim, color: C.red, border: `1px solid ${C.red}`, borderRadius: 4, cursor: 'pointer', opacity: pending ? 0.5 : 1 }}>
+                      {pending ? '...' : '↩ Remove Flag'}
+                    </button>
+                  );
+                  if (r.isBillable) return (
+                    <button disabled={pending} onClick={e => { e.stopPropagation(); flagCall(r._rowIndex, 'N'); }} style={{ fontSize: 10, padding: '3px 8px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', opacity: pending ? 0.5 : 1 }}>
+                      {pending ? '...' : '🚩 Flag'}
+                    </button>
+                  );
+                  return <span style={{ color: C.border, fontSize: 10 }}>—</span>;
+                }},
               ]} rows={dayCalls} />
             </Section>
             {dayPolicies.length > 0 && (

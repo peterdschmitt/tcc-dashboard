@@ -101,10 +101,13 @@ export async function GET(request) {
         const priceInfo = pricing[normalized] || {};
         const callDuration = parseDuration(r['Duration']);
         const callTypeRaw = (r['Call Type'] || '').trim().toLowerCase();
-        const isBillable = callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
+        const overrideRaw = (r['Billable Override'] || '').trim().toUpperCase();
+        const computedBillable = callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
+        const isBillable = overrideRaw === 'N' ? false : overrideRaw === 'Y' ? true : computedBillable;
         return {
           date, rep, campaign: rawCampaign, campaignCode: normalized,
-          vendor: priceInfo.vendor || '', isBillable,
+          vendor: priceInfo.vendor || '', isBillable, billableOverride: overrideRaw,
+          _rowIndex: r._rowIndex,
           isSale: (r['Call Status'] || '').trim().toLowerCase() === 'sale',
           callStatus: r['Call Status']?.trim(),
           duration: callDuration,

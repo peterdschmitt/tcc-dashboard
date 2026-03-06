@@ -135,14 +135,58 @@ export async function fetchSheet(sheetId, tabName, ttl) {
   console.log('[sheets] ' + tabName + ': header at row ' + headerIdx + ', cols = ' + rows[headerIdx].filter(Boolean).join(' | '));
 
   const headers = rows[headerIdx].map(h => (h || '').trim());
-  const data = rows.slice(headerIdx + 1).filter(r => r.some(c => c)).map(row => {
-    const obj = {};
+  const rawDataRows = rows.slice(headerIdx + 1);
+  const data = rawDataRows.reduce((acc, row, ri) => {
+    if (!row.some(c => c)) return acc;
+    const obj = { _rowIndex: headerIdx + ri + 2 }; // 1-based sheet row number
     headers.forEach((h, i) => { if (h) obj[h] = (row[i] || '').trim(); });
-    return obj;
-  });
+    acc.push(obj);
+    return acc;
+  }, []);
 
   cache[key] = { data, ts: now };
   return data;
+}
+
+function colIndexToLetter(n) {
+  let s = '';
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+/** Write a single cell by column name, auto-creating the column header if missing */
+export async function writeCell(sheetId, tabName, rowIndex, colName, value) {
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: tabName });
+  const rows = res.data.values || [];
+
+  let headerIdx = 0, bestScore = 0;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const score = (rows[i] || []).filter(c => { const t = (c || '').trim(); return t.length > 0 && t.length < 60; }).length;
+    if (score > bestScore) { bestScore = score; headerIdx = i; }
+  }
+
+  const headers = (rows[headerIdx] || []).map(h => (h || '').trim());
+  let colIdx = headers.indexOf(colName);
+
+  if (colIdx === -1) {
+    colIdx = headers.length;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${tabName}!${colIndexToLetter(colIdx + 1)}${headerIdx + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[colName]] },
+    });
+  }
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${tabName}!${colIndexToLetter(colIdx + 1)}${rowIndex}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[value]] },
+  });
+
+  invalidateCache(sheetId, tabName);
 }
 
 export function invalidateCache(sheetId, tabName) {
