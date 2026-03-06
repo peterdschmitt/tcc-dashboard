@@ -1,3 +1,21 @@
+const NICKNAMES = {
+  'bill': 'william', 'will': 'william', 'mike': 'michael',
+  'bob': 'robert', 'rob': 'robert', 'jim': 'james',
+  'tom': 'thomas', 'dick': 'richard', 'rick': 'richard',
+  'dan': 'daniel', 'joe': 'joseph', 'tony': 'anthony',
+  'kari': 'karina',
+};
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  }
+  return dp[m][n];
+}
+
 // Fuzzy match agent names between call logs and policy tracker
 export function fuzzyMatchAgent(callLogName, policyAgents) {
   if (!callLogName) return null;
@@ -5,29 +23,53 @@ export function fuzzyMatchAgent(callLogName, policyAgents) {
   const exact = policyAgents.find(a => a.toLowerCase() === clean);
   if (exact) return exact;
   const parts = clean.split(/\s+/);
+
   if (parts.length >= 2) {
     const firstName = parts[0];
-    const lastPart = parts.slice(1).join(' ');
-    const match = policyAgents.find(a => {
-      const aParts = a.toLowerCase().split(/\s+/);
-      if (aParts.length < 2) return false;
-      return aParts[0] === firstName && aParts[aParts.length - 1].startsWith(lastPart.charAt(0));
+    const lastInitial = parts[parts.length - 1].charAt(0);
+    const expandedFirst = NICKNAMES[firstName] || firstName;
+
+    // Exact first name + last initial
+    const m1 = policyAgents.find(a => {
+      const ap = a.toLowerCase().split(/\s+/);
+      return ap.length >= 2 && ap[0] === firstName && ap[ap.length - 1].startsWith(lastInitial);
     });
-    if (match) return match;
-    const nicknames = {
-      'bill': 'william', 'will': 'william', 'mike': 'michael',
-      'bob': 'robert', 'rob': 'robert', 'jim': 'james',
-      'tom': 'thomas', 'dick': 'richard', 'rick': 'richard',
-      'dan': 'daniel', 'joe': 'joseph', 'tony': 'anthony',
-    };
-    const expandedFirst = nicknames[firstName] || firstName;
-    const match2 = policyAgents.find(a => {
-      const aParts = a.toLowerCase().split(/\s+/);
-      if (aParts.length < 2) return false;
-      return aParts[0] === expandedFirst && aParts[aParts.length - 1].startsWith(lastPart.charAt(0));
+    if (m1) return m1;
+
+    // Nickname expansion + last initial (Bill P → William Parks)
+    const m2 = policyAgents.find(a => {
+      const ap = a.toLowerCase().split(/\s+/);
+      return ap.length >= 2 && ap[0] === expandedFirst && ap[ap.length - 1].startsWith(lastInitial);
     });
-    if (match2) return match2;
+    if (m2) return m2;
+
+    // Approximate first name (edit distance ≤ 1) + last initial — handles "Micheal P" → "Michael Parks"
+    const m3 = policyAgents.find(a => {
+      const ap = a.toLowerCase().split(/\s+/);
+      return ap.length >= 2 && levenshtein(firstName, ap[0]) <= 1 && ap[ap.length - 1].startsWith(lastInitial);
+    });
+    if (m3) return m3;
   }
+
+  // Single-word name: try first-name matching with nickname expansion
+  // Only match if exactly one candidate to avoid false positives
+  if (parts.length === 1) {
+    const firstName = parts[0];
+    const expandedFirst = NICKNAMES[firstName] || firstName;
+    const candidates = policyAgents.filter(a => {
+      const ap = a.toLowerCase().split(/\s+/);
+      return ap[0] === firstName || ap[0] === expandedFirst;
+    });
+    if (candidates.length === 1) return candidates[0];
+
+    // Approximate (typo tolerance) — only if uniquely resolved
+    const approx = policyAgents.filter(a => {
+      const ap = a.toLowerCase().split(/\s+/);
+      return levenshtein(firstName, ap[0]) <= 1 || levenshtein(expandedFirst, ap[0]) <= 1;
+    });
+    if (approx.length === 1) return approx[0];
+  }
+
   return callLogName.trim();
 }
 

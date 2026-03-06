@@ -148,7 +148,7 @@ export async function fetchSheet(sheetId, tabName, ttl) {
   return data;
 }
 
-function colIndexToLetter(n) {
+export function colIndexToLetter(n) {
   let s = '';
   while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
   return s;
@@ -187,6 +187,82 @@ export async function writeCell(sheetId, tabName, rowIndex, colName, value) {
   });
 
   invalidateCache(sheetId, tabName);
+}
+
+// Standard header structure for the Agent Daily Goals tab
+const AGENT_GOALS_HEADERS = [
+  'Agent Name', 'Premium/Day ($)', 'Apps/Day', 'Placed/Day',
+  'Placement Rate (%)', 'CPA Target ($)', 'Conversion Rate (%)', 'Notes', 'Commission Type',
+];
+
+/**
+ * Ensure all agents in agentNames have a row in the Agent Goals tab.
+ * Handles empty sheets, broken sheets (missing Agent Name column), and adds Commission Type.
+ * Defaults new agents to "Commission".
+ */
+export async function ensureAgentsExist(sheetId, tabName, agentNames, existingRows) {
+  const existing = new Set(
+    existingRows.map(r => (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim().toLowerCase())
+  );
+  const missing = agentNames.filter(n => n && !existing.has(n.toLowerCase()));
+  if (missing.length === 0) return;
+
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: tabName });
+  const rows = res.data.values || [];
+
+  // Locate header row
+  let headerIdx = 0, bestScore = 0;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const score = (rows[i] || []).filter(c => { const t = (c || '').trim(); return t.length > 0 && t.length < 60; }).length;
+    if (score > bestScore) { bestScore = score; headerIdx = i; }
+  }
+  let headers = (rows[headerIdx] || []).map(h => (h || '').trim());
+
+  // If sheet is empty OR missing Agent Name column (broken state), write standard headers
+  const hasAgentNameCol = headers.some(h => ['Agent Name', 'Agent', 'Name'].includes(h));
+  if (!hasAgentNameCol) {
+    headers = [...AGENT_GOALS_HEADERS];
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${tabName}!A1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [headers] },
+    });
+    headerIdx = 0;
+    console.log(`[sheets] Wrote standard headers to ${tabName}`);
+  } else if (!headers.includes('Commission Type')) {
+    // Headers exist and are correct — just add the Commission Type column
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${tabName}!${colIndexToLetter(headers.length + 1)}${headerIdx + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['Commission Type']] },
+    });
+    headers.push('Commission Type');
+  }
+
+  const nameCol = Math.max(0, headers.findIndex(h => ['Agent Name', 'Agent', 'Name'].includes(h)));
+  const commTypeIdx = headers.indexOf('Commission Type');
+
+  // Build full-width rows so every column lands in the right position
+  const newRows = missing.map(name => {
+    const row = new Array(headers.length).fill('');
+    row[nameCol] = name;
+    if (commTypeIdx >= 0) row[commTypeIdx] = 'Commission';
+    return row;
+  });
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: tabName,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: newRows },
+  });
+
+  invalidateCache(sheetId, tabName);
+  console.log(`[sheets] Added ${missing.length} new agent(s) to ${tabName}:`, missing.join(', '));
 }
 
 export function invalidateCache(sheetId, tabName) {

@@ -1,5 +1,5 @@
 export const dynamic = 'force-dynamic';
-import { fetchSheet } from '@/lib/sheets';
+import { fetchSheet, ensureAgentsExist } from '@/lib/sheets';
 import { parseFlexDate, normalizePlacedStatus, normalizeCampaign, parseDuration, fuzzyMatchAgent, calcCommission } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
@@ -14,11 +14,12 @@ export async function GET(request) {
     const startDate = searchParams.get('start');
     const endDate = searchParams.get('end');
 
-    const [salesRaw, callsRaw, commRaw, pricingRaw] = await Promise.all([
+    const [salesRaw, callsRaw, commRaw, pricingRaw, agentGoalsRaw] = await Promise.all([
       fetchSheet(process.env.SALES_SHEET_ID, process.env.SALES_TAB_NAME || 'Sheet1'),
       fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report'),
       fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1'),
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing'),
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals').catch(() => []),
     ]);
 
     const commissionRates = commRaw
@@ -44,6 +45,14 @@ export async function GET(request) {
 
     console.log('[dashboard] Pricing loaded:', Object.entries(pricing).map(([k,v]) => k + '=$' + v.pricePerCall + '/buf=' + v.buffer + 's').join(', '));
 
+    // Build salary set — agents with Commission Type = Salary pay $0 commission
+    const salaryAgents = new Set(
+      agentGoalsRaw
+        .filter(r => (r['Commission Type'] || '').trim().toLowerCase() === 'salary')
+        .map(r => (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim().toLowerCase())
+    );
+    console.log('[dashboard] Salary agents:', [...salaryAgents].join(', ') || 'none');
+
     const allAgentNames = [...new Set(salesRaw.map(r => r['Agent']?.trim()).filter(Boolean))];
 
     console.log('[dashboard] Commission rates:', commissionRates.map(r => `${r.carrier}/${r.product}/${r.ageRange}=${(r.commissionRate*100).toFixed(0)}%`).join(', '));
@@ -67,22 +76,54 @@ export async function GET(request) {
         const carrier = cpParts[0] || '';
         const product = cpParts.slice(1).join(', ').trim() || '';
         const isGIWL = (carrier + ' ' + product).toLowerCase().includes('giwl');
-        const commission = isGIWL ? premium * 1.5 : premium * 3;
+        const agentNameRaw = (r['Agent'] || '').trim();
+        const isSalaried = salaryAgents.has(agentNameRaw.toLowerCase());
+        let commission = 0;
+        let commissionRate = 0;
+        if (!isSalaried && premium > 0) {
+          commission = calcCommission(premium, carrier, product, age, commissionRates);
+          if (commission === 0) {
+            // Fallback to hardcoded if no sheet rate matched
+            commission = isGIWL ? premium * 1.5 : premium * 3;
+          }
+          commissionRate = commission / premium;
+        }
         const leadSource = r['Lead Source']?.trim() || '';
         const months = advanceMonths(carrier);
         const grossAdvancedRevenue = premium * months;
 
         if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} commission=${commission} ${isGIWL ? '(GIWL)' : ''}`);
 
+        const phoneRaw = String(r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
+        const phone = phoneRaw.length === 10
+          ? `(${phoneRaw.slice(0,3)}) ${phoneRaw.slice(3,6)}-${phoneRaw.slice(6)}`
+          : phoneRaw.length === 11
+          ? `(${phoneRaw.slice(1,4)}) ${phoneRaw.slice(4,7)}-${phoneRaw.slice(7)}`
+          : phoneRaw;
+
         return {
-          agent: r['Agent']?.trim(), leadSource, carrier, product,
+          agent: agentNameRaw, leadSource, carrier, product, isSalaried,
+          firstName: r['First Name']?.trim() || '',
+          lastName: r['Last Name']?.trim() || '',
+          gender: r['Gender']?.trim() || '',
+          dob: r['Date of Birth']?.trim() || '',
+          phone,
+          email: r['Email Address']?.trim() || '',
+          address: r['Street Address']?.trim() || '',
+          city: r['City']?.trim() || '',
+          zip: r['Zip Code']?.trim() || '',
+          textFriendly: r['Text Friendly']?.trim() || '',
+          policyNumber: r['Policy #']?.trim() || '',
+          termLength: r['Term Length']?.trim() || '',
+          paymentType: r['Payment Type']?.trim() || '',
+          paymentFrequency: r['Payment Frequency']?.trim() || '',
+          ssnMatch: r['Social Security Billing Match']?.trim() || '',
           faceAmount: parseFloat(r['Face Amount']) || 0,
           premium, outcome: r['Outcome at Application Submission']?.trim(),
-          benefit: '',
           placed: normalizePlacedStatus(r['Placed?']),
           submitDate, effectiveDate: parseFlexDate(r['Effective Date']),
-          state: r['State']?.trim(), gender: r['Gender']?.trim(),
-          age, commission, advanceMonths: months,
+          state: r['State']?.trim() || '',
+          age, commission, commissionRate, advanceMonths: months,
           grossAdvancedRevenue,
         };
       })
@@ -123,6 +164,14 @@ export async function GET(request) {
         };
       })
       .filter(c => c.date);
+
+    // Fire-and-forget: add any new agents to the Agent Daily Goals tab
+    ensureAgentsExist(
+      process.env.GOALS_SHEET_ID,
+      process.env.AGENT_GOALS_TAB || 'Agent Daily Goals',
+      allAgentNames,
+      agentGoalsRaw
+    ).catch(e => console.error('[dashboard] Agent sync failed:', e.message));
 
     if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
     if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }

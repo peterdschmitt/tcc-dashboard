@@ -102,6 +102,7 @@ export async function GET() {
           closeRate: parseFloat((r['Conversion Rate (%)'] || r['Close Rate'] || '0').replace('%', '')) || 0,
           yellowThreshold: parseFloat(yellowRaw) || 80,
           notes: (r['Notes'] || '').trim(),
+          commissionType: (r['Commission Type'] || 'Commission').trim(),
         };
       });
     } catch (e) {

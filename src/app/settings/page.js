@@ -65,6 +65,49 @@ function Btn({ children, onClick, variant = 'primary', disabled, small, style: e
   );
 }
 
+const DROPDOWN_FIELDS = {
+  'Commission Type': ['Commission', 'Salary'],
+  'Status': ['Active', 'Inactive'],
+};
+
+const selectStyle = {
+  ...inputStyle,
+  cursor: 'pointer',
+  appearance: 'none',
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238fa3be'/%3E%3C/svg%3E")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 10px center',
+  paddingRight: 28,
+};
+
+function FieldInput({ header, value, onChange, placeholder }) {
+  const options = DROPDOWN_FIELDS[header];
+  if (options) {
+    return (
+      <select
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        style={selectStyle}
+        onFocus={e => e.target.style.borderColor = inputFocusColor}
+        onBlur={e => e.target.style.borderColor = C.border}
+      >
+        <option value="">— select —</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+  return (
+    <input
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={inputStyle}
+      onFocus={e => e.target.style.borderColor = inputFocusColor}
+      onBlur={e => e.target.style.borderColor = C.border}
+    />
+  );
+}
+
 // ─── EDITABLE TABLE ─────────────────────────────────────
 function EditableTable({ headers, rows, onSave, onDelete, onAdd, saving, section }) {
   const [editRow, setEditRow] = useState(null); // rowIndex being edited
@@ -131,12 +174,10 @@ function EditableTable({ headers, rows, onSave, onDelete, onAdd, saving, section
                 {displayHeaders.map(h => (
                   <td key={h} style={{ padding: '8px 12px', color: C.text }}>
                     {editRow === idx ? (
-                      <input
+                      <FieldInput
+                        header={h}
                         value={editData[h] || ''}
-                        onChange={e => setEditData(d => ({ ...d, [h]: e.target.value }))}
-                        style={inputStyle}
-                        onFocus={e => e.target.style.borderColor = inputFocusColor}
-                        onBlur={e => e.target.style.borderColor = C.border}
+                        onChange={val => setEditData(d => ({ ...d, [h]: val }))}
                       />
                     ) : (
                       <span style={{ color: row[h] ? C.text : C.muted }}>{row[h] || '—'}</span>
@@ -164,13 +205,11 @@ function EditableTable({ headers, rows, onSave, onDelete, onAdd, saving, section
               <tr style={{ background: C.greenDim }}>
                 {displayHeaders.map(h => (
                   <td key={h} style={{ padding: '8px 12px' }}>
-                    <input
+                    <FieldInput
+                      header={h}
                       value={newRow[h] || ''}
-                      onChange={e => setNewRow(d => ({ ...d, [h]: e.target.value }))}
+                      onChange={val => setNewRow(d => ({ ...d, [h]: val }))}
                       placeholder={h}
-                      style={inputStyle}
-                      onFocus={e => e.target.style.borderColor = inputFocusColor}
-                      onBlur={e => e.target.style.borderColor = C.border}
                     />
                   </td>
                 ))}
@@ -203,6 +242,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -259,6 +299,25 @@ export default function SettingsPage() {
     setSaving(false);
   }
 
+  async function handleSyncAgents() {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/sync-agents', { method: 'POST' });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      const parts = [];
+      if (json.added > 0) parts.push(`Added ${json.added}: ${json.agents.join(', ')}`);
+      if (json.deleted > 0) parts.push(`removed ${json.deleted} duplicate(s)`);
+      if (json.backfilled > 0) parts.push(`fixed Commission Type for ${json.backfilled}`);
+      const msg = parts.length > 0 ? parts.join(' · ') : `All ${json.total} agents up to date`;
+      showToast(msg);
+      await loadAll();
+    } catch (e) {
+      showToast('Sync failed: ' + e.message, 'error');
+    }
+    setSyncing(false);
+  }
+
   async function handleDelete(section, rowNumber) {
     setSaving(true);
     try {
@@ -292,7 +351,7 @@ export default function SettingsPage() {
       <style>{`
         @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes spin { to { transform: rotate(360deg); } }
-        input:focus { border-color: ${C.accent} !important; box-shadow: 0 0 0 2px ${C.accentDim}; }
+        input:focus, select:focus { border-color: ${C.accent} !important; box-shadow: 0 0 0 2px ${C.accentDim}; }
       `}</style>
 
       <Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />
@@ -361,9 +420,16 @@ export default function SettingsPage() {
                 title={currentTab.icon + ' ' + currentTab.label}
                 subtitle={currentTab.description}
                 rightContent={
-                  <span style={{ fontSize: 11, color: C.muted, fontFamily: C.mono }}>
-                    {currentData.rows?.length || 0} rows
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 11, color: C.muted, fontFamily: C.mono }}>
+                      {currentData.rows?.length || 0} rows
+                    </span>
+                    {activeTab === 'agentGoals' && (
+                      <Btn variant="ghost" small onClick={handleSyncAgents} disabled={syncing}>
+                        {syncing ? '↻ Syncing...' : '↻ Sync Agents from History'}
+                      </Btn>
+                    )}
+                  </div>
                 }
               />
 

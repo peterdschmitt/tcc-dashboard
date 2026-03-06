@@ -515,6 +515,8 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
   const [drill, setDrill] = useState(null);
   const days = calcDays(dateRange.start, dateRange.end);
   const ag = goals?.agent || {};
+  const isSalaried = name => (goals?.agents?.[name]?.commissionType || '').toLowerCase() === 'salary';
+  const SalaryBadge = () => <span style={{ fontSize: 9, marginLeft: 6, padding: '1px 5px', background: C.accentDim, color: C.accent, borderRadius: 3, fontWeight: 700, verticalAlign: 'middle' }}>SALARY</span>;
   const agentMap = {};
   policies.forEach(p => {
     if (!agentMap[p.agent]) agentMap[p.agent] = { agent: p.agent, apps: 0, placed: 0, premium: 0, commission: 0, faceAmount: 0, gar: 0 };
@@ -553,13 +555,15 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
     const rpc = (a.totalCalls || 0) > 0 ? (a.leadSpend || 0) / a.totalCalls : 0;
     return (
       <>
-        <Breadcrumb items={[{ label: 'All Agents', onClick: () => setDrill(null) }, { label: drill }]} />
+        <Breadcrumb items={[{ label: 'All Agents', onClick: () => setDrill(null) }, { label: drill }, ...(isSalaried(drill) ? [{ label: 'SALARY' }] : [])]} />
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
           <KPICard label="Apps" value={a.apps} />
           <KPICard label="Placed" value={a.placed} goal={getGoal(drill, 'policiesPlaced')} />
           <KPICard label="Premium" value={fmtDollar(a.premium, 2)} goal={getGoal(drill, 'premiumTarget')} subtitle={`Avg: ${fmtDollar(a.placed > 0 ? a.premium / a.placed : 0, 2)}`} />
           <KPICard label="Gross Adv Rev" value={fmtDollar(a.gar)} />
-          <KPICard label="Commission" value={fmtDollar(a.commission)} />
+          {isSalaried(drill)
+            ? <KPICard label="Commission" value="Salary" subtitle="No commission owed" />
+            : <KPICard label="Commission" value={fmtDollar(a.commission)} />}
           <KPICard label="Bill %" value={fmtPct(billRate)} />
           <KPICard label="RPC" value={fmtDollar(rpc, 2)} />
         </div>
@@ -581,16 +585,16 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
             { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
           ]} rows={Object.values(sourceMap)} />
         </Section>
-        <Section title="Recent Policies">
+        <Section title="Recent Policies — Commission Verification">
           <SortableTable defaultSort="submitDate" columns={[
             { key: 'submitDate', label: 'Date', align: 'left', bold: true },
             { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
             { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
-            { key: 'faceAmount', label: 'Face', render: r => fmtDollar(r.faceAmount) },
+            { key: 'age', label: 'Age' },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'outcome', label: 'Outcome', align: 'left', mono: false },
+            { key: 'commissionRate', label: 'Rate', render: r => r.isSalaried ? 'Salary' : r.commissionRate > 0 ? (r.commissionRate * 100).toFixed(0) + '%' : '—', color: r => r.isSalaried ? C.muted : C.accent },
+            { key: 'commission', label: 'Commission $', render: r => r.isSalaried ? '$0' : fmtDollar(r.commission, 2), color: r => r.isSalaried ? C.muted : C.yellow },
             { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => r.placed === 'Declined' ? C.red : r.placed.includes('Active') || r.placed.includes('Advance') ? C.green : C.yellow },
-            { key: 'state', label: 'State' },
           ]} rows={ap} />
         </Section>
       </>
@@ -601,12 +605,12 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
     <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
     <Section title="Agent Rankings" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="premium" onRowClick={r => r.agent !== 'TOTAL' && setDrill(r.agent)} totalsRow={agentTotals} columns={[
-        { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false },
+        { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false, render: r => <span>{r.agent}{isSalaried(r.agent) && <SalaryBadge />}</span> },
         { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
         { key: 'premium', label: 'Mo. Prem', render: r => fmtDollar(r.premium, 2), color: () => C.green, bold: true },
         { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
         { key: 'premGoal', label: 'Prem Goal', render: r => r.agent === 'TOTAL' ? '' : <ProgressBar value={r.premium} goal={getGoal(r.agent, 'premiumTarget')} />, sortable: false },
-        { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.accent },
+        { key: 'commission', label: 'Commission', render: r => isSalaried(r.agent) ? <span style={{ color: C.muted }}>Salary</span> : fmtDollar(r.commission), color: r => isSalaried(r.agent) ? C.muted : C.accent },
         { key: 'gar', label: 'Gross Adv', render: r => fmtDollar(r.gar), color: () => C.green },
         { key: 'totalCalls', label: 'Calls', render: r => fmt(r.totalCalls || 0) },
         { key: 'billRate', label: 'Bill %', render: r => (r.totalCalls || 0) > 0 ? fmtPct((r.billableCalls || 0) / r.totalCalls * 100) : '—' },
@@ -811,17 +815,25 @@ function PoliciesTab({ policies }) {
           { key: 'submitDate', label: 'Submit Date', align: 'left', bold: true },
           { key: 'firstName', label: 'First', align: 'left', mono: false },
           { key: 'lastName', label: 'Last', align: 'left', mono: false },
+          { key: 'gender', label: 'Gender', align: 'left', mono: false, color: () => C.muted },
+          { key: 'dob', label: 'DOB', align: 'left', mono: false, color: () => C.muted },
+          { key: 'phone', label: 'Phone', align: 'left' },
+          { key: 'email', label: 'Email', align: 'left', mono: false, color: () => C.muted },
+          { key: 'city', label: 'City', align: 'left', mono: false, color: () => C.muted },
+          { key: 'state', label: 'State' },
+          { key: 'zip', label: 'Zip', align: 'left', mono: false, color: () => C.muted },
+          { key: 'textFriendly', label: 'Text OK', align: 'left', mono: false, color: r => (r.textFriendly || '').toLowerCase() === 'yes' ? C.green : C.muted },
           { key: 'agent', label: 'Agent', align: 'left', mono: false },
           { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
           { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
-          { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
+          { key: 'termLength', label: 'Term', align: 'left', mono: false, color: () => C.muted },
           { key: 'faceAmount', label: 'Face', render: r => fmtDollar(r.faceAmount) },
-          { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => isPlaced(r) ? C.green : r.placed === 'Declined' ? C.red : C.yellow },
-          { key: 'state', label: 'State' },
-          { key: 'leadSource', label: 'Source', align: 'left', mono: false, color: () => C.muted },
-          { key: 'paymentType', label: 'Pay Type', align: 'left', mono: false },
+          { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
+          { key: 'paymentType', label: 'Pay Type', align: 'left', mono: false, color: () => C.muted },
           { key: 'policyNumber', label: 'Policy #', align: 'left' },
           { key: 'effectiveDate', label: 'Eff Date', align: 'left' },
+          { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => isPlaced(r) ? C.green : r.placed === 'Declined' ? C.red : C.yellow },
+          { key: 'leadSource', label: 'Source', align: 'left', mono: false, color: () => C.muted },
         ]} rows={sorted} />
       </Section>
     </>
