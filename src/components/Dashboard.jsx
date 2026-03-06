@@ -15,7 +15,7 @@ const TABS = [
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
-  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },
+  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'commissions', label: 'Commissions' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -749,6 +749,107 @@ function PnlTab({ pnl, policies, calls, goals }) {
 
 
 
+// ─── COMMISSIONS TAB ────────────────────────────────
+function CommissionsTab({ policies }) {
+  const [drill, setDrill] = useState(null);
+
+  const placed = policies.filter(isPlaced);
+
+  // Aggregate placed policies by submit date
+  const byDay = {};
+  placed.forEach(p => {
+    if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, policies: [], totalPremium: 0, totalCommission: 0, agentSet: new Set() };
+    byDay[p.submitDate].policies.push(p);
+    byDay[p.submitDate].totalPremium += p.premium;
+    byDay[p.submitDate].totalCommission += p.commission;
+    byDay[p.submitDate].agentSet.add(p.agent);
+  });
+
+  const days = Object.values(byDay)
+    .map(d => ({
+      date: d.date, policies: d.policies, count: d.policies.length,
+      totalPremium: d.totalPremium, totalCommission: d.totalCommission,
+      avgRate: d.totalPremium > 0 ? d.totalCommission / d.totalPremium * 100 : 0,
+      agents: [...d.agentSet].join(', '),
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const totalPolicies = placed.length;
+  const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
+  const totalCommission = placed.reduce((s, p) => s + p.commission, 0);
+  const overallAvgRate = totalPremium > 0 ? totalCommission / totalPremium * 100 : 0;
+  const commAgentCount = new Set(placed.filter(p => !p.isSalaried && p.commission > 0).map(p => p.agent)).size;
+  const salaryAgentCount = new Set(placed.filter(p => p.isSalaried).map(p => p.agent)).size;
+
+  // ── Drill-down: single day ────────────────────────
+  if (drill) {
+    const dp = drill.policies;
+    const dayPrem = dp.reduce((s, p) => s + p.premium, 0);
+    const dayComm = dp.reduce((s, p) => s + p.commission, 0);
+    const totalsRow = {
+      agent: 'TOTAL', firstName: '', lastName: '', carrier: '', product: '', age: '',
+      premium: dayPrem,
+      commissionRate: dayPrem > 0 ? dayComm / dayPrem : 0,
+      commission: dayComm,
+      placed: '', isSalaried: false,
+    };
+    return (
+      <>
+        <Breadcrumb items={[{ label: 'All Days', onClick: () => setDrill(null) }, { label: drill.date }]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Policies" value={dp.length} />
+          <KPICard label="Total Premium" value={fmtDollar(dayPrem, 2)} />
+          <KPICard label="Commission Owed" value={fmtDollar(dayComm, 2)} />
+          <KPICard label="Avg Rate" value={dayPrem > 0 ? (dayComm / dayPrem * 100).toFixed(0) + '%' : '—'} />
+        </div>
+        <Section title={`Commission Detail — ${drill.date}`}>
+          <SortableTable defaultSort="agent" columns={[
+            { key: 'agent', label: 'Agent', align: 'left', mono: false },
+            { key: 'firstName', label: 'First', align: 'left', mono: false },
+            { key: 'lastName', label: 'Last', align: 'left', mono: false },
+            { key: 'carrier', label: 'Carrier', align: 'left', mono: false, color: () => C.muted },
+            { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+            { key: 'age', label: 'Age' },
+            { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
+            { key: 'commissionRate', label: 'Rate', render: r => r.isSalaried ? 'Salary' : r.commissionRate > 0 ? (r.commissionRate * 100).toFixed(0) + '%' : '—', color: r => r.isSalaried ? C.muted : C.accent },
+            { key: 'commission', label: 'Commission $', render: r => r.isSalaried ? '$0' : fmtDollar(r.commission, 2), color: r => r.isSalaried ? C.muted : C.yellow },
+            { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => !r.placed ? C.muted : r.placed === 'Declined' ? C.red : r.placed.includes('Active') || r.placed.includes('Advance') ? C.green : C.yellow },
+          ]} rows={dp} totalsRow={totalsRow} />
+        </Section>
+      </>
+    );
+  }
+
+  // ── Summary totals row ────────────────────────────
+  const summaryTotalsRow = {
+    date: 'TOTAL', count: totalPolicies, totalPremium,
+    avgRate: overallAvgRate, totalCommission,
+    agents: commAgentCount + ' agent' + (commAgentCount !== 1 ? 's' : ''),
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <KPICard label="Total Commission" value={fmtDollar(totalCommission, 2)} />
+        <KPICard label="Total Premium" value={fmtDollar(totalPremium, 2)} />
+        <KPICard label="Avg Rate" value={overallAvgRate.toFixed(0) + '%'} />
+        <KPICard label="Commission Agents" value={commAgentCount} />
+        {salaryAgentCount > 0 && <KPICard label="Salary Agents" value={salaryAgentCount} subtitle="$0 commission" />}
+      </div>
+      <Section title="Daily Commission Summary" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row for policy detail</span>}>
+        <SortableTable defaultSort="date" onRowClick={r => r.date !== 'TOTAL' && setDrill(r)} columns={[
+          { key: 'date', label: 'Date', align: 'left', bold: true },
+          { key: 'count', label: 'Policies' },
+          { key: 'totalPremium', label: 'Total Premium', render: r => fmtDollar(r.totalPremium, 2), color: () => C.green },
+          { key: 'avgRate', label: 'Avg Rate', render: r => r.avgRate > 0 ? r.avgRate.toFixed(0) + '%' : '—', color: () => C.accent },
+          { key: 'totalCommission', label: 'Commission $', render: r => fmtDollar(r.totalCommission, 2), color: () => C.yellow },
+          { key: 'agents', label: 'Agents', align: 'left', mono: false, color: () => C.muted },
+        ]} rows={days} totalsRow={summaryTotalsRow} />
+      </Section>
+    </>
+  );
+}
+
 // ─── POLICIES TAB ───────────────────────────────────
 function PoliciesTab({ policies }) {
   const [drill, setDrill] = useState(null);
@@ -1199,7 +1300,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
       </div>
     </div>
   );
