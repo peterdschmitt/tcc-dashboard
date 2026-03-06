@@ -15,7 +15,7 @@ const TABS = [
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
-  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },
+  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -320,7 +320,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
                 { key: 'isBillable', label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO', color: r => r.isBillable ? C.green : C.red },
                 { key: 'cost', label: 'Cost', render: r => r.cost > 0 ? fmtDollar(r.cost) : '—', color: r => r.cost > 0 ? C.yellow : C.muted },
                 { key: 'pricePerCall', label: '$/Call', render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall) : '—' },
-                { key: 'state', label: 'State' },
+                { key: 'state', label: 'State' },                { key: 'phone', label: 'Phone', align: 'left' },
                 { key: 'callerName', label: 'Caller', align: 'left', mono: false, color: () => C.muted },
               ]} rows={dayCalls} />
             </Section>
@@ -701,6 +701,89 @@ function PnlTab({ pnl, policies, calls, goals }) {
 
 
 
+
+// ─── POLICIES TAB ───────────────────────────────────
+function PoliciesTab({ policies }) {
+  const [drill, setDrill] = useState(null);
+  const sorted = [...policies].sort((a, b) => (b.submitDate || '').localeCompare(a.submitDate || ''));
+
+  if (drill) {
+    const p = drill;
+    const fields = [
+      ['Agent', p.agent], ['Lead Source', p.leadSource],
+      ['Submit Date', p.submitDate], ['Effective Date', p.effectiveDate],
+      ['Carrier', p.carrier], ['Product', p.product],
+      ['Face Amount', fmtDollar(p.faceAmount)], ['Monthly Premium', fmtDollar(p.premium, 2)],
+      ['Commission', fmtDollar(p.commission)], ['Gross Adv Revenue', fmtDollar(p.grossAdvancedRevenue)],
+      ['Outcome', p.outcome], ['Status', p.placed],
+      ['Payment Type', p.paymentType], ['Payment Frequency', p.paymentFrequency],
+      ['SSN Billing Match', p.ssnMatch],
+      ['First Name', p.firstName], ['Last Name', p.lastName],
+      ['Gender', p.gender], ['Date of Birth', p.dob],
+      ['Phone', p.phone], ['Email', p.email],
+      ['Address', [p.address, p.city, p.state, p.zip].filter(Boolean).join(', ')],
+      ['Text Friendly', p.textFriendly],
+      ['Policy #', p.policyNumber],
+    ];
+    return (
+      <>
+        <Breadcrumb items={[{ label: 'All Policies', onClick: () => setDrill(null) }, { label: `${p.firstName || ''} ${p.lastName || ''} — ${p.carrier}` }]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Monthly Premium" value={fmtDollar(p.premium, 2)} />
+          <KPICard label="Face Amount" value={fmtDollar(p.faceAmount)} />
+          <KPICard label="Commission" value={fmtDollar(p.commission)} />
+          <KPICard label="Gross Adv Revenue" value={fmtDollar(p.grossAdvancedRevenue)} />
+        </div>
+        <Section title="Policy Details">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 1, padding: 1, background: C.border }}>
+            {fields.map(([label, val]) => (
+              <div key={label} style={{ background: C.card, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 13, color: C.text, fontFamily: C.mono, fontWeight: 500 }}>{val || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      </>
+    );
+  }
+
+  const placed = sorted.filter(isPlaced);
+  const totalPrem = placed.reduce((s, p) => s + p.premium, 0);
+  const totalFace = placed.reduce((s, p) => s + p.faceAmount, 0);
+  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalComm = placed.reduce((s, p) => s + p.commission, 0);
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <KPICard label="Total Policies" value={sorted.length} subtitle={`${placed.length} placed`} />
+        <KPICard label="Total Premium" value={fmtDollar(totalPrem, 2)} subtitle={`Avg: ${fmtDollar(placed.length > 0 ? totalPrem / placed.length : 0, 2)}`} />
+        <KPICard label="Total Face" value={fmtDollar(totalFace)} />
+        <KPICard label="Gross Adv Revenue" value={fmtDollar(totalGAR)} />
+        <KPICard label="Total Commission" value={fmtDollar(totalComm)} />
+      </div>
+      <Section title="All Policies" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row for full details</span>}>
+        <SortableTable defaultSort="submitDate" onRowClick={r => setDrill(r)} columns={[
+          { key: 'submitDate', label: 'Submit Date', align: 'left', bold: true },
+          { key: 'firstName', label: 'First', align: 'left', mono: false },
+          { key: 'lastName', label: 'Last', align: 'left', mono: false },
+          { key: 'agent', label: 'Agent', align: 'left', mono: false },
+          { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
+          { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+          { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
+          { key: 'faceAmount', label: 'Face', render: r => fmtDollar(r.faceAmount) },
+          { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => isPlaced(r) ? C.green : r.placed === 'Declined' ? C.red : C.yellow },
+          { key: 'state', label: 'State' },
+          { key: 'leadSource', label: 'Source', align: 'left', mono: false, color: () => C.muted },
+          { key: 'paymentType', label: 'Pay Type', align: 'left', mono: false },
+          { key: 'policyNumber', label: 'Policy #', align: 'left' },
+          { key: 'effectiveDate', label: 'Eff Date', align: 'left' },
+        ]} rows={sorted} />
+      </Section>
+    </>
+  );
+}
 // ─── AGENT PERFORMANCE TAB ──────────────────────────
 function AgentPerformanceTab({ dateRange }) {
   const [perfData, setPerfData] = useState(null);
@@ -1061,7 +1144,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}
       </div>
     </div>
   );
