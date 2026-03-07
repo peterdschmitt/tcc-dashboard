@@ -150,7 +150,7 @@ function Breadcrumb({ items }) {
   );
 }
 
-const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'total_calls'];
+const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'total_calls', 'billable_calls', 'billable_rate', 'monthly_premium', 'lead_spend', 'agent_commission', 'net_revenue', 'cpa', 'rpc', 'close_rate', 'placement_rate', 'premium_cost_ratio', 'avg_premium'];
 
 // ─── TILE DETAIL MODAL ─────────────────────────────
 function TileModal({ tileKey, policies, calls, pnl, onClose }) {
@@ -294,6 +294,488 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           '', `${billable.length} billable`,
           fmtDollar(totalSpend, 2),
           '', '', '',
+        ],
+      };
+    })(),
+    billable_calls: (() => {
+      const billableRows = [...calls].filter(c => c.isBillable).sort((a, b) => (b.date||'').localeCompare(a.date||'') || (b.duration||0) - (a.duration||0));
+      const totalSpend = billableRows.reduce((s, c) => s + (c.cost || 0), 0);
+      const totalDur = billableRows.reduce((s, c) => s + (c.duration || 0), 0);
+      const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
+      const bCount = billableRows.length;
+      return {
+        title: 'Billable Calls — Detail',
+        summary: `${bCount} billable calls · ${fmtDollar(totalSpend)} total spend`,
+        financials: [
+          { label: 'Billable Calls', value: fmt(bCount),                                                       color: C.green },
+          { label: 'Total Spend',    value: fmtDollar(totalSpend),                                            color: C.yellow },
+          { label: 'Avg Cost/Call',  value: fmtDollar(bCount > 0 ? totalSpend / bCount : 0, 2),              color: C.text },
+        ],
+        rows: billableRows,
+        columns: [
+          { label: 'Date',      render: r => r.date,                                    color: C.muted },
+          { label: 'Time',      render: r => r.callTime || '—',                         color: C.muted },
+          { label: 'Agent',     render: r => r.rep || '—',                              color: C.text },
+          { label: 'Campaign',  render: r => r.campaign || '—',                         color: C.text },
+          { label: 'Status',    render: r => r.callStatus || '—',                       color: C.muted },
+          { label: 'Type',      render: r => r.callType || '—',                         color: C.muted },
+          { label: 'Duration',  render: r => fmtDur(r.duration),                        color: () => C.green },
+          { label: 'Buffer',    render: r => fmtDur(r.buffer),                          color: () => C.muted },
+          { label: 'Cost',      render: r => fmtDollar(r.cost, 2),                      color: () => C.yellow },
+          { label: 'State',     render: r => r.state || '—',                            color: C.muted },
+          { label: 'Phone',     render: r => r.phone || '—',                            color: C.muted },
+          { label: 'Lead ID',   render: r => r.leadId || '—',                           color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '', '', '', '', '',
+          fmtDur(totalDur) + ` (avg ${fmtDur(bCount > 0 ? Math.round(totalDur/bCount) : 0)})`,
+          '',
+          fmtDollar(totalSpend, 2) + ` (avg ${fmtDollar(bCount > 0 ? totalSpend/bCount : 0, 2)})`,
+          '', '', '',
+        ],
+      };
+    })(),
+    billable_rate: (() => {
+      // Break down by campaign
+      const bycamp = {};
+      calls.forEach(c => {
+        const key = c.campaignCode || c.campaign || 'Unknown';
+        if (!bycamp[key]) bycamp[key] = { campaign: key, vendor: c.vendor || '', total: 0, billable: 0, spend: 0, buffer: c.buffer || 0, pricePerCall: c.pricePerCall || 0 };
+        bycamp[key].total++;
+        if (c.isBillable) { bycamp[key].billable++; bycamp[key].spend += c.cost || 0; }
+      });
+      const campRows = Object.values(bycamp).sort((a, b) => {
+        const rA = a.total > 0 ? a.billable / a.total : 0;
+        const rB = b.total > 0 ? b.billable / b.total : 0;
+        return rA - rB; // worst rate first
+      });
+      const totalCalls = calls.length;
+      const totalBillable = calls.filter(c => c.isBillable).length;
+      const overallRate = totalCalls > 0 ? totalBillable / totalCalls * 100 : 0;
+      return {
+        title: 'Billable Rate — By Campaign',
+        summary: `${totalBillable} billable of ${totalCalls} total calls · ${fmtPct(overallRate)} overall`,
+        financials: [
+          { label: 'Total Calls',    value: fmt(totalCalls),           color: C.text },
+          { label: 'Billable Calls', value: fmt(totalBillable),        color: C.green },
+          { label: 'Billable Rate',  value: fmtPct(overallRate),       color: overallRate >= 65 ? C.green : overallRate >= 52 ? C.yellow : C.red },
+        ],
+        rows: campRows,
+        columns: [
+          { label: 'Campaign',      render: r => r.campaign,                                                            color: C.text },
+          { label: 'Vendor',        render: r => r.vendor || '—',                                                       color: C.muted },
+          { label: 'Buffer',        render: r => r.buffer ? r.buffer + 's' : '—',                                       color: C.muted },
+          { label: '$/Call',        render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall, 2) : '—',              color: C.muted },
+          { label: 'Total Calls',   render: r => fmt(r.total),                                                          color: C.text },
+          { label: 'Billable',      render: r => fmt(r.billable),                                                       color: C.green },
+          { label: 'Non-Billable',  render: r => fmt(r.total - r.billable),                                             color: C.red },
+          { label: 'Bill Rate',     render: r => r.total > 0 ? fmtPct(r.billable / r.total * 100) : '—',               color: r => { const rt = r.total > 0 ? r.billable/r.total*100 : 0; return rt >= 65 ? C.green : rt >= 52 ? C.yellow : C.red; } },
+          { label: 'Spend',         render: r => r.spend > 0 ? fmtDollar(r.spend, 2) : '—',                            color: r => r.spend > 0 ? C.yellow : C.muted },
+        ],
+        totals: [
+          'TOTAL', '', '', '',
+          fmt(totalCalls),
+          fmt(totalBillable),
+          fmt(totalCalls - totalBillable),
+          fmtPct(overallRate),
+          fmtDollar(calls.reduce((s,c) => s+(c.cost||0), 0), 2),
+        ],
+      };
+    })(),
+    monthly_premium: (() => {
+      const premRows = policies.filter(isPlaced).sort((a, b) => (b.premium||0) - (a.premium||0));
+      const totalPrem = premRows.reduce((s, r) => s + (r.premium||0), 0);
+      const avgPrem = premRows.length > 0 ? totalPrem / premRows.length : 0;
+      const byAgent = {};
+      premRows.forEach(r => { byAgent[r.agent] = (byAgent[r.agent]||0) + r.premium; });
+      const topAgent = Object.entries(byAgent).sort((a,b) => b[1]-a[1])[0];
+      return {
+        title: 'Monthly Premium — Placed Policies',
+        summary: `${premRows.length} placed policies · avg ${fmtDollar(avgPrem, 2)}/policy`,
+        financials: [
+          { label: 'Total Premium', value: fmtDollar(totalPrem, 2),                                        color: C.green },
+          { label: 'Avg Premium',   value: fmtDollar(avgPrem, 2),                                          color: C.text },
+          { label: 'Top Agent',     value: topAgent ? `${topAgent[0]} (${fmtDollar(topAgent[1], 2)})` : '—', color: C.accent },
+        ],
+        rows: premRows,
+        columns: [
+          { label: 'Date',        render: r => r.submitDate,                                                color: C.muted },
+          { label: 'Agent',       render: r => r.agent,                                                     color: C.text },
+          { label: 'Client',      render: r => `${r.firstName} ${r.lastName}`.trim(),                       color: C.text },
+          { label: 'Lead Source', render: r => r.leadSource || '—',                                         color: C.muted },
+          { label: 'Carrier',     render: r => r.carrier,                                                   color: C.text },
+          { label: 'Product',     render: r => r.product || '—',                                            color: C.muted },
+          { label: 'Face Amount', render: r => fmtDollar(r.faceAmount||0),                                  color: C.muted },
+          { label: 'Premium',     render: r => fmtDollar(r.premium, 2),                                     color: C.green },
+          { label: 'Status',      render: r => r.placed,                                                    color: () => C.green },
+        ],
+        totals: [
+          'TOTAL', '', '', '', '', '', '',
+          fmtDollar(totalPrem, 2) + ` (avg ${fmtDollar(avgPrem, 2)})`,
+          `${premRows.length} placed`,
+        ],
+      };
+    })(),
+    lead_spend: (() => {
+      const bycamp = {};
+      calls.forEach(c => {
+        const key = c.campaignCode || c.campaign || 'Unknown';
+        if (!bycamp[key]) bycamp[key] = { campaign: key, vendor: c.vendor || '', total: 0, billable: 0, spend: 0, pricePerCall: c.pricePerCall || 0, buffer: c.buffer || 0 };
+        bycamp[key].total++;
+        if (c.isBillable) { bycamp[key].billable++; bycamp[key].spend += c.cost || 0; }
+      });
+      const spendRows = Object.values(bycamp).filter(r => r.spend > 0).sort((a, b) => b.spend - a.spend);
+      const totalSpend = spendRows.reduce((s, r) => s + r.spend, 0);
+      const totalBillable = spendRows.reduce((s, r) => s + r.billable, 0);
+      return {
+        title: 'Lead Spend — By Publisher',
+        summary: `${spendRows.length} publishers · ${fmt(totalBillable)} billable calls · ${fmtDollar(totalSpend)} total spend`,
+        financials: [
+          { label: 'Total Spend',      value: fmtDollar(totalSpend),                                                            color: C.yellow },
+          { label: 'Billable Calls',   value: fmt(totalBillable),                                                               color: C.green },
+          { label: 'Avg Cost/Call',    value: fmtDollar(totalBillable > 0 ? totalSpend / totalBillable : 0, 2),                color: C.text },
+        ],
+        rows: spendRows,
+        columns: [
+          { label: 'Campaign',      render: r => r.campaign,                                                                    color: C.text },
+          { label: 'Vendor',        render: r => r.vendor || '—',                                                               color: C.muted },
+          { label: 'Buffer',        render: r => r.buffer ? r.buffer + 's' : '—',                                               color: C.muted },
+          { label: '$/Call',        render: r => fmtDollar(r.pricePerCall, 2),                                                  color: C.muted },
+          { label: 'Total Calls',   render: r => fmt(r.total),                                                                  color: C.text },
+          { label: 'Billable',      render: r => fmt(r.billable),                                                               color: C.green },
+          { label: 'Bill Rate',     render: r => r.total > 0 ? fmtPct(r.billable / r.total * 100) : '—',                       color: C.muted },
+          { label: 'Spend',         render: r => fmtDollar(r.spend, 2),                                                         color: () => C.yellow },
+          { label: 'Avg Cost/Call', render: r => r.billable > 0 ? fmtDollar(r.spend / r.billable, 2) : '—',                   color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '', '', '',
+          fmt(calls.length),
+          fmt(totalBillable),
+          fmtPct(calls.length > 0 ? totalBillable / calls.length * 100 : 0),
+          fmtDollar(totalSpend, 2),
+          fmtDollar(totalBillable > 0 ? totalSpend / totalBillable : 0, 2),
+        ],
+      };
+    })(),
+    agent_commission: (() => {
+      const commRows = policies.filter(isPlaced).sort((a, b) => (b.commission||0) - (a.commission||0));
+      const totalComm = commRows.reduce((s, r) => s + (r.commission||0), 0);
+      const totalPrem = commRows.reduce((s, r) => s + (r.premium||0), 0);
+      // Summarize by agent
+      const byAgent = {};
+      commRows.forEach(r => {
+        if (!byAgent[r.agent]) byAgent[r.agent] = { agent: r.agent, policies: 0, premium: 0, commission: 0, isSalaried: r.isSalaried };
+        byAgent[r.agent].policies++;
+        byAgent[r.agent].premium += r.premium||0;
+        byAgent[r.agent].commission += r.commission||0;
+      });
+      const agentSummary = Object.values(byAgent).sort((a,b) => b.commission - a.commission);
+      const topAgent = agentSummary[0];
+      return {
+        title: 'Agent Commission — Placed Policies',
+        summary: `${commRows.length} placed policies · ${agentSummary.length} agents`,
+        financials: [
+          { label: 'Total Commission', value: fmtDollar(totalComm, 2),                                                          color: C.accent },
+          { label: 'Avg Commission',   value: fmtDollar(commRows.length > 0 ? totalComm / commRows.length : 0, 2),             color: C.text },
+          { label: 'Top Agent',        value: topAgent ? `${topAgent.agent} (${fmtDollar(topAgent.commission, 2)})` : '—',     color: C.accent },
+        ],
+        rows: commRows,
+        columns: [
+          { label: 'Date',        render: r => r.submitDate,                                                    color: C.muted },
+          { label: 'Agent',       render: r => r.agent,                                                         color: C.text },
+          { label: 'Client',      render: r => `${r.firstName} ${r.lastName}`.trim(),                           color: C.text },
+          { label: 'Carrier',     render: r => r.carrier,                                                       color: C.muted },
+          { label: 'Product',     render: r => r.product || '—',                                                color: C.muted },
+          { label: 'Premium',     render: r => fmtDollar(r.premium, 2),                                         color: C.green },
+          { label: 'Comm Rate',   render: r => r.premium > 0 ? fmtPct(r.commission / r.premium * 100) : '—',   color: C.muted },
+          { label: 'Commission',  render: r => r.isSalaried ? 'Salary' : fmtDollar(r.commission, 2),           color: r => r.isSalaried ? C.muted : C.accent },
+          { label: 'Status',      render: r => r.placed,                                                        color: () => C.green },
+        ],
+        totals: [
+          'TOTAL', '', '', '', '',
+          fmtDollar(totalPrem, 2),
+          totalPrem > 0 ? fmtPct(totalComm / totalPrem * 100) : '—',
+          fmtDollar(totalComm, 2) + ` (avg ${fmtDollar(commRows.length > 0 ? totalComm/commRows.length : 0, 2)})`,
+          '',
+        ],
+      };
+    })(),
+    net_revenue: (() => {
+      const netRows = [...pnl].sort((a, b) => b.netRevenue - a.netRevenue);
+      const totalGAR     = netRows.reduce((s, r) => s + (r.grossAdvancedRevenue||0), 0);
+      const totalSpend   = netRows.reduce((s, r) => s + (r.leadSpend||0), 0);
+      const totalComm    = netRows.reduce((s, r) => s + (r.totalCommission||0), 0);
+      const totalNet     = totalGAR - totalSpend - totalComm;
+      return {
+        title: 'Net Revenue — By Publisher',
+        summary: `${netRows.length} publishers · GAR ${fmtDollar(totalGAR)} − Spend ${fmtDollar(totalSpend)} − Comm ${fmtDollar(totalComm)}`,
+        financials: [
+          { label: 'Gross Adv Revenue', value: fmtDollar(totalGAR),   color: C.green },
+          { label: 'Lead Spend + Comm', value: fmtDollar(totalSpend + totalComm), color: C.yellow },
+          { label: 'Net Revenue',        value: fmtDollar(totalNet),   color: totalNet >= 0 ? C.green : C.red },
+        ],
+        rows: netRows,
+        columns: [
+          { label: 'Publisher',    render: r => r.campaign,                                                                        color: C.text },
+          { label: 'Vendor',       render: r => r.vendor || '—',                                                                   color: C.muted },
+          { label: 'Placed',       render: r => fmt(r.placedCount||0),                                                             color: C.green },
+          { label: 'Premium',      render: r => fmtDollar(r.totalPremium||0, 2),                                                   color: C.green },
+          { label: 'Gross Adv Rev',render: r => fmtDollar(r.grossAdvancedRevenue||0),                                             color: C.green },
+          { label: 'Lead Spend',   render: r => fmtDollar(r.leadSpend||0, 2),                                                      color: C.yellow },
+          { label: 'Commission',   render: r => fmtDollar(r.totalCommission||0, 2),                                                color: C.accent },
+          { label: 'Net Revenue',  render: r => fmtDollar(r.netRevenue||0, 2),                                                     color: r => (r.netRevenue||0) >= 0 ? C.green : C.red },
+        ],
+        totals: [
+          'TOTAL', '',
+          fmt(netRows.reduce((s,r)=>s+(r.placedCount||0),0)),
+          fmtDollar(netRows.reduce((s,r)=>s+(r.totalPremium||0),0), 2),
+          fmtDollar(totalGAR),
+          fmtDollar(totalSpend, 2),
+          fmtDollar(totalComm, 2),
+          fmtDollar(totalNet, 2),
+        ],
+      };
+    })(),
+    cpa: (() => {
+      const cpaRows = [...pnl].filter(r => r.leadSpend > 0).sort((a, b) => {
+        const cpaA = a.placedCount > 0 ? a.leadSpend / a.placedCount : Infinity;
+        const cpaB = b.placedCount > 0 ? b.leadSpend / b.placedCount : Infinity;
+        return cpaA - cpaB; // best CPA first
+      });
+      const totalSpend   = cpaRows.reduce((s, r) => s + r.leadSpend, 0);
+      const totalPlaced  = cpaRows.reduce((s, r) => s + (r.placedCount||0), 0);
+      const overallCpa   = totalPlaced > 0 ? totalSpend / totalPlaced : 0;
+      return {
+        title: 'CPA — Cost Per Acquisition by Publisher',
+        summary: `${totalPlaced} placed · ${fmtDollar(totalSpend)} spend · overall CPA ${fmtDollar(overallCpa)}`,
+        financials: [
+          { label: 'Overall CPA',   value: fmtDollar(overallCpa),   color: overallCpa <= 250 ? C.green : overallCpa <= 312 ? C.yellow : C.red },
+          { label: 'Total Spend',   value: fmtDollar(totalSpend),   color: C.yellow },
+          { label: 'Placed',        value: fmt(totalPlaced),         color: C.green },
+        ],
+        rows: cpaRows,
+        columns: [
+          { label: 'Publisher',     render: r => r.campaign,                                                                                          color: C.text },
+          { label: 'Vendor',        render: r => r.vendor || '—',                                                                                     color: C.muted },
+          { label: 'Total Calls',   render: r => fmt(r.totalCalls||0),                                                                                color: C.muted },
+          { label: 'Billable',      render: r => fmt(r.billableCalls||0),                                                                             color: C.muted },
+          { label: 'Placed',        render: r => fmt(r.placedCount||0),                                                                               color: C.green },
+          { label: 'Lead Spend',    render: r => fmtDollar(r.leadSpend, 2),                                                                           color: C.yellow },
+          { label: 'CPA',           render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend / r.placedCount) : '—',                                   color: r => { const c = r.placedCount > 0 ? r.leadSpend/r.placedCount : null; return !c ? C.muted : c <= 250 ? C.green : c <= 312 ? C.yellow : C.red; } },
+          { label: 'Close Rate',    render: r => r.billableCalls > 0 ? fmtPct(r.placedCount / r.billableCalls * 100) : '—',                          color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '',
+          fmt(cpaRows.reduce((s,r)=>s+(r.totalCalls||0),0)),
+          fmt(cpaRows.reduce((s,r)=>s+(r.billableCalls||0),0)),
+          fmt(totalPlaced),
+          fmtDollar(totalSpend, 2),
+          fmtDollar(overallCpa),
+          '',
+        ],
+      };
+    })(),
+    rpc: (() => {
+      const rpcRows = [...pnl].filter(r => r.totalCalls > 0).sort((a, b) => {
+        const rpcA = a.totalCalls > 0 ? a.leadSpend / a.totalCalls : Infinity;
+        const rpcB = b.totalCalls > 0 ? b.leadSpend / b.totalCalls : Infinity;
+        return rpcA - rpcB; // best (lowest) RPC first
+      });
+      const totalSpend  = rpcRows.reduce((s, r) => s + (r.leadSpend||0), 0);
+      const totalCalls  = rpcRows.reduce((s, r) => s + (r.totalCalls||0), 0);
+      const overallRpc  = totalCalls > 0 ? totalSpend / totalCalls : 0;
+      return {
+        title: 'RPC — Revenue Per Call by Publisher',
+        summary: `${fmt(totalCalls)} total calls · ${fmtDollar(totalSpend)} spend · overall RPC ${fmtDollar(overallRpc, 2)}`,
+        financials: [
+          { label: 'Overall RPC',   value: fmtDollar(overallRpc, 2),  color: overallRpc <= 35 ? C.green : overallRpc <= 43 ? C.yellow : C.red },
+          { label: 'Total Calls',   value: fmt(totalCalls),            color: C.text },
+          { label: 'Total Spend',   value: fmtDollar(totalSpend),     color: C.yellow },
+        ],
+        rows: rpcRows,
+        columns: [
+          { label: 'Publisher',    render: r => r.campaign,                                                                                         color: C.text },
+          { label: 'Vendor',       render: r => r.vendor || '—',                                                                                    color: C.muted },
+          { label: 'Total Calls',  render: r => fmt(r.totalCalls||0),                                                                               color: C.text },
+          { label: 'Billable',     render: r => fmt(r.billableCalls||0),                                                                            color: C.muted },
+          { label: 'Bill Rate',    render: r => r.totalCalls > 0 ? fmtPct(r.billableCalls/r.totalCalls*100) : '—',                                 color: C.muted },
+          { label: 'Lead Spend',   render: r => fmtDollar(r.leadSpend||0, 2),                                                                       color: C.yellow },
+          { label: 'RPC',          render: r => r.totalCalls > 0 ? fmtDollar(r.leadSpend/r.totalCalls, 2) : '—',                                   color: r => { const v = r.totalCalls > 0 ? r.leadSpend/r.totalCalls : null; return !v ? C.muted : v <= 35 ? C.green : v <= 43 ? C.yellow : C.red; } },
+          { label: 'Placed',       render: r => fmt(r.placedCount||0),                                                                              color: C.green },
+          { label: 'CPA',          render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend/r.placedCount) : '—',                                    color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '',
+          fmt(totalCalls),
+          fmt(rpcRows.reduce((s,r)=>s+(r.billableCalls||0),0)),
+          '',
+          fmtDollar(totalSpend, 2),
+          fmtDollar(overallRpc, 2),
+          fmt(rpcRows.reduce((s,r)=>s+(r.placedCount||0),0)),
+          '',
+        ],
+      };
+    })(),
+    close_rate: (() => {
+      const crRows = [...pnl].filter(r => r.billableCalls > 0).sort((a, b) => {
+        const crA = a.billableCalls > 0 ? a.placedCount / a.billableCalls : 0;
+        const crB = b.billableCalls > 0 ? b.placedCount / b.billableCalls : 0;
+        return crB - crA; // best close rate first
+      });
+      const totalBillable = crRows.reduce((s, r) => s + (r.billableCalls||0), 0);
+      const totalPlaced   = crRows.reduce((s, r) => s + (r.placedCount||0), 0);
+      const overallCR     = totalBillable > 0 ? totalPlaced / totalBillable * 100 : 0;
+      return {
+        title: 'Close Rate — By Publisher',
+        summary: `${fmt(totalPlaced)} placed of ${fmt(totalBillable)} billable calls · overall ${fmtPct(overallCR)}`,
+        financials: [
+          { label: 'Overall Close Rate', value: fmtPct(overallCR),     color: overallCR >= 5 ? C.green : overallCR >= 4 ? C.yellow : C.red },
+          { label: 'Placed',             value: fmt(totalPlaced),       color: C.green },
+          { label: 'Billable Calls',     value: fmt(totalBillable),     color: C.text },
+        ],
+        rows: crRows,
+        columns: [
+          { label: 'Publisher',    render: r => r.campaign,                                                                                              color: C.text },
+          { label: 'Vendor',       render: r => r.vendor || '—',                                                                                         color: C.muted },
+          { label: 'Billable',     render: r => fmt(r.billableCalls||0),                                                                                 color: C.text },
+          { label: 'Placed',       render: r => fmt(r.placedCount||0),                                                                                   color: C.green },
+          { label: 'Close Rate',   render: r => r.billableCalls > 0 ? fmtPct(r.placedCount/r.billableCalls*100) : '—',                                  color: r => { const v = r.billableCalls > 0 ? r.placedCount/r.billableCalls*100 : 0; return v >= 5 ? C.green : v >= 4 ? C.yellow : C.red; } },
+          { label: 'Total Calls',  render: r => fmt(r.totalCalls||0),                                                                                    color: C.muted },
+          { label: 'Bill Rate',    render: r => r.totalCalls > 0 ? fmtPct(r.billableCalls/r.totalCalls*100) : '—',                                      color: C.muted },
+          { label: 'Lead Spend',   render: r => fmtDollar(r.leadSpend||0, 2),                                                                            color: C.yellow },
+          { label: 'CPA',          render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend/r.placedCount) : '—',                                         color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '',
+          fmt(totalBillable),
+          fmt(totalPlaced),
+          fmtPct(overallCR),
+          fmt(crRows.reduce((s,r)=>s+(r.totalCalls||0),0)),
+          '',
+          fmtDollar(crRows.reduce((s,r)=>s+(r.leadSpend||0),0), 2),
+          '',
+        ],
+      };
+    })(),
+    placement_rate: (() => {
+      const byAgent = {};
+      policies.forEach(r => {
+        if (!byAgent[r.agent]) byAgent[r.agent] = { agent: r.agent, apps: 0, placed: 0, premium: 0 };
+        byAgent[r.agent].apps++;
+        if (isPlaced(r)) { byAgent[r.agent].placed++; byAgent[r.agent].premium += r.premium||0; }
+      });
+      const prRows = Object.values(byAgent).filter(r => r.apps > 0).sort((a, b) => {
+        const prA = a.apps > 0 ? a.placed / a.apps : 0;
+        const prB = b.apps > 0 ? b.placed / b.apps : 0;
+        return prB - prA; // best placement rate first
+      });
+      const totalApps   = prRows.reduce((s, r) => s + r.apps, 0);
+      const totalPlaced = prRows.reduce((s, r) => s + r.placed, 0);
+      const overallPR   = totalApps > 0 ? totalPlaced / totalApps * 100 : 0;
+      return {
+        title: 'Placement Rate — By Agent',
+        summary: `${fmt(totalPlaced)} placed of ${fmt(totalApps)} apps submitted · overall ${fmtPct(overallPR)}`,
+        financials: [
+          { label: 'Placement Rate', value: fmtPct(overallPR),    color: overallPR >= 80 ? C.green : overallPR >= 64 ? C.yellow : C.red },
+          { label: 'Apps Submitted', value: fmt(totalApps),        color: C.text },
+          { label: 'Placed',         value: fmt(totalPlaced),      color: C.green },
+        ],
+        rows: prRows,
+        columns: [
+          { label: 'Agent',           render: r => r.agent,                                                                                              color: C.text },
+          { label: 'Apps Submitted',  render: r => fmt(r.apps),                                                                                          color: C.text },
+          { label: 'Placed',          render: r => fmt(r.placed),                                                                                        color: C.green },
+          { label: 'Not Placed',      render: r => fmt(r.apps - r.placed),                                                                               color: C.red },
+          { label: 'Placement Rate',  render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—',                                                      color: r => { const v = r.apps > 0 ? r.placed/r.apps*100 : 0; return v >= 80 ? C.green : v >= 64 ? C.yellow : C.red; } },
+          { label: 'Total Premium',   render: r => fmtDollar(r.premium, 2),                                                                              color: C.green },
+          { label: 'Avg Premium',     render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—',                                               color: C.muted },
+        ],
+        totals: [
+          'TOTAL',
+          fmt(totalApps),
+          fmt(totalPlaced),
+          fmt(totalApps - totalPlaced),
+          fmtPct(overallPR),
+          fmtDollar(prRows.reduce((s,r)=>s+r.premium,0), 2),
+          '',
+        ],
+      };
+    })(),
+    premium_cost_ratio: (() => {
+      const pcrRows = [...pnl].filter(r => r.leadSpend > 0).sort((a, b) => {
+        const rA = a.leadSpend > 0 ? a.totalPremium / a.leadSpend : 0;
+        const rB = b.leadSpend > 0 ? b.totalPremium / b.leadSpend : 0;
+        return rB - rA; // best ratio first
+      });
+      const totalPrem  = pcrRows.reduce((s, r) => s + (r.totalPremium||0), 0);
+      const totalSpend = pcrRows.reduce((s, r) => s + (r.leadSpend||0), 0);
+      const overallRatio = totalSpend > 0 ? totalPrem / totalSpend : 0;
+      return {
+        title: 'Premium:Cost Ratio — By Publisher',
+        summary: `${fmtDollar(totalPrem, 2)} premium · ${fmtDollar(totalSpend)} spend · overall ${overallRatio.toFixed(2)}x`,
+        financials: [
+          { label: 'Premium:Cost',   value: overallRatio.toFixed(2) + 'x',  color: overallRatio >= 2.5 ? C.green : overallRatio >= 2 ? C.yellow : C.red },
+          { label: 'Total Premium',  value: fmtDollar(totalPrem, 2),         color: C.green },
+          { label: 'Total Spend',    value: fmtDollar(totalSpend),           color: C.yellow },
+        ],
+        rows: pcrRows,
+        columns: [
+          { label: 'Publisher',      render: r => r.campaign,                                                                                                          color: C.text },
+          { label: 'Vendor',         render: r => r.vendor || '—',                                                                                                     color: C.muted },
+          { label: 'Placed',         render: r => fmt(r.placedCount||0),                                                                                               color: C.green },
+          { label: 'Premium',        render: r => fmtDollar(r.totalPremium||0, 2),                                                                                     color: C.green },
+          { label: 'Lead Spend',     render: r => fmtDollar(r.leadSpend||0, 2),                                                                                        color: C.yellow },
+          { label: 'Prem:Cost',      render: r => r.leadSpend > 0 ? (r.totalPremium/r.leadSpend).toFixed(2) + 'x' : '—',                                              color: r => { const v = r.leadSpend > 0 ? r.totalPremium/r.leadSpend : 0; return v >= 2.5 ? C.green : v >= 2 ? C.yellow : C.red; } },
+          { label: 'Avg Premium',    render: r => r.placedCount > 0 ? fmtDollar(r.totalPremium/r.placedCount, 2) : '—',                                               color: C.muted },
+          { label: 'CPA',            render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend/r.placedCount) : '—',                                                     color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '',
+          fmt(pcrRows.reduce((s,r)=>s+(r.placedCount||0),0)),
+          fmtDollar(totalPrem, 2),
+          fmtDollar(totalSpend, 2),
+          overallRatio.toFixed(2) + 'x',
+          '', '',
+        ],
+      };
+    })(),
+    avg_premium: (() => {
+      const placed = policies.filter(isPlaced);
+      const avgRows = [...placed].sort((a, b) => (b.premium||0) - (a.premium||0));
+      const totalPrem = avgRows.reduce((s, r) => s + (r.premium||0), 0);
+      const avgPrem   = avgRows.length > 0 ? totalPrem / avgRows.length : 0;
+      // By agent summary
+      const byAgent = {};
+      avgRows.forEach(r => {
+        if (!byAgent[r.agent]) byAgent[r.agent] = { agent: r.agent, count: 0, premium: 0 };
+        byAgent[r.agent].count++;
+        byAgent[r.agent].premium += r.premium||0;
+      });
+      const topAgent = Object.values(byAgent).sort((a,b) => (b.premium/b.count) - (a.premium/a.count))[0];
+      return {
+        title: 'Avg Premium — Placed Policies',
+        summary: `${avgRows.length} placed policies · total ${fmtDollar(totalPrem, 2)}`,
+        financials: [
+          { label: 'Avg Premium',   value: fmtDollar(avgPrem, 2),                                                                                  color: avgPrem >= 70 ? C.green : avgPrem >= 56 ? C.yellow : C.red },
+          { label: 'Total Premium', value: fmtDollar(totalPrem, 2),                                                                                 color: C.green },
+          { label: 'Top Avg Agent', value: topAgent ? `${topAgent.agent} (${fmtDollar(topAgent.premium/topAgent.count, 2)})` : '—',                color: C.accent },
+        ],
+        rows: avgRows,
+        columns: [
+          { label: 'Date',        render: r => r.submitDate,                                                                                         color: C.muted },
+          { label: 'Agent',       render: r => r.agent,                                                                                              color: C.text },
+          { label: 'Client',      render: r => `${r.firstName} ${r.lastName}`.trim(),                                                                color: C.text },
+          { label: 'Carrier',     render: r => r.carrier,                                                                                            color: C.muted },
+          { label: 'Product',     render: r => r.product || '—',                                                                                     color: C.muted },
+          { label: 'Face Amount', render: r => fmtDollar(r.faceAmount||0),                                                                           color: C.muted },
+          { label: 'Premium',     render: r => fmtDollar(r.premium, 2),                                                                              color: r => (r.premium||0) >= 70 ? C.green : (r.premium||0) >= 56 ? C.yellow : C.red },
+          { label: 'Lead Source', render: r => r.leadSource || '—',                                                                                  color: C.muted },
+          { label: 'Status',      render: r => r.placed,                                                                                             color: () => C.green },
+        ],
+        totals: [
+          'TOTAL', '', '', '', '', '',
+          fmtDollar(totalPrem, 2) + ` (avg ${fmtDollar(avgPrem, 2)})`,
+          '', '',
         ],
       };
     })(),
