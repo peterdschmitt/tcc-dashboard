@@ -1,5 +1,8 @@
 'use client';
 import { useState, useMemo, useEffect } from 'react';
+import LeadCRMTab from './tabs/LeadCRMTab';
+import RetentionDashboardTab from './tabs/RetentionDashboardTab';
+import BusinessHealthTab from './tabs/BusinessHealthTab';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -15,7 +18,8 @@ const TABS = [
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
-  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'commissions', label: 'Commissions' },
+  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },  { id: 'commissions', label: 'Commissions' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -1629,6 +1633,452 @@ function PoliciesTab({ policies }) {
     </>
   );
 }
+// ─── POLICY STATUS TAB ──────────────────────────────
+function PolicyStatusTab({ policies, calls }) {
+  const [period, setPeriod] = useState('weekly');
+  const [subTab, setSubTab] = useState('period'); // 'period' | 'aging'
+  const [drillPeriod, setDrillPeriod] = useState(null);
+  const [drillPolicy, setDrillPolicy] = useState(null);
+
+  const classify = p => {
+    const s = p.placed;
+    if (s === 'Advance Released' || s === 'Active - In Force') return 'active';
+    if (s === 'Submitted - Pending') return 'pending';
+    return 'left';
+  };
+
+  // Phone → best call map for per-policy lead cost lookup
+  const phoneCallMap = useMemo(() => {
+    const map = {};
+    (calls || []).forEach(c => {
+      if (!c.phone) return;
+      const ex = map[c.phone];
+      if (!ex || (c.isBillable && !ex.isBillable)) map[c.phone] = c;
+    });
+    return map;
+  }, [calls]);
+
+  const getLeadCost = p => phoneCallMap[p.phone]?.cost || 0;
+
+  const AGE_BUCKETS = [
+    { label: '0–7d',   min: 0,  max: 7 },
+    { label: '8–30d',  min: 8,  max: 30 },
+    { label: '31–60d', min: 31, max: 60 },
+    { label: '61–90d', min: 61, max: 90 },
+    { label: '90+d',   min: 91, max: Infinity },
+  ];
+  const policyAge = dateStr => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
+  };
+  const getAgeBucketLabel = days => {
+    if (days === null) return null;
+    return AGE_BUCKETS.find(b => days >= b.min && days <= b.max)?.label || null;
+  };
+
+  const getPeriodKey = (dateStr) => {
+    if (!dateStr) return 'Unknown';
+    if (period === 'daily') return dateStr;
+    if (period === 'monthly') return dateStr.slice(0, 7);
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return 'Unknown';
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const formatPeriodLabel = (key) => {
+    if (key === 'Unknown') return 'Unknown';
+    if (period === 'monthly') {
+      const [y, m] = key.split('-');
+      return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    }
+    if (period === 'weekly') {
+      const start = new Date(key + 'T00:00:00');
+      if (isNaN(start.getTime())) return key;
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      const f = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+      return `${f(start)} – ${f(end)}, ${start.getFullYear()}`;
+    }
+    return key;
+  };
+
+  const grouped = useMemo(() => {
+    const map = {};
+    policies.forEach(p => {
+      const key = getPeriodKey(p.submitDate);
+      if (!map[key]) map[key] = { key, items: [] };
+      map[key].items.push(p);
+    });
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policies, period]);
+
+  const periodRows = useMemo(() => {
+    return Object.values(grouped).map(({ key, items }) => {
+      const active = items.filter(p => classify(p) === 'active');
+      const pending = items.filter(p => classify(p) === 'pending');
+      const left = items.filter(p => classify(p) === 'left');
+      const premium = active.reduce((s, p) => s + p.premium, 0);
+      const billed = items.filter(p => classify(p) !== 'left');
+      const grossRevenue = billed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+      const commission = billed.reduce((s, p) => s + p.commission, 0);
+      const leadCost = items.reduce((s, p) => s + getLeadCost(p), 0);
+      const netRevenue = grossRevenue - commission - leadCost;
+      const retention = (active.length + left.length) > 0 ? active.length / (active.length + left.length) * 100 : 0;
+      return { key, label: formatPeriodLabel(key), total: items.length, active: active.length, pending: pending.length, left: left.length, premium, grossRevenue, commission, leadCost, netRevenue, retention, _sortKey: key };
+    }).sort((a, b) => b._sortKey.localeCompare(a._sortKey));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grouped, phoneCallMap]);
+
+  const totals = useMemo(() => {
+    const active = policies.filter(p => classify(p) === 'active');
+    const pending = policies.filter(p => classify(p) === 'pending');
+    const left = policies.filter(p => classify(p) === 'left');
+    const billed = policies.filter(p => classify(p) !== 'left');
+    const grossRevenue = billed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+    const commission = billed.reduce((s, p) => s + p.commission, 0);
+    const leadCost = policies.reduce((s, p) => s + getLeadCost(p), 0);
+    return {
+      total: policies.length,
+      active: active.length,
+      pending: pending.length,
+      left: left.length,
+      premium: active.reduce((s, p) => s + p.premium, 0),
+      grossRevenue,
+      commission,
+      leadCost,
+      netRevenue: grossRevenue - commission - leadCost,
+      retention: (active.length + left.length) > 0 ? active.length / (active.length + left.length) * 100 : 0,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policies, phoneCallMap]);
+
+  // Non-active policies (pending + left) enriched with age in days
+  const nonActivePolicies = useMemo(() => {
+    return policies
+      .filter(p => classify(p) !== 'active')
+      .map(p => ({ ...p, ageDays: policyAge(p.submitDate) }))
+      .sort((a, b) => (b.ageDays || 0) - (a.ageDays || 0));
+  }, [policies]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Aging matrix: status × age-bucket → { count, grossRevenue, commission, leadCost }
+  const agingMatrix = useMemo(() => {
+    const statuses = ['active', 'pending', 'left'];
+    const empty = () => ({ count: 0, grossRevenue: 0, commission: 0, leadCost: 0 });
+    const matrix = {};
+    statuses.forEach(s => {
+      matrix[s] = {};
+      AGE_BUCKETS.forEach(b => { matrix[s][b.label] = empty(); });
+      matrix[s]['Total'] = empty();
+    });
+    matrix['Total'] = {};
+    AGE_BUCKETS.forEach(b => { matrix['Total'][b.label] = empty(); });
+    matrix['Total']['Total'] = empty();
+
+    policies.forEach(p => {
+      const s = classify(p);
+      const days = policyAge(p.submitDate);
+      const bucket = getAgeBucketLabel(days);
+      if (!bucket) return;
+      const gr = s !== 'left' ? p.grossAdvancedRevenue : 0;
+      const cm = s !== 'left' ? p.commission : 0;
+      const lc = getLeadCost(p);
+      for (const key of [bucket, 'Total']) {
+        matrix[s][key].count++;
+        matrix[s][key].grossRevenue += gr;
+        matrix[s][key].commission += cm;
+        matrix[s][key].leadCost += lc;
+        matrix['Total'][key].count++;
+        matrix['Total'][key].grossRevenue += gr;
+        matrix['Total'][key].commission += cm;
+        matrix['Total'][key].leadCost += lc;
+      }
+    });
+    return matrix;
+  }, [policies, phoneCallMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const statusColor = p => {
+    const c = classify(p);
+    return c === 'active' ? C.green : c === 'pending' ? C.yellow : C.red;
+  };
+
+  const pillStyle = (active) => ({
+    padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+    cursor: 'pointer', border: 'none',
+    background: active ? C.accent : C.border, color: active ? '#fff' : C.muted,
+  });
+
+  const policyColumns = [
+    { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => statusColor(r), bold: true },
+    { key: 'submitDate', label: 'Submit Date', align: 'left' },
+    { key: 'agent', label: 'Agent', align: 'left', mono: false },
+    { key: 'firstName', label: 'First', align: 'left', mono: false },
+    { key: 'lastName', label: 'Last', align: 'left', mono: false },
+    { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
+    { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+    { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: r => classify(r) === 'active' ? C.green : C.muted },
+    { key: 'grossAdvancedRevenue', label: 'Gross Rev', render: r => fmtDollar(r.grossAdvancedRevenue), color: r => classify(r) === 'active' ? C.green : C.muted },
+    { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.yellow },
+    { key: '_leadCost', label: 'Lead Cost', render: r => fmtDollar(getLeadCost(r)), color: () => C.muted },
+    { key: '_netRevenue', label: 'Net Revenue', render: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return fmtDollar(n); }, color: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return n >= 0 ? C.green : C.red; } },
+    { key: 'faceAmount', label: 'Face', render: r => fmtDollar(r.faceAmount) },
+    { key: 'leadSource', label: 'Source', align: 'left', mono: false, color: () => C.muted },
+    { key: 'effectiveDate', label: 'Eff Date', align: 'left' },
+    { key: 'policyNumber', label: 'Policy #', align: 'left' },
+    { key: 'phone', label: 'Phone', align: 'left' },
+    { key: 'state', label: 'State' },
+  ];
+
+  // Policy detail view
+  if (drillPolicy) {
+    const p = drillPolicy;
+    const periodLabel = drillPeriod ? formatPeriodLabel(drillPeriod) : null;
+    const leadCost = getLeadCost(p);
+    const netRevenue = p.grossAdvancedRevenue - p.commission - leadCost;
+    const fields = [
+      ['Agent', p.agent], ['Lead Source', p.leadSource],
+      ['Submit Date', p.submitDate], ['Effective Date', p.effectiveDate],
+      ['Carrier', p.carrier], ['Product', p.product],
+      ['Face Amount', fmtDollar(p.faceAmount)], ['Monthly Premium', fmtDollar(p.premium, 2)],
+      ['Gross Adv Revenue', fmtDollar(p.grossAdvancedRevenue)], ['Commission', fmtDollar(p.commission)],
+      ['Lead Cost', fmtDollar(leadCost)], ['Net Revenue', fmtDollar(netRevenue)],
+      ['Outcome', p.outcome], ['Status', p.placed],
+      ['Payment Type', p.paymentType], ['Payment Frequency', p.paymentFrequency],
+      ['SSN Billing Match', p.ssnMatch],
+      ['First Name', p.firstName], ['Last Name', p.lastName],
+      ['Gender', p.gender], ['Date of Birth', p.dob],
+      ['Phone', p.phone], ['Email', p.email],
+      ['Address', [p.address, p.city, p.state, p.zip].filter(Boolean).join(', ')],
+      ['Text Friendly', p.textFriendly], ['Policy #', p.policyNumber],
+    ];
+    return (
+      <>
+        <Breadcrumb items={[
+          { label: 'Policy Status', onClick: () => { setDrillPeriod(null); setDrillPolicy(null); } },
+          ...(periodLabel ? [{ label: periodLabel, onClick: () => setDrillPolicy(null) }] : []),
+          { label: `${p.firstName || ''} ${p.lastName || ''} — ${p.carrier}`.trim() },
+        ]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Monthly Premium" value={fmtDollar(p.premium, 2)} />
+          <KPICard label="Gross Adv Revenue" value={fmtDollar(p.grossAdvancedRevenue)} />
+          <KPICard label="Commission" value={fmtDollar(p.commission)} />
+          <KPICard label="Lead Cost" value={fmtDollar(leadCost)} />
+          <KPICard label="Net Revenue" value={fmtDollar(netRevenue)} />
+          <KPICard label="Face Amount" value={fmtDollar(p.faceAmount)} />
+        </div>
+        <Section title="Policy Details">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 1, padding: 1, background: C.border }}>
+            {fields.map(([label, val]) => (
+              <div key={label} style={{ background: C.card, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 13, color: C.text, fontFamily: C.mono, fontWeight: 500 }}>{val || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      </>
+    );
+  }
+
+  // Period drill-down view
+  if (drillPeriod) {
+    const group = grouped[drillPeriod];
+    const ps = group?.items || [];
+    const periodLabel = formatPeriodLabel(drillPeriod);
+    const active = ps.filter(p => classify(p) === 'active');
+    const pending = ps.filter(p => classify(p) === 'pending');
+    const left = ps.filter(p => classify(p) === 'left');
+    const prem = active.reduce((s, p) => s + p.premium, 0);
+    const billed = ps.filter(p => classify(p) !== 'left');
+    const grossRev = billed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+    const comm = billed.reduce((s, p) => s + p.commission, 0);
+    const lCost = ps.reduce((s, p) => s + getLeadCost(p), 0);
+    const netRev = grossRev - comm - lCost;
+    const ret = (active.length + left.length) > 0 ? active.length / (active.length + left.length) * 100 : 0;
+    return (
+      <>
+        <Breadcrumb items={[
+          { label: 'Policy Status', onClick: () => setDrillPeriod(null) },
+          { label: periodLabel },
+        ]} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <KPICard label="Total Policies" value={fmt(ps.length)} />
+          <KPICard label="Active / Placed" value={fmt(active.length)} />
+          <KPICard label="Pending" value={fmt(pending.length)} />
+          <KPICard label="Left" value={fmt(left.length)} />
+          <KPICard label="Active Premium" value={fmtDollar(prem, 2)} />
+          <KPICard label="Gross Revenue" value={fmtDollar(grossRev)} />
+          <KPICard label="Commission" value={fmtDollar(comm)} />
+          <KPICard label="Lead Cost" value={fmtDollar(lCost)} />
+          <KPICard label="Net Revenue" value={fmtDollar(netRev)} />
+          <KPICard label="Retention Rate" value={fmtPct(ret)} />
+        </div>
+        <Section title={`Policies — ${periodLabel}`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row for full details</span>}>
+          <SortableTable defaultSort="submitDate" onRowClick={r => setDrillPolicy(r)} columns={policyColumns} rows={ps} />
+        </Section>
+      </>
+    );
+  }
+
+  // Columns for the non-active and period drill-down policy list (includes age)
+  const nonActiveColumns = [
+    { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => statusColor(r), bold: true },
+    { key: 'ageDays', label: 'Age (days)', render: r => r.ageDays != null ? fmt(r.ageDays) : '—', color: r => r.ageDays > 90 ? C.red : r.ageDays > 30 ? C.yellow : C.muted },
+    { key: 'submitDate', label: 'Submit Date', align: 'left' },
+    { key: 'agent', label: 'Agent', align: 'left', mono: false },
+    { key: 'firstName', label: 'First', align: 'left', mono: false },
+    { key: 'lastName', label: 'Last', align: 'left', mono: false },
+    { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
+    { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+    { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.muted },
+    { key: 'grossAdvancedRevenue', label: 'Gross Rev', render: r => fmtDollar(r.grossAdvancedRevenue), color: () => C.muted },
+    { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.yellow },
+    { key: '_leadCost', label: 'Lead Cost', render: r => fmtDollar(getLeadCost(r)), color: () => C.muted },
+    { key: '_netRevenue', label: 'Net Revenue', render: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return fmtDollar(n); }, color: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return n >= 0 ? C.green : C.red; } },
+    { key: 'policyNumber', label: 'Policy #', align: 'left' },
+  ];
+
+  // Main view
+  const STATUS_ROWS = [
+    { key: 'active',  label: 'Active / Placed', color: C.green },
+    { key: 'pending', label: 'Pending',          color: C.yellow },
+    { key: 'left',    label: 'Left',             color: C.red },
+    { key: 'Total',   label: 'Total',            color: C.accent },
+  ];
+  const BUCKET_COLS = [...AGE_BUCKETS.map(b => b.label), 'Total'];
+
+  return (
+    <>
+      {/* Summary KPIs */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <KPICard label="Total Policies" value={fmt(totals.total)} />
+        <KPICard label="Active / Placed" value={fmt(totals.active)} subtitle="Advance Released + In Force" />
+        <KPICard label="Pending" value={fmt(totals.pending)} subtitle="Submitted - Pending" />
+        <KPICard label="Left" value={fmt(totals.left)} subtitle="Lapsed, Cancelled, Declined" />
+        <KPICard label="Active Premium" value={fmtDollar(totals.premium, 2)} />
+        <KPICard label="Gross Revenue" value={fmtDollar(totals.grossRevenue)} />
+        <KPICard label="Commission" value={fmtDollar(totals.commission)} />
+        <KPICard label="Lead Cost" value={fmtDollar(totals.leadCost)} />
+        <KPICard label="Net Revenue" value={fmtDollar(totals.netRevenue)} />
+        <KPICard label="Retention Rate" value={fmtPct(totals.retention)} subtitle="Active ÷ (Active + Left)" />
+      </div>
+
+      {/* Sub-tab toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[['period', 'By Period'], ['aging', 'Aging Report']].map(([val, lbl]) => (
+          <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
+        ))}
+      </div>
+
+      {subTab === 'period' && <>
+        <Section title="Policy Status by Period" rightContent={
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(([val, lbl]) => (
+              <button key={val} style={pillStyle(period === val)} onClick={() => setPeriod(val)}>{lbl}</button>
+            ))}
+          </div>
+        }>
+          <SortableTable defaultSort="_sortKey" onRowClick={r => setDrillPeriod(r.key)} columns={[
+            { key: 'label', label: 'Period', align: 'left', mono: false, sortable: false },
+            { key: 'total', label: 'Total', render: r => fmt(r.total) },
+            { key: 'active', label: 'Active', render: r => fmt(r.active), color: r => r.active > 0 ? C.green : C.muted },
+            { key: 'pending', label: 'Pending', render: r => fmt(r.pending), color: r => r.pending > 0 ? C.yellow : C.muted },
+            { key: 'left', label: 'Left', render: r => fmt(r.left), color: r => r.left > 0 ? C.red : C.muted },
+            { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: r => r.premium > 0 ? C.green : C.muted },
+            { key: 'grossRevenue', label: 'Gross Rev', render: r => fmtDollar(r.grossRevenue), color: r => r.grossRevenue > 0 ? C.green : C.muted },
+            { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.yellow },
+            { key: 'leadCost', label: 'Lead Cost', render: r => fmtDollar(r.leadCost), color: () => C.muted },
+            { key: 'netRevenue', label: 'Net Revenue', render: r => fmtDollar(r.netRevenue), color: r => r.netRevenue >= 0 ? C.green : C.red },
+            { key: 'retention', label: 'Retention %', render: r => (r.active + r.left) > 0 ? fmtPct(r.retention) : '—', color: r => (r.active + r.left) > 0 ? (r.retention >= 80 ? C.green : r.retention >= 60 ? C.yellow : C.red) : C.muted },
+          ]} rows={periodRows} />
+        </Section>
+
+        <Section title={`Non-Active Policies (${nonActivePolicies.length})`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>Pending + Left · sorted by age · click for details</span>}>
+          <SortableTable defaultSort="ageDays" onRowClick={r => setDrillPolicy(r)} columns={nonActiveColumns} rows={nonActivePolicies} />
+        </Section>
+      </>}
+
+      {subTab === 'aging' && <>
+        <Section title="Policy Aging Matrix" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Age = days since application submitted · click cell area to explore</span>}>
+          <div style={{ overflowX: 'auto', padding: 16 }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 700 }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `2px solid ${C.border}`, background: C.surface, width: 130 }}>Status</th>
+                  {BUCKET_COLS.map(col => (
+                    <th key={col} style={{ padding: '8px 16px', textAlign: 'center', fontSize: 9, fontWeight: 700, color: col === 'Total' ? C.accent : C.muted, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `2px solid ${C.border}`, background: C.surface, borderLeft: col === 'Total' ? `2px solid ${C.accent}` : `1px solid ${C.border}` }}>{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {STATUS_ROWS.map((row, ri) => {
+                  const rowData = agingMatrix[row.key] || {};
+                  const isTotal = row.key === 'Total';
+                  return (
+                    <tr key={row.key} style={{ borderTop: isTotal ? `2px solid ${C.accent}` : undefined, background: isTotal ? C.surface : 'transparent' }}>
+                      <td style={{ padding: '10px 16px', fontSize: 11, fontWeight: 700, color: row.color, fontFamily: C.sans, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{row.label}</td>
+                      {BUCKET_COLS.map(col => {
+                        const cell = rowData[col] || { count: 0, grossRevenue: 0, commission: 0, leadCost: 0 };
+                        const netRev = cell.grossRevenue - cell.commission - cell.leadCost;
+                        const isLastCol = col === 'Total';
+                        return (
+                          <td key={col} style={{ padding: '10px 16px', textAlign: 'center', borderBottom: `1px solid ${C.border}`, borderLeft: isLastCol ? `2px solid ${C.accent}` : `1px solid ${C.border}`, background: cell.count > 0 ? (isTotal ? C.surface : `${row.color}10`) : 'transparent', verticalAlign: 'top' }}>
+                            {cell.count === 0 ? (
+                              <span style={{ color: C.border, fontSize: 13 }}>—</span>
+                            ) : (
+                              <>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: row.color, fontFamily: C.mono, lineHeight: 1.1 }}>{cell.count}</div>
+                                {cell.grossRevenue > 0 && <div style={{ fontSize: 10, color: C.green, fontFamily: C.mono, marginTop: 3 }}>{fmtDollar(cell.grossRevenue)}</div>}
+                                {cell.commission > 0 && <div style={{ fontSize: 9, color: C.yellow, fontFamily: C.mono }}>{fmtDollar(cell.commission)} comm</div>}
+                                {cell.leadCost > 0 && <div style={{ fontSize: 9, color: C.muted, fontFamily: C.mono }}>{fmtDollar(cell.leadCost)} spend</div>}
+                                {(cell.grossRevenue > 0 || cell.leadCost > 0) && <div style={{ fontSize: 10, fontWeight: 700, color: netRev >= 0 ? C.green : C.red, fontFamily: C.mono, marginTop: 2, borderTop: `1px solid ${C.border}`, paddingTop: 2 }}>{fmtDollar(netRev)} net</div>}
+                              </>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        {/* Full policy list enriched with age, sortable */}
+        <Section title="All Policies — By Age" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row for full details</span>}>
+          <SortableTable
+            defaultSort="ageDays"
+            onRowClick={r => setDrillPolicy(r)}
+            columns={[
+              { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => statusColor(r), bold: true },
+              { key: 'ageDays', label: 'Age (days)', render: r => r.ageDays != null ? fmt(r.ageDays) : '—', color: r => r.ageDays > 90 ? C.red : r.ageDays > 30 ? C.yellow : C.text },
+              { key: '_ageBucket', label: 'Bucket', render: r => getAgeBucketLabel(r.ageDays) || '—', align: 'left', mono: false, color: () => C.muted },
+              { key: 'submitDate', label: 'Submit Date', align: 'left' },
+              { key: 'agent', label: 'Agent', align: 'left', mono: false },
+              { key: 'firstName', label: 'First', align: 'left', mono: false },
+              { key: 'lastName', label: 'Last', align: 'left', mono: false },
+              { key: 'carrier', label: 'Carrier', align: 'left', mono: false },
+              { key: 'product', label: 'Product', align: 'left', mono: false, color: () => C.muted },
+              { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: r => classify(r) === 'active' ? C.green : C.muted },
+              { key: 'grossAdvancedRevenue', label: 'Gross Rev', render: r => fmtDollar(r.grossAdvancedRevenue), color: r => classify(r) !== 'left' ? C.green : C.muted },
+              { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.yellow },
+              { key: '_leadCost2', label: 'Lead Cost', render: r => fmtDollar(getLeadCost(r)), color: () => C.muted },
+              { key: '_netRevenue2', label: 'Net Revenue', render: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return fmtDollar(n); }, color: r => { const n = r.grossAdvancedRevenue - r.commission - getLeadCost(r); return n >= 0 ? C.green : C.red; } },
+            ]}
+            rows={policies.map(p => ({ ...p, ageDays: policyAge(p.submitDate) }))}
+          />
+        </Section>
+      </>}
+    </>
+  );
+}
+
 // ─── AGENT PERFORMANCE TAB ──────────────────────────
 function AgentPerformanceTab({ dateRange, calls, policies }) {
   const [perfData, setPerfData] = useState(null);
@@ -2026,7 +2476,10 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
+        {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} />}
+        {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
       </div>
     </div>
   );
