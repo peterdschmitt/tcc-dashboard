@@ -150,7 +150,209 @@ function Breadcrumb({ items }) {
   );
 }
 
+const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'total_calls'];
+
+// ─── TILE DETAIL MODAL ─────────────────────────────
+function TileModal({ tileKey, policies, calls, pnl, onClose }) {
+  if (!tileKey) return null;
+
+  const placed = policies.filter(isPlaced);
+
+  const overlayStyle = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 2000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto' };
+  const modalStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20, minWidth: 900, maxWidth: 1400, width: '100%', position: 'relative' };
+  const thStyle = { textAlign: 'left', padding: '5px 8px', color: C.muted, fontWeight: 600, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
+  const tdStyle = (color) => ({ padding: '4px 8px', color: color || C.text, fontSize: 10, fontFamily: C.mono, borderBottom: `1px solid ${C.border}22`, whiteSpace: 'nowrap' });
+
+  const appsRows = [...policies].sort((a, b) => b.submitDate.localeCompare(a.submitDate));
+
+  // Match each policy to its specific call by phone number (prefer billable calls)
+  const phoneCallMap = {};
+  calls.forEach(c => {
+    if (!c.phone) return;
+    const existing = phoneCallMap[c.phone];
+    if (!existing || (c.isBillable && !existing.isBillable)) phoneCallMap[c.phone] = c;
+  });
+  const getCallCost = r => phoneCallMap[r.phone]?.cost || 0;
+
+  const totalPrem      = appsRows.reduce((s, r) => s + (r.premium || 0), 0);
+  const totalComm      = appsRows.reduce((s, r) => s + (r.commission || 0), 0);
+  const totalGAR       = appsRows.reduce((s, r) => s + (r.grossAdvancedRevenue || 0), 0);
+  const totalLeadSpend = appsRows.reduce((s, r) => s + getCallCost(r), 0);
+  const netRevenue     = totalGAR - totalLeadSpend - totalComm;
+  const count = appsRows.length;
+
+  const MODAL_CONFIGS = {
+    apps_submitted: {
+      title: 'Apps Submitted — All Applications',
+      summary: `${count} applications in date range`,
+      financials: [
+        { label: 'Gross Adv Revenue', value: fmtDollar(totalGAR),       color: C.green },
+        { label: 'Lead Cost',         value: fmtDollar(totalLeadSpend), color: C.yellow },
+        { label: 'Net Revenue',       value: fmtDollar(netRevenue),     color: netRevenue >= 0 ? C.green : C.red },
+      ],
+      rows: appsRows,
+      columns: [
+        { label: 'Date',          render: r => r.submitDate,                                                                      color: C.muted },
+        { label: 'Agent',         render: r => r.agent,                                                                           color: C.text },
+        { label: 'Client',        render: r => `${r.firstName} ${r.lastName}`.trim(),                                             color: C.text },
+        { label: 'Lead Source',   render: r => r.leadSource || '—',                                                               color: C.muted },
+        { label: 'Carrier',       render: r => r.carrier,                                                                         color: C.text },
+        { label: 'Product',       render: r => r.product || '—',                                                                  color: C.muted },
+        { label: 'Premium',       render: r => fmtDollar(r.premium, 2),                                                           color: C.green },
+        { label: 'Commission',    render: r => fmtDollar(r.commission, 2),                                                        color: C.accent },
+        { label: 'Gross Adv Rev', render: r => fmtDollar(r.grossAdvancedRevenue, 0),                                             color: C.green },
+        { label: 'Lead Cost',     render: r => getCallCost(r) > 0 ? fmtDollar(getCallCost(r), 2) : '—',                         color: C.yellow },
+        { label: 'Net Revenue',   render: r => { const n = (r.grossAdvancedRevenue||0) - getCallCost(r) - (r.commission||0); return fmtDollar(n, 2); }, color: r => ((r.grossAdvancedRevenue||0) - getCallCost(r) - (r.commission||0)) >= 0 ? C.green : C.red },
+        { label: 'Status',        render: r => r.placed,                                                                          color: r => isPlaced(r) ? C.green : C.muted },
+      ],
+      totals: [
+        'TOTAL', `${count} apps`, '', '', '', '',
+        fmtDollar(totalPrem, 2) + ` (avg ${fmtDollar(count > 0 ? totalPrem / count : 0, 2)})`,
+        fmtDollar(totalComm, 2) + ` (avg ${fmtDollar(count > 0 ? totalComm / count : 0, 2)})`,
+        fmtDollar(totalGAR, 0)  + ` (avg ${fmtDollar(count > 0 ? totalGAR  / count : 0, 0)})`,
+        fmtDollar(totalLeadSpend, 2),
+        fmtDollar(netRevenue, 2),
+        `${policies.filter(isPlaced).length} placed`,
+      ],
+    },
+    gross_adv_revenue: (() => {
+      const garRows = policies.filter(isPlaced).sort((a, b) => b.submitDate.localeCompare(a.submitDate));
+      const garTotalGAR  = garRows.reduce((s, r) => s + (r.grossAdvancedRevenue || 0), 0);
+      const garTotalComm = garRows.reduce((s, r) => s + (r.commission || 0), 0);
+      const garTotalSpend = garRows.reduce((s, r) => s + getCallCost(r), 0);
+      const garNet = garTotalGAR - garTotalSpend - garTotalComm;
+      const garCount = garRows.length;
+      return {
+        title: 'Gross Advanced Revenue — Placed Policies',
+        summary: `${garCount} placed policies in date range`,
+        financials: [
+          { label: 'Gross Adv Revenue', value: fmtDollar(garTotalGAR),   color: C.green },
+          { label: 'Lead Cost',         value: fmtDollar(garTotalSpend), color: C.yellow },
+          { label: 'Net Revenue',       value: fmtDollar(garNet),        color: garNet >= 0 ? C.green : C.red },
+        ],
+        rows: garRows,
+        columns: [
+          { label: 'Date',          render: r => r.submitDate,                                                                      color: C.muted },
+          { label: 'Agent',         render: r => r.agent,                                                                           color: C.text },
+          { label: 'Client',        render: r => `${r.firstName} ${r.lastName}`.trim(),                                             color: C.text },
+          { label: 'Carrier',       render: r => r.carrier,                                                                         color: C.text },
+          { label: 'Product',       render: r => r.product || '—',                                                                  color: C.muted },
+          { label: 'Premium',       render: r => fmtDollar(r.premium, 2),                                                           color: C.green },
+          { label: 'Adv Months',    render: r => r.premium > 0 ? Math.round(r.grossAdvancedRevenue / r.premium) + 'mo' : '—',      color: C.muted },
+          { label: 'Gross Adv Rev', render: r => fmtDollar(r.grossAdvancedRevenue, 0),                                             color: C.green },
+          { label: 'Commission',    render: r => fmtDollar(r.commission, 2),                                                        color: C.accent },
+          { label: 'Lead Cost',     render: r => getCallCost(r) > 0 ? fmtDollar(getCallCost(r), 2) : '—',                         color: C.yellow },
+          { label: 'Net Revenue',   render: r => { const n = (r.grossAdvancedRevenue||0) - getCallCost(r) - (r.commission||0); return fmtDollar(n, 2); }, color: r => ((r.grossAdvancedRevenue||0) - getCallCost(r) - (r.commission||0)) >= 0 ? C.green : C.red },
+          { label: 'Status',        render: r => r.placed,                                                                          color: () => C.green },
+        ],
+        totals: [
+          'TOTAL', `${garCount} placed`, '', '', '',
+          fmtDollar(garRows.reduce((s,r) => s+(r.premium||0),0), 2) + ` (avg ${fmtDollar(garCount > 0 ? garRows.reduce((s,r)=>s+(r.premium||0),0)/garCount : 0, 2)})`,
+          '',
+          fmtDollar(garTotalGAR, 0) + ` (avg ${fmtDollar(garCount > 0 ? garTotalGAR / garCount : 0, 0)})`,
+          fmtDollar(garTotalComm, 2),
+          fmtDollar(garTotalSpend, 2),
+          fmtDollar(garNet, 2),
+          '',
+        ],
+      };
+    })(),
+    total_calls: (() => {
+      const callRows = [...calls].sort((a, b) => (b.date||'').localeCompare(a.date||'') || (b.duration||0) - (a.duration||0));
+      const billable = callRows.filter(c => c.isBillable);
+      const totalSpend = callRows.reduce((s, c) => s + (c.cost || 0), 0);
+      const totalDur = callRows.reduce((s, c) => s + (c.duration || 0), 0);
+      const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
+      const callCount = callRows.length;
+      return {
+        title: 'Total Calls — All Calls',
+        summary: `${callCount} calls · ${billable.length} billable · ${fmtDollar(totalSpend)} spend`,
+        financials: [
+          { label: 'Total Calls',    value: fmt(callCount),           color: C.text },
+          { label: 'Billable Calls', value: fmt(billable.length),     color: C.green },
+          { label: 'Total Spend',    value: fmtDollar(totalSpend),   color: C.yellow },
+        ],
+        rows: callRows,
+        columns: [
+          { label: 'Date',      render: r => r.date,                                                      color: C.muted },
+          { label: 'Time',      render: r => r.callTime || '—',                                           color: C.muted },
+          { label: 'Agent',     render: r => r.rep || '—',                                                color: C.text },
+          { label: 'Campaign',  render: r => r.campaign || '—',                                           color: C.text },
+          { label: 'Status',    render: r => r.callStatus || '—',                                         color: C.muted },
+          { label: 'Type',      render: r => r.callType || '—',                                           color: C.muted },
+          { label: 'Duration',  render: r => fmtDur(r.duration),                                          color: r => r.isBillable ? C.green : C.muted },
+          { label: 'Buffer',    render: r => fmtDur(r.buffer),                                            color: () => C.muted },
+          { label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO',                            color: r => r.isBillable ? C.green : C.red },
+          { label: 'Cost',      render: r => r.cost > 0 ? fmtDollar(r.cost, 2) : '—',                   color: r => r.cost > 0 ? C.yellow : C.muted },
+          { label: 'State',     render: r => r.state || '—',                                              color: C.muted },
+          { label: 'Phone',     render: r => r.phone || '—',                                              color: C.muted },
+          { label: 'Lead ID',   render: r => r.leadId || '—',                                             color: C.muted },
+        ],
+        totals: [
+          'TOTAL', '', '', '', '', '',
+          fmtDur(totalDur) + ` (avg ${fmtDur(callCount > 0 ? Math.round(totalDur/callCount) : 0)})`,
+          '', `${billable.length} billable`,
+          fmtDollar(totalSpend, 2),
+          '', '', '',
+        ],
+      };
+    })(),
+  };
+
+  const cfg = MODAL_CONFIGS[tileKey];
+  if (!cfg) return null;
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{cfg.title}</h2>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{cfg.summary}</div>
+        {cfg.financials && (
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            {cfg.financials.map(f => (
+              <div key={f.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{f.label}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: f.color }}>{f.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ overflowX: 'auto', maxHeight: '60vh', overflowY: 'auto' }}>
+          <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead style={{ position: 'sticky', top: 0, background: C.card }}>
+              <tr>{cfg.columns.map(c => <th key={c.label} style={thStyle}>{c.label}</th>)}</tr>
+            </thead>
+            <tbody>
+              {cfg.rows.map((row, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${C.surface}88` }}>
+                  {cfg.columns.map(c => {
+                    const color = typeof c.color === 'function' ? c.color(row) : c.color;
+                    return <td key={c.label} style={tdStyle(color)}>{c.render(row)}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+            {cfg.totals && (
+              <tfoot>
+                <tr style={{ background: C.surface, borderTop: `2px solid ${C.border}` }}>
+                  {cfg.totals.map((val, i) => (
+                    <td key={i} style={{ padding: '8px 10px', fontSize: 11, fontFamily: C.mono, fontWeight: 700, color: i === 0 ? C.muted : C.text, whiteSpace: 'nowrap' }}>{val}</td>
+                  ))}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
+  const [activeTile, setActiveTile] = useState(null);
   const cg = goals?.company || {};
   const meta = goals?.companyMeta || {};
 
@@ -206,6 +408,8 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
   if (!cg || Object.keys(cg).length === 0) return null;
 
   return (
+    <>
+    {activeTile && <TileModal tileKey={activeTile} policies={policies} calls={calls} pnl={pnl} onClose={() => setActiveTile(null)} />}
     <Section title={`Goal Comparison — ${days} active day${days !== 1 ? 's' : ''}`}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rows.map((row, ri) => (
@@ -218,8 +422,9 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
               const pctLabel = pctOff !== null ? (pctOff >= 0 ? '+' + pctOff.toFixed(1) + '%' : pctOff.toFixed(1) + '%') : null;
               const tileColor = !periodGoal ? '#ffffff' : ratio >= 1 ? C.green : ratio >= (gm.yellow / 100) ? C.yellow : C.red;
               const tileBg = !periodGoal ? C.surface : ratio >= 1 ? C.greenDim : ratio >= (gm.yellow / 100) ? C.yellowDim : C.redDim;
+              const isClickable = !!MODAL_CONFIGS_KEYS.includes(g.key);
               return (
-                <div key={g.label} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}` }}>
+                <div key={g.label} onClick={isClickable ? () => setActiveTile(g.key) : undefined} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}`, cursor: isClickable ? 'pointer' : 'default', position: 'relative' }}>
                   <div style={{ fontSize: 9, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{g.label}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color: tileColor, lineHeight: 1 }}>{g.format(g.actual)}</span>
@@ -252,6 +457,7 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
                       <span style={{ fontSize: 10, fontFamily: C.mono, color: tileColor, minWidth: 36 }}>{ratio ? (ratio * 100).toFixed(0) + '%' : '—'}</span>
                     </div>
                   )}
+                  {isClickable && <div style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 9, color: C.muted, opacity: 0.6 }}>↗ detail</div>}
                 </div>
               );
             })}
@@ -259,6 +465,7 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
         ))}
       </div>
     </Section>
+    </>
   );
 }
 // ─── DAILY ACTIVITY TAB ────────────────────────────
@@ -941,7 +1148,7 @@ function PoliciesTab({ policies }) {
   );
 }
 // ─── AGENT PERFORMANCE TAB ──────────────────────────
-function AgentPerformanceTab({ dateRange }) {
+function AgentPerformanceTab({ dateRange, calls, policies }) {
   const [perfData, setPerfData] = useState(null);
   const [perfLoading, setPerfLoading] = useState(true);
   const [view, setView] = useState('agents');
@@ -968,6 +1175,23 @@ function AgentPerformanceTab({ dateRange }) {
   }
 
   const { daily, agents } = perfData;
+
+  // Billable calls and placed policies from dashboard data, keyed by agent and date
+  const billableByAgent = {};
+  const billableByDate = {};
+  const billableByAgentDate = {};
+  const placedByAgent = {};
+  (calls || []).forEach(c => {
+    if (c.isBillable) {
+      billableByAgent[c.rep] = (billableByAgent[c.rep] || 0) + 1;
+      billableByDate[c.date] = (billableByDate[c.date] || 0) + 1;
+      const k = c.rep + '|' + c.date;
+      billableByAgentDate[k] = (billableByAgentDate[k] || 0) + 1;
+    }
+  });
+  (policies || []).filter(isPlaced).forEach(p => {
+    placedByAgent[p.agent] = (placedByAgent[p.agent] || 0) + 1;
+  });
 
   function fmtTime(s) {
     if (!s) return '0:00:00';
@@ -1017,6 +1241,7 @@ function AgentPerformanceTab({ dateRange }) {
   });
   const dayRows = Object.values(byDay).map(d => {
     const available = d.loggedIn - d.paused;
+    const dayBillable = billableByDate[d.date] || 0;
     return {
       ...d,
       available,
@@ -1024,12 +1249,16 @@ function AgentPerformanceTab({ dateRange }) {
       pausePct: d.loggedIn > 0 ? (d.paused / d.loggedIn) * 100 : 0,
       talkPct: available > 0 ? (d.talkTime / available) * 100 : 0,
       connectsPerHour: d.hoursWorked > 0 ? d.connects / d.hoursWorked : 0,
-      conversionRate: d.connects > 0 ? (d.sales / d.connects) * 100 : 0,
+      billable: dayBillable,
+      billConvRate: dayBillable > 0 ? (d.sales / dayBillable) * 100 : 0,
       loggedInStr: fmtTime(d.loggedIn),
       pausedStr: fmtTime(d.paused),
       talkTimeStr: fmtTime(d.talkTime),
+      avgTalkTimeStr: fmtTime(d.connects > 0 ? Math.round(d.talkTime / d.connects) : 0),
       waitTimeStr: fmtTime(d.waitTime),
+      avgWaitTimeStr: fmtTime(d.connects > 0 ? Math.round(d.waitTime / d.connects) : 0),
       wrapUpStr: fmtTime(d.wrapUp),
+      avgWrapUpStr: fmtTime(d.connects > 0 ? Math.round(d.wrapUp / d.connects) : 0),
       availableStr: fmtTime(available),
     };
   }).sort((a, b) => b.date.localeCompare(a.date));
@@ -1054,7 +1283,7 @@ function AgentPerformanceTab({ dateRange }) {
           <KPICard label="Pause %" value={fmtPct(agg.pausePct)} subtitle={fmtTime(agg.paused)} />
           <KPICard label="Talk Time" value={fmtTime(agg.talkTime)} subtitle={`${fmtPct(agg.talkPct)} utilization`} />
           <KPICard label="Connects" value={fmt(agg.connects)} subtitle={`${agg.connectsPerHour.toFixed(1)}/hr`} />
-          <KPICard label="Sales" value={fmt(agg.sales)} subtitle={`${fmtPct(agg.conversionRate)} conv`} />
+          <KPICard label="Sales" value={fmt(agg.sales)} subtitle={`${(billableByAgent[drillAgent]||0) > 0 ? fmtPct(agg.sales/(billableByAgent[drillAgent]||1)*100) : '—'} bill conv`} />
         </div>
         {agg.pausePct > 30 && (
           <div style={{ background: C.redDim, border: `1px solid ${C.red}44`, borderRadius: 8, padding: '12px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1070,17 +1299,20 @@ function AgentPerformanceTab({ dateRange }) {
             { key: 'date', label: 'Date', align: 'left', bold: true },
             { key: 'dialed', label: 'Dialed' },
             { key: 'connects', label: 'Connects' },
-            { key: 'contacts', label: 'Contacts' },
+            { key: 'billable', label: 'Billable', render: r => fmt(billableByAgentDate[r.rep + '|' + r.date] || 0), color: r => (billableByAgentDate[r.rep + '|' + r.date] || 0) > 0 ? C.accent : C.muted },
             { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
-            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'billConv', label: 'Bill Conv%', render: r => { const b = billableByAgentDate[r.rep + '|' + r.date] || 0; return b > 0 ? fmtPct(r.sales / b * 100) : '—'; }, color: r => r.sales > 0 ? C.green : C.muted },
             { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
             { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'avgTalkTimeStr', label: 'Avg Talk' },
             { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
             { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
-            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
-            { key: 'loggedInStr', label: 'Logged In' },
             { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'avgWaitTimeStr', label: 'Avg Wait' },
             { key: 'wrapUpStr', label: 'Wrap Up' },
+            { key: 'avgWrapUpStr', label: 'Avg Wrap' },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
           ]} rows={agentDays} />
         </Section>
       </>
@@ -1136,17 +1368,20 @@ function AgentPerformanceTab({ dateRange }) {
             { key: 'rep', label: 'Agent', align: 'left', bold: true, mono: false },
             { key: 'dialed', label: 'Dialed' },
             { key: 'connects', label: 'Connects' },
-            { key: 'contacts', label: 'Contacts' },
+            { key: 'billable', label: 'Billable', render: r => fmt(billableByAgentDate[r.rep + '|' + r.date] || 0), color: r => (billableByAgentDate[r.rep + '|' + r.date] || 0) > 0 ? C.accent : C.muted },
             { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
-            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'billConv', label: 'Bill Conv%', render: r => { const b = billableByAgentDate[r.rep + '|' + r.date] || 0; return b > 0 ? fmtPct(r.sales / b * 100) : '—'; }, color: r => r.sales > 0 ? C.green : C.muted },
             { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
             { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'avgTalkTimeStr', label: 'Avg Talk' },
             { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
             { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
-            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
-            { key: 'loggedInStr', label: 'Logged In' },
             { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'avgWaitTimeStr', label: 'Avg Wait' },
             { key: 'wrapUpStr', label: 'Wrap Up' },
+            { key: 'avgWrapUpStr', label: 'Avg Wrap' },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
           ]} rows={dayAgents} />
         </Section>
       </>
@@ -1162,7 +1397,7 @@ function AgentPerformanceTab({ dateRange }) {
         <KPICard label="Overall Pause %" value={fmtPct(overallPausePct)} subtitle={fmtTime(totalPaused)} />
         <KPICard label="Talk Utilization" value={fmtPct(overallTalkPct)} subtitle={fmtTime(totalTalk)} />
         <KPICard label="Total Connects" value={fmt(totalConnects)} subtitle={`${totalHours > 0 ? (totalConnects / totalHours).toFixed(1) : 0}/hr`} />
-        <KPICard label="Total Sales" value={fmt(totalSales)} subtitle={`${totalConnects > 0 ? ((totalSales / totalConnects) * 100).toFixed(1) : 0}% conv`} />
+        <KPICard label="Total Sales" value={fmt(totalSales)} subtitle={`${Object.values(billableByAgent).reduce((s,v)=>s+v,0) > 0 ? ((totalSales / Object.values(billableByAgent).reduce((s,v)=>s+v,0)) * 100).toFixed(1) : 0}% bill conv`} />
         <KPICard label="Total Dialed" value={fmt(totalDialed)} />
       </div>
 
@@ -1204,16 +1439,21 @@ function AgentPerformanceTab({ dateRange }) {
             { key: 'days', label: 'Days' },
             { key: 'dialed', label: 'Dialed' },
             { key: 'connects', label: 'Connects' },
+            { key: 'billable', label: 'Billable', render: r => fmt(billableByAgent[r.rep] || 0), color: r => (billableByAgent[r.rep] || 0) > 0 ? C.accent : C.muted },
             { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
-            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'placed', label: 'Placed', render: r => fmt(placedByAgent[r.rep] || 0), color: r => (placedByAgent[r.rep] || 0) > 0 ? C.green : C.muted },
+            { key: 'billConv', label: 'Bill Conv%', render: r => { const b = billableByAgent[r.rep] || 0; return b > 0 ? fmtPct(r.sales / b * 100) : '—'; }, color: r => (billableByAgent[r.rep] || 0) > 0 ? C.green : C.muted },
             { key: 'connHr', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
             { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'avgTalkTimeStr', label: 'Avg Talk' },
             { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
             { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
-            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
-            { key: 'loggedInStr', label: 'Logged In' },
             { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'avgWaitTimeStr', label: 'Avg Wait' },
             { key: 'wrapUpStr', label: 'Wrap Up' },
+            { key: 'avgWrapUpStr', label: 'Avg Wrap' },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
           ]} rows={agents} />
         </Section>
       )}
@@ -1225,17 +1465,20 @@ function AgentPerformanceTab({ dateRange }) {
             { key: 'rep', label: 'Agent', align: 'left', bold: true, mono: false },
             { key: 'dialed', label: 'Dialed' },
             { key: 'connects', label: 'Connects' },
-            { key: 'contacts', label: 'Contacts' },
+            { key: 'billable', label: 'Billable', render: r => fmt(billableByAgentDate[r.rep + '|' + r.date] || 0), color: r => (billableByAgentDate[r.rep + '|' + r.date] || 0) > 0 ? C.accent : C.muted },
             { key: 'sales', label: 'Sales', color: r => r.sales > 0 ? C.green : C.muted },
-            { key: 'convRate', label: 'Conv %', render: r => fmtPct(r.conversionRate), color: r => r.conversionRate > 0 ? C.green : C.muted },
+            { key: 'billConv', label: 'Bill Conv%', render: r => { const b = billableByAgentDate[r.rep + '|' + r.date] || 0; return b > 0 ? fmtPct(r.sales / b * 100) : '—'; }, color: r => r.sales > 0 ? C.green : C.muted },
             { key: 'connectsPerHour', label: 'Conn/Hr', render: r => r.connectsPerHour.toFixed(1) },
             { key: 'talkTimeStr', label: 'Talk Time' },
+            { key: 'avgTalkTimeStr', label: 'Avg Talk' },
             { key: 'pausedStr', label: 'Paused', color: r => pauseColor(r.pausePct) },
             { key: 'pausePct', label: 'Pause %', render: r => fmtPct(r.pausePct), color: r => pauseColor(r.pausePct) },
-            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
-            { key: 'loggedInStr', label: 'Logged In' },
             { key: 'waitTimeStr', label: 'Wait Time' },
+            { key: 'avgWaitTimeStr', label: 'Avg Wait' },
             { key: 'wrapUpStr', label: 'Wrap Up' },
+            { key: 'avgWrapUpStr', label: 'Avg Wrap' },
+            { key: 'loggedInStr', label: 'Logged In' },
+            { key: 'availPct', label: 'Avail %', render: r => fmtPct(r.availPct), color: r => availColor(r.availPct) },
           ]} rows={daily.sort((a, b) => b.date.localeCompare(a.date) || a.rep.localeCompare(b.rep))} />
         </Section>
       )}
@@ -1259,6 +1502,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
   const { policies, calls, pnl } = data;
   return (
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans }}>
+      <style>{`input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }`}</style>
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '12px 24px', position: 'sticky', top: 0, zIndex: 50 }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1272,7 +1516,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
-              {[{ id: 'yesterday', label: 'Yest' }, { id: 'today', label: 'Today' }, { id: 'last7', label: '7D' }, { id: 'last30', label: '30D' }, { id: 'mtd', label: 'MTD' }, { id: 'all', label: 'All' }].map(p => (
+              {[{ id: 'yesterday', label: 'Yest' }, { id: 'today', label: 'Today' }, { id: 'last7', label: '7D' }, { id: 'last30', label: '30D' }, { id: 'mtd', label: 'MTD' }, { id: 'wtd', label: 'WTD' }, { id: 'all', label: 'All' }].map(p => (
                 <button key={p.id} onClick={() => applyPreset(p.id)} style={{
                   padding: '5px 10px', borderRadius: 4, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                   background: dateRange.preset === p.id ? C.accent : 'transparent', color: dateRange.preset === p.id ? '#fff' : C.muted,
@@ -1300,7 +1544,7 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
       </div>
     </div>
   );

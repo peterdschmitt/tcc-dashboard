@@ -136,6 +136,7 @@ export async function GET(request) {
       .filter(r => r['Date'])
       .map(r => {
         const date = parseFlexDate(r['Date']);
+        const callTime = (r['Date'] || '').split(/\s+/).slice(1).join(' ').trim() || '';
         const rawCampaign = r['Campaign']?.trim() || '';
         const normalized = normalizeCampaign(rawCampaign);
         const rep = fuzzyMatchAgent(r['Rep']?.trim(), allAgentNames);
@@ -146,7 +147,7 @@ export async function GET(request) {
         const computedBillable = callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
         const isBillable = overrideRaw === 'N' ? false : overrideRaw === 'Y' ? true : computedBillable;
         return {
-          date, rep, campaign: rawCampaign, campaignCode: normalized,
+          date, callTime, rep, campaign: rawCampaign, campaignCode: normalized,
           vendor: priceInfo.vendor || '', isBillable, billableOverride: overrideRaw,
           _rowIndex: r._rowIndex,
           isSale: (r['Call Status'] || '').trim().toLowerCase() === 'sale',

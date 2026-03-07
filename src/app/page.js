@@ -15,7 +15,7 @@ export default function Home() {
 
   const applyPreset = useCallback((preset) => {
     const today = new Date();
-    const fmt = d => d.toISOString().slice(0, 10);
+    const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     let start, end;
     if (preset === 'yesterday') {
       const y = new Date(); y.setDate(y.getDate() - 1);
@@ -27,6 +27,10 @@ export default function Home() {
       start = fmt(s); end = fmt(today);
     } else if (preset === 'last30') {
       const s = new Date(); s.setDate(s.getDate() - 29);
+      start = fmt(s); end = fmt(today);
+    } else if (preset === 'wtd') {
+      const day = today.getDay(); // 0=Sun, 1=Mon, ...
+      const s = new Date(today); s.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
       start = fmt(s); end = fmt(today);
     } else if (preset === 'mtd') {
       start = fmt(new Date(today.getFullYear(), today.getMonth(), 1));

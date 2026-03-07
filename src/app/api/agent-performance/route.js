@@ -125,6 +125,9 @@ export async function GET(request) {
         connectsPerHour: a.hoursWorked > 0 ? a.connects / a.hoursWorked : 0,
         slaPerHour: a.hoursWorked > 0 ? a.sales / a.hoursWorked : 0,
         conversionRate: a.connects > 0 ? (a.sales / a.connects) * 100 : 0,
+        avgTalkTimeStr: fmtSec(a.connects > 0 ? Math.round(a.talkTime / a.connects) : 0),
+        avgWaitTimeStr: fmtSec(a.connects > 0 ? Math.round(a.waitTime / a.connects) : 0),
+        avgWrapUpStr: fmtSec(a.connects > 0 ? Math.round(a.wrapUp / a.connects) : 0),
       };
     });
 
