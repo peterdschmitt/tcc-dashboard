@@ -12,17 +12,23 @@ export const C = {
 
 export function fmt(n, d = 0) {
   if (n == null || isNaN(n)) return '—';
-  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const num = typeof n === 'number' ? n : parseFloat(n);
+  if (isNaN(num)) return '—';
+  const digits = (typeof d === 'number' && !isNaN(d)) ? Math.max(0, Math.min(20, Math.floor(d))) : 0;
+  return num.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 export function fmtDollar(n, d = 0) {
   if (n == null || isNaN(n)) return '—';
-  return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const num = typeof n === 'number' ? n : parseFloat(n);
+  if (isNaN(num)) return '—';
+  const digits = (typeof d === 'number' && !isNaN(d)) ? Math.max(0, Math.min(20, Math.floor(d))) : 0;
+  return (num < 0 ? '-$' : '$') + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 export function fmtPct(n) {
   if (n == null || isNaN(n)) return '—';
-  return n.toFixed(1) + '%';
+  return parseFloat(n).toFixed(1) + '%';
 }
 
 export function goalColor(actual, goal, lower = false, yellowPct = 80) {
@@ -46,7 +52,28 @@ export const isPlaced = p => ['Advance Released', 'Active - In Force', 'Submitte
 
 // CRM-specific status colors
 export const STATUS_COLORS = {
-  // Lead statuses
+  // Dialer Call Status values (lead disposition)
+  'SALE': C.green,
+  'CONVERTED': C.green,
+  'CALLBACK': C.yellow,
+  'CALLBK': C.yellow,
+  'DNC': C.red,
+  'DNCC': C.red,
+  'NI': C.muted,
+  'NA': C.muted,
+  'NO ANSWER': C.muted,
+  'VOICEMAIL': C.muted,
+  'VM': C.muted,
+  'BUSY': C.muted,
+  'B': C.muted,
+  'HANGUP': C.red,
+  'DROP': '#666',
+  'DEAD': '#666',
+  'DEC': C.red,
+  'XFER': C.accent,
+  'A': C.accent,
+  'UNKNOWN': '#555',
+  // Legacy lead statuses
   'New': C.accent,
   'Contacted': C.yellow,
   'Follow-Up': C.purple,

@@ -1,5 +1,7 @@
 node_modules/
 .next/
+.next.bak/
+*.xlsx
 .env.local
 .env*.local
 *.tsbuildinfo

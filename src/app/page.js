@@ -4,6 +4,7 @@ import Dashboard from '@/components/Dashboard';
 
 export default function Home() {
   const [data, setData] = useState(null);
+  const [allTimePolicies, setAllTimePolicies] = useState([]);
   const [goals, setGoals] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -12,6 +13,7 @@ export default function Home() {
   const [dateRange, setDateRange] = useState({
     start: '2020-01-01', end: '2030-12-31', preset: 'all'
   });
+  const [dataSource, setDataSource] = useState('Sheet1');
 
   const applyPreset = useCallback((preset) => {
     const today = new Date();
@@ -45,6 +47,16 @@ export default function Home() {
     setDateRange(r => ({ ...r, [field]: value, preset: 'custom' }));
   }, []);
 
+  // One-time fetch of all-time policies (for status breakdown widget — ignores date range)
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/dashboard?start=2020-01-01&end=2030-12-31&source=' + dataSource)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d?.policies) setAllTimePolicies(d.policies); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [dataSource]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -52,7 +64,7 @@ export default function Home() {
       setError(null);
       try {
         const [dashRes, goalsRes] = await Promise.all([
-          fetch('/api/dashboard?start=' + dateRange.start + '&end=' + dateRange.end),
+          fetch('/api/dashboard?start=' + dateRange.start + '&end=' + dateRange.end + '&source=' + dataSource),
           fetch('/api/goals'),
         ]);
         if (!dashRes.ok) throw new Error('Dashboard API: ' + dashRes.status);
@@ -67,7 +79,7 @@ export default function Home() {
     }
     load();
     return () => { cancelled = true; };
-  }, [dateRange]);
+  }, [dateRange, dataSource]);
 
   if (error) {
     return (
@@ -88,11 +100,14 @@ export default function Home() {
   return (
     <Dashboard
       data={data}
+      allTimePolicies={allTimePolicies}
       goals={goals}
       loading={loading}
       dateRange={dateRange}
       applyPreset={applyPreset}
       setCustomRange={setCustomRange}
+      dataSource={dataSource}
+      setDataSource={setDataSource}
     />
   );
 }

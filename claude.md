@@ -339,3 +339,54 @@ Direct file downloads from Claude's interface may not overwrite existing files (
 1. **Lead ID in Daily Drill-Down** — `Lead Id` field from call logs is now mapped in the call object and shown as a column in the daily drill-down calls table.
 2. **Removed Caller and Client ID columns** — Daily drill-down calls table now shows: Campaign, Agent, Status, Call Type, Duration, Buffer, Billable?, Cost, $/Call, State, Phone, Lead ID.
 3. **Agent Performance tab** — Reads from `AGENT_PERF_SHEET_ID` (dialer report sheet). Must be set in Vercel environment variables for the tab to work in production.
+4. **CRM System** — Lead CRM, Retention Dashboard, Business Health tabs with carrier sync integration.
+5. **Carrier Reconciliation API** — `/api/crm/compare` compares DetailedProduction carrier report against Application tracker, shows record-level differences and economic impact.
+6. **Merged Economics Tab** — Carrier-corrected economics system. The dashboard reads from a `Merged` tab (set via `SALES_TAB_NAME=Merged`) that mirrors Sheet1 but with carrier-corrected premium and status values. Original Sheet1 is preserved as historical record.
+
+---
+
+## Merged Economics Architecture
+
+### Data Flow
+```
+Sheet1 (original agent-submitted data, never modified)
+    ↓ (copied once as baseline)
+Merged tab (carrier-corrected, dashboard reads this via SALES_TAB_NAME)
+    ↑ (updated by carrier sync with updateMerged=true)
+Carrier Report (DetailedProduction)
+
+Change History tab (append-only audit log of every field change)
+```
+
+### How It Works
+- **First sync**: Copies all Sheet1 data → Merged tab, adds 7 audit columns
+- **Subsequent syncs**: Matches carrier records to Merged rows using 3-tier matching (policy number → name+agent fuzzy → no match), updates economics where different
+- **Trigger**: POST `/api/crm/carrier-sync` with `{ updateMerged: true }` in body (checkbox in Retention tab sync bar)
+- **Dashboard reads**: All 6 economics API routes read from `SALES_TAB_NAME` env var, which now points to `Merged`
+
+### Merged Tab Columns (7 audit columns appended after Sheet1 columns)
+| Column | Purpose |
+|--------|---------|
+| `Original Premium` | Agent-submitted premium, set once on first carrier override, never overwritten |
+| `Original Placed Status` | Original `Placed?` value before carrier correction |
+| `Carrier Policy #` | Carrier's internal policy number (for cross-reference) |
+| `Carrier Status` | Raw carrier status (Active, Canceled, Declined, Pending) |
+| `Carrier Status Date` | Date carrier status was last seen/changed |
+| `Last Sync Date` | When this row was last checked against carrier data |
+| `Sync Notes` | Human-readable change log with dates |
+
+### Change History Tab (append-only audit log)
+Headers: Date, Policy #, Carrier Policy #, Insured Name, Agent, Field Changed, Old Value, New Value, Source
+
+### Matching Strategy
+- **Tier 1**: Exact match on `Policy #` (Sales) vs `Policy No.` (Carrier) — works for AIG, Transamerica
+- **Tier 2**: Fuzzy name+agent match — Last name (exact or edit distance ≤1) + First name (exact, nickname, starts-with, or edit distance ≤1) + optional agent match for confidence boost. Handles American Amicable which uses different policy numbering systems.
+- **Minimum confidence**: 55% (score/90) required for Tier 2 matches
+
+### Status Mapping (Carrier → Placed?)
+- `Active`, `Reinstated` → `Active - In Force`
+- `Pending` → `Submitted - Pending`
+- `Canceled`, `Cancelled`, `Terminated`, `Lapsed`, `Declined`, `Not Taken`, `Rejected` → `Declined`
+
+### Reverting to Original Data
+To temporarily use original agent-submitted data: change `SALES_TAB_NAME=Sheet1` in `.env.local` and restart. All economics APIs will read from the unmodified Sheet1.

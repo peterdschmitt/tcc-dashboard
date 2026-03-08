@@ -3,6 +3,7 @@ import { useState, useMemo, useEffect } from 'react';
 import LeadCRMTab from './tabs/LeadCRMTab';
 import RetentionDashboardTab from './tabs/RetentionDashboardTab';
 import BusinessHealthTab from './tabs/BusinessHealthTab';
+import CarrierSyncTab from './tabs/CarrierSyncTab';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -19,7 +20,7 @@ const TABS = [
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },  { id: 'commissions', label: 'Commissions' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -837,7 +838,62 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
   );
 }
 
-function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
+function PolicyStatusMini({ allTimePolicies, rangePolicies }) {
+  const clf = p => {
+    const s = p.placed;
+    if (s === 'Advance Released' || s === 'Active - In Force') return 'active';
+    if (s === 'Submitted - Pending') return 'pending';
+    return 'left';
+  };
+  const breakdown = ps => {
+    const total = ps.length;
+    const active = ps.filter(p => clf(p) === 'active').length;
+    const pending = ps.filter(p => clf(p) === 'pending').length;
+    const left = ps.filter(p => clf(p) === 'left').length;
+    return { total, active, pending, left };
+  };
+  const all = breakdown(allTimePolicies);
+  const range = breakdown(rangePolicies);
+  const pct = (n, t) => t > 0 ? (n / t * 100).toFixed(0) + '%' : '—';
+
+  const Panel = ({ label, d }) => {
+    const aPct = d.total > 0 ? d.active / d.total * 100 : 0;
+    const pPct = d.total > 0 ? d.pending / d.total * 100 : 0;
+    const lPct = d.total > 0 ? d.left / d.total * 100 : 0;
+    return (
+      <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+          {label} <span style={{ color: C.accent, fontFamily: C.mono }}>{d.total}</span> submitted
+        </div>
+        {/* Stacked bar */}
+        <div style={{ height: 6, borderRadius: 3, overflow: 'hidden', display: 'flex', marginBottom: 8, background: C.border }}>
+          <div style={{ width: `${aPct}%`, background: C.green }} />
+          <div style={{ width: `${pPct}%`, background: C.yellow }} />
+          <div style={{ width: `${lPct}%`, background: C.red }} />
+        </div>
+        {/* Rows */}
+        {[['Active', d.active, C.green], ['Pending', d.pending, C.yellow], ['Left', d.left, C.red]].map(([lbl, count, color]) => (
+          <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: C.muted, flex: 1 }}>{lbl}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, fontFamily: C.mono, color }}>{count}</span>
+            <span style={{ fontSize: 10, fontFamily: C.mono, color: C.muted, minWidth: 34, textAlign: 'right' }}>{pct(count, d.total)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 24, padding: '12px 16px', borderTop: `1px solid ${C.border}`, background: C.surface }}>
+      <Panel label="All Time —" d={all} />
+      <div style={{ width: 1, background: C.border }} />
+      <Panel label="Selected Range —" d={range} />
+    </div>
+  );
+}
+
+function GoalComparison({ policies, calls, pnl, goals, dateRange, allTimePolicies }) {
   const [activeTile, setActiveTile] = useState(null);
   const cg = goals?.company || {};
   const meta = goals?.companyMeta || {};
@@ -950,12 +1006,13 @@ function GoalComparison({ policies, calls, pnl, goals, dateRange }) {
           </div>
         ))}
       </div>
+      <PolicyStatusMini allTimePolicies={allTimePolicies} rangePolicies={policies} />
     </Section>
     </>
   );
 }
 // ─── DAILY ACTIVITY TAB ────────────────────────────
-function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
+function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolicies }) {
   const [drillDay, setDrillDay] = useState(null);
   const [overrides, setOverrides] = useState({}); // rowIndex → 'N' | 'Y' | ''
   const [flagging, setFlagging] = useState(null); // rowIndex currently being saved
@@ -1004,7 +1061,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
 
   return (
     <>
-      <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
+      <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />
       {drillDay ? (() => {
         const rawDayCalls = calls.filter(c => c.date === drillDay).sort((a, b) => b.duration - a.duration);
         // Apply local overrides on top of server-side data
@@ -1101,7 +1158,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange }) {
 }
 
 // ─── PUBLISHERS TAB ─────────────────────────────────
-function PublishersTab({ pnl, policies, goals, calls, dateRange }) {
+function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies }) {
   const [drill, setDrill] = useState(null);
   const cg = goals?.company || {};
 
@@ -1204,7 +1261,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange }) {
 }
 
 // ─── AGENTS TAB ──────────────────────────────────────
-function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
+function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) {
   const [drill, setDrill] = useState(null);
   const days = calcDays(dateRange.start, dateRange.end);
   const ag = goals?.agent || {};
@@ -1316,7 +1373,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl }) {
 }
 
 // ─── CARRIERS TAB ────────────────────────────────────
-function CarriersTab({ policies, goals, calls, dateRange, pnl }) {
+function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }) {
   const [drill, setDrill] = useState(null);
 
   // Group by Carrier + Product + Payout
@@ -1399,7 +1456,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl }) {
 }
 
 // ─── P&L TAB ─────────────────────────────────────────
-function PnlTab({ pnl, policies, calls, goals }) {
+function PnlTab({ pnl, policies, calls, goals, allTimePolicies }) {
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
@@ -1415,7 +1472,7 @@ function PnlTab({ pnl, policies, calls, goals }) {
 
   return (
     <>
-      <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
+      <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />
       <Section title="Publisher P&L Detail">
         <SortableTable defaultSort="netRevenue" columns={[
           { key: 'campaign', label: 'Publisher', align: 'left', bold: true, mono: false },
@@ -2418,7 +2475,7 @@ function AgentPerformanceTab({ dateRange, calls, policies }) {
   );
 }
 // ─── MAIN DASHBOARD ──────────────────────────────────
-export default function Dashboard({ data, goals, loading, dateRange, applyPreset, setCustomRange }) {
+export default function Dashboard({ data, allTimePolicies, goals, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource }) {
   const [activeTab, setActiveTab] = useState('daily');
   if (loading || !data) {
     return (
@@ -2445,6 +2502,12 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
             <a href="/trends" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>📈 Trends</a>
             <a href="/settings" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>⚙ Settings</a>
             <button onClick={async () => { await fetch("/api/clear-cache", { method: "POST" }); window.location.reload(); }} style={{ padding: "6px 14px", borderRadius: 5, fontSize: 11, fontWeight: 600, background: "#2e0a0a", color: "#f87171", border: "1px solid #f8717133", cursor: "pointer" }}>🗑 Clear Cache</button>
+            {dataSource && setDataSource && (
+              <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
+                <button onClick={() => setDataSource('Sheet1')} style={{ padding: '5px 10px', borderRadius: 4, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer', background: dataSource === 'Sheet1' ? C.yellow : 'transparent', color: dataSource === 'Sheet1' ? '#000' : C.muted }}>App Data</button>
+                <button onClick={() => setDataSource('Merged')} style={{ padding: '5px 10px', borderRadius: 4, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer', background: dataSource === 'Merged' ? C.green : 'transparent', color: dataSource === 'Merged' ? '#000' : C.muted }}>Carrier Data</button>
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
@@ -2472,14 +2535,15 @@ export default function Dashboard({ data, goals, loading, dateRange, applyPreset
         </div>
       </div>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
-        {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />}
-        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} />}
-        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}
+        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}
+        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
+        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} allTimePolicies={allTimePolicies || []} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
         {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
-        {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} />}
+        {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
+        {activeTab === 'carrier-sync' && <CarrierSyncTab />}
       </div>
     </div>
   );

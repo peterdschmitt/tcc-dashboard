@@ -13,9 +13,20 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('start');
     const endDate = searchParams.get('end');
+    const requestedTab = searchParams.get('source') || process.env.SALES_TAB_NAME || 'Sheet1';
 
-    const [salesRaw, callsRaw, commRaw, pricingRaw, agentGoalsRaw] = await Promise.all([
-      fetchSheet(process.env.SALES_SHEET_ID, process.env.SALES_TAB_NAME || 'Sheet1'),
+    // Try requested tab first, fall back to Sheet1 if it doesn't exist
+    let salesRaw;
+    let sourceTab = requestedTab;
+    try {
+      salesRaw = await fetchSheet(process.env.SALES_SHEET_ID, requestedTab);
+    } catch (e) {
+      console.warn(`[dashboard] Tab "${requestedTab}" failed (${e.message}), falling back to Sheet1`);
+      sourceTab = 'Sheet1';
+      salesRaw = await fetchSheet(process.env.SALES_SHEET_ID, 'Sheet1');
+    }
+
+    const [callsRaw, commRaw, pricingRaw, agentGoalsRaw] = await Promise.all([
       fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report'),
       fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1'),
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing'),
@@ -250,7 +261,7 @@ export async function GET(request) {
 
     return NextResponse.json({
       policies, calls, pnl,
-      meta: { policyCount: policies.length, callCount: calls.length, dateRange: { start: startDate, end: endDate } },
+      meta: { policyCount: policies.length, callCount: calls.length, dateRange: { start: startDate, end: endDate }, sourceTab },
     });
   } catch (error) {
     console.error('Dashboard data API error:', error);

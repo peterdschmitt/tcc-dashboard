@@ -117,13 +117,64 @@ export default function BusinessHealthTab({ dateRange }) {
   if (error) return <div style={{ color: C.red, textAlign: 'center', padding: 40 }}>Error: {error}</div>;
   if (!healthData) return <div style={{ color: C.muted, textAlign: 'center', padding: 40 }}>No data available</div>;
 
-  const {
-    totalActiveMembers = 0, totalPremiumInForce = 0, atRiskMembers = 0, lapsedThisMonth = 0, winBackSuccesses = 0,
-    monthlyLapseRate = 0, winBackRate = 0, persistencyRate = 0, avgPolicyLifespan = 0, revenueAtRisk = 0,
-    topDefectingCarrier = '—', topLapseReason = '—', highestLapseAgent = '—', highestLapseRate = 0,
-    bestRetentionAgent = '—', bestRetentionRate = 0, outreachDueToday = 0,
-    lapseReasonBreakdown = [], carriers = [], timeSeries = []
-  } = healthData;
+  // Map API response to UI fields
+  const c = healthData.current || {};
+  const byCarrier = healthData.byCarrier || [];
+  const byAgent = healthData.byAgent || [];
+  const lapseReasonBreakdown = healthData.lapseReasons || [];
+  const timeSeries = healthData.timeSeries || [];
+
+  const totalActiveMembers = c.activeMembers || 0;
+  const totalPremiumInForce = c.totalActivePremium || 0;
+  const atRiskMembers = c.atRiskMembers || 0;
+  const lapsedThisMonth = c.lapsedThisPeriod || 0;
+  const winBackSuccesses = c.winBackSuccesses || 0;
+  const winBackAttempts = c.winBackAttempts || 0;
+  const monthlyLapseRate = c.lapseRate || 0;
+  const winBackRate = winBackAttempts > 0 ? (winBackSuccesses / winBackAttempts * 100) : 0;
+  const persistencyRate = 0; // Requires persistency data
+  const avgPolicyLifespan = 0; // Requires time series data
+  const revenueAtRisk = c.revenueAtRisk || 0;
+  const outreachDueToday = 0; // TODO: compute from tasks
+
+  // Derived highlights
+  const topDefectingCarrier = byCarrier.length > 0
+    ? byCarrier.reduce((a, b) => (b.lapsed > a.lapsed ? b : a), byCarrier[0]).carrier
+    : '—';
+  const topLapseReason = lapseReasonBreakdown.length > 0
+    ? lapseReasonBreakdown.reduce((a, b) => (b.count > a.count ? b : a), lapseReasonBreakdown[0]).reason
+    : '—';
+  const agentsWithLapses = byAgent.filter(a => (a.active + a.lapsed) > 0);
+  const highestLapseAgent = agentsWithLapses.length > 0
+    ? agentsWithLapses.reduce((a, b) => {
+        const aRate = a.lapsed / (a.active + a.lapsed);
+        const bRate = b.lapsed / (b.active + b.lapsed);
+        return bRate > aRate ? b : a;
+      }, agentsWithLapses[0])
+    : null;
+  const bestRetentionAgent = agentsWithLapses.length > 0
+    ? agentsWithLapses.reduce((a, b) => {
+        const aRate = a.active / (a.active + a.lapsed);
+        const bRate = b.active / (b.active + b.lapsed);
+        return bRate > aRate ? b : a;
+      }, agentsWithLapses[0])
+    : null;
+  const highestLapseAgentName = highestLapseAgent ? highestLapseAgent.agent : '—';
+  const highestLapseRate = highestLapseAgent ? (highestLapseAgent.lapsed / (highestLapseAgent.active + highestLapseAgent.lapsed) * 100) : 0;
+  const bestRetentionAgentName = bestRetentionAgent ? bestRetentionAgent.agent : '—';
+  const bestRetentionRate = bestRetentionAgent ? (bestRetentionAgent.active / (bestRetentionAgent.active + bestRetentionAgent.lapsed) * 100) : 0;
+  const carriers = byCarrier.map(c => {
+    const total = c.active + c.lapsed + c.atRisk;
+    return {
+      carrier: c.carrier,
+      activeMembers: c.active,
+      lapsedMembers: c.lapsed,
+      lapseRate: total > 0 ? (c.lapsed / total * 100) : 0,
+      premiumInForce: c.premium,
+      revenueAtRisk: c.atRisk * (c.premium / (c.active || 1)),
+      persistencyRate: total > 0 ? (c.active / total * 100) : 0,
+    };
+  });
 
   return (
     <div>
@@ -152,8 +203,8 @@ export default function BusinessHealthTab({ dateRange }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <GoalTile label="Top Defecting Carrier" value={topDefectingCarrier} goal="" />
           <GoalTile label="Top Lapse Reason" value={topLapseReason} goal="" />
-          <GoalTile label="Highest Lapse Agent" value={`${highestLapseAgent} (${fmtPct(highestLapseRate)})`} goal="" />
-          <GoalTile label="Best Retention Agent" value={`${bestRetentionAgent} (${fmtPct(bestRetentionRate)})`} goal="" />
+          <GoalTile label="Highest Lapse Agent" value={`${highestLapseAgentName} (${fmtPct(highestLapseRate)})`} goal="" />
+          <GoalTile label="Best Retention Agent" value={`${bestRetentionAgentName} (${fmtPct(bestRetentionRate)})`} goal="" />
           <GoalTile label="Outreach Due Today" value={fmt(outreachDueToday)} goal="" />
         </div>
       </Section>
