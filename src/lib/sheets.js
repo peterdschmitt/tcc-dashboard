@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 
 let cachedAuth = null;
 const cache = {};
+const inflight = {}; // Request coalescing: reuse in-flight promises for the same sheet+tab
 
 export async function getAuth() {
   if (cachedAuth) return cachedAuth;
@@ -105,47 +106,66 @@ export async function deleteRow(sheetId, tabName, rowNumber) {
 }
 
 export async function fetchSheet(sheetId, tabName, ttl) {
-  const cacheTTL = ttl || parseInt(process.env.CACHE_TTL || '900');
+  // TTL=0 means "no cache" — but we still coalesce concurrent requests.
+  // TTL=undefined/null uses the env default.
+  const cacheTTL = ttl === 0 ? 0 : (ttl || parseInt(process.env.CACHE_TTL || '900'));
   const key = `${sheetId}:${tabName}`;
   const now = Date.now();
-  if (cache[key] && now - cache[key].ts < cacheTTL * 1000) return cache[key].data;
 
-  const auth = await getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: tabName });
-  const rows = res.data.values || [];
-  if (rows.length < 2) return [];
+  // Return cached data if still fresh
+  if (cacheTTL > 0 && cache[key] && now - cache[key].ts < cacheTTL * 1000) return cache[key].data;
 
-  // Find the header row: scan first 15 rows, pick the one with the
-  // most non-empty cells that are short (under 60 chars = likely labels)
-  let headerIdx = 0;
-  let bestScore = 0;
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const row = rows[i] || [];
-    const score = row.filter(c => {
-      const t = (c || '').trim();
-      return t.length > 0 && t.length < 60;
-    }).length;
-    if (score > bestScore) {
-      bestScore = score;
-      headerIdx = i;
+  // Request coalescing: if an identical fetch is already in-flight, reuse it
+  // This prevents parallel calls (e.g. page load + goals + agent-perf) from
+  // each making their own Google API request for the same sheet
+  if (inflight[key]) return inflight[key];
+
+  const promise = (async () => {
+    const auth = await getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: tabName });
+    const rows = res.data.values || [];
+    if (rows.length < 2) return [];
+
+    // Find the header row: scan first 15 rows, pick the one with the
+    // most non-empty cells that are short (under 60 chars = likely labels)
+    let headerIdx = 0;
+    let bestScore = 0;
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const row = rows[i] || [];
+      const score = row.filter(c => {
+        const t = (c || '').trim();
+        return t.length > 0 && t.length < 60;
+      }).length;
+      if (score > bestScore) {
+        bestScore = score;
+        headerIdx = i;
+      }
     }
+
+    console.log('[sheets] ' + tabName + ': header at row ' + headerIdx + ', cols = ' + rows[headerIdx].filter(Boolean).join(' | '));
+
+    const headers = rows[headerIdx].map(h => (h || '').trim());
+    const rawDataRows = rows.slice(headerIdx + 1);
+    const data = rawDataRows.reduce((acc, row, ri) => {
+      if (!row.some(c => c)) return acc;
+      const obj = { _rowIndex: headerIdx + ri + 2 }; // 1-based sheet row number
+      headers.forEach((h, i) => { if (h) obj[h] = (row[i] || '').trim(); });
+      acc.push(obj);
+      return acc;
+    }, []);
+
+    // Always cache the result (even for TTL=0 routes, other routes benefit)
+    cache[key] = { data, ts: Date.now() };
+    return data;
+  })();
+
+  inflight[key] = promise;
+  try {
+    return await promise;
+  } finally {
+    delete inflight[key];
   }
-
-  console.log('[sheets] ' + tabName + ': header at row ' + headerIdx + ', cols = ' + rows[headerIdx].filter(Boolean).join(' | '));
-
-  const headers = rows[headerIdx].map(h => (h || '').trim());
-  const rawDataRows = rows.slice(headerIdx + 1);
-  const data = rawDataRows.reduce((acc, row, ri) => {
-    if (!row.some(c => c)) return acc;
-    const obj = { _rowIndex: headerIdx + ri + 2 }; // 1-based sheet row number
-    headers.forEach((h, i) => { if (h) obj[h] = (row[i] || '').trim(); });
-    acc.push(obj);
-    return acc;
-  }, []);
-
-  cache[key] = { data, ts: now };
-  return data;
 }
 
 export function colIndexToLetter(n) {

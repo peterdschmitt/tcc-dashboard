@@ -8,8 +8,9 @@ export default function Home() {
   const [goals, setGoals] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [earliestDate, setEarliestDate] = useState(null);
 
-  // Default to ALL so data shows immediately
+  // Default to ALL so data shows immediately — uses wide range until we know the real earliest date
   const [dateRange, setDateRange] = useState({
     start: '2020-01-01', end: '2030-12-31', preset: 'all'
   });
@@ -38,24 +39,23 @@ export default function Home() {
       start = fmt(new Date(today.getFullYear(), today.getMonth(), 1));
       end = fmt(today);
     } else if (preset === 'all') {
-      start = '2020-01-01'; end = '2030-12-31';
+      start = earliestDate || '2020-01-01'; end = fmt(today);
     } else return;
     setDateRange({ start, end, preset });
-  }, []);
+  }, [earliestDate]);
 
   const setCustomRange = useCallback((field, value) => {
     setDateRange(r => ({ ...r, [field]: value, preset: 'custom' }));
   }, []);
 
-  // One-time fetch of all-time policies (for status breakdown widget — ignores date range)
+  // Once we know the earliest date, update the "All" preset range
   useEffect(() => {
-    let cancelled = false;
-    fetch('/api/dashboard?start=2020-01-01&end=2030-12-31&source=' + dataSource)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled && d?.policies) setAllTimePolicies(d.policies); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [dataSource]);
+    if (earliestDate && dateRange.preset === 'all') {
+      const today = new Date();
+      const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      setDateRange({ start: earliestDate, end: fmt(today), preset: 'all' });
+    }
+  }, [earliestDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +63,9 @@ export default function Home() {
       setLoading(true);
       setError(null);
       try {
+        const isAllRange = dateRange.preset === 'all' ||
+          (dateRange.start === '2020-01-01' && dateRange.end === '2030-12-31');
+
         const [dashRes, goalsRes] = await Promise.all([
           fetch('/api/dashboard?start=' + dateRange.start + '&end=' + dateRange.end + '&source=' + dataSource),
           fetch('/api/goals'),
@@ -71,7 +74,16 @@ export default function Home() {
         if (!goalsRes.ok) throw new Error('Goals API: ' + goalsRes.status);
         const dashData = await dashRes.json();
         const goalsData = await goalsRes.json();
-        if (!cancelled) { setData(dashData); setGoals(goalsData); }
+        if (!cancelled) {
+          setData(dashData);
+          setGoals(goalsData);
+          // When fetching all-time data, reuse it for the status breakdown widget
+          // instead of making a separate API call
+          if (isAllRange && dashData.policies) {
+            setAllTimePolicies(dashData.policies);
+          }
+          if (dashData.meta?.earliestDate) setEarliestDate(dashData.meta.earliestDate);
+        }
       } catch (err) {
         if (!cancelled) setError(err.message);
       }
@@ -80,6 +92,21 @@ export default function Home() {
     load();
     return () => { cancelled = true; };
   }, [dateRange, dataSource]);
+
+  // Fetch all-time policies only when using a filtered date range (not "all")
+  // This avoids the double-fetch on initial load since "all" is the default
+  useEffect(() => {
+    if (dateRange.preset === 'all' || (dateRange.start === '2020-01-01' && dateRange.end === '2030-12-31')) return;
+    if (allTimePolicies.length > 0) return; // Already have all-time data from initial load
+    let cancelled = false;
+    fetch('/api/dashboard?start=2020-01-01&end=2030-12-31&source=' + dataSource)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!cancelled && d?.policies) setAllTimePolicies(d.policies);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [dataSource]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) {
     return (

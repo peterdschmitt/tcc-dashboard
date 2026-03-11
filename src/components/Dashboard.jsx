@@ -4,6 +4,8 @@ import LeadCRMTab from './tabs/LeadCRMTab';
 import RetentionDashboardTab from './tabs/RetentionDashboardTab';
 import BusinessHealthTab from './tabs/BusinessHealthTab';
 import CarrierSyncTab from './tabs/CarrierSyncTab';
+import DataDiffTab from './tabs/DataDiffTab';
+import DatePicker from './shared/DatePicker';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -20,7 +22,7 @@ const TABS = [
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },  { id: 'commissions', label: 'Commissions' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -2140,6 +2142,7 @@ function PolicyStatusTab({ policies, calls }) {
 function AgentPerformanceTab({ dateRange, calls, policies }) {
   const [perfData, setPerfData] = useState(null);
   const [perfLoading, setPerfLoading] = useState(true);
+  const [perfError, setPerfError] = useState(null);
   const [view, setView] = useState('agents');
   const [drillAgent, setDrillAgent] = useState(null);
   const [drillDay, setDrillDay] = useState(null);
@@ -2148,20 +2151,39 @@ function AgentPerformanceTab({ dateRange, calls, policies }) {
     let cancelled = false;
     async function load() {
       setPerfLoading(true);
+      setPerfError(null);
       try {
         const res = await fetch('/api/agent-performance?start=' + dateRange.start + '&end=' + dateRange.end);
+        if (!res.ok) throw new Error('API returned ' + res.status);
         const data = await res.json();
+        if (data.meta?.error) throw new Error(data.meta.error);
         if (!cancelled) setPerfData(data);
-      } catch (e) { console.error('[agent-perf] load error:', e); }
+      } catch (e) {
+        console.error('[agent-perf] load error:', e);
+        if (!cancelled) setPerfError(e.message);
+      }
       if (!cancelled) setPerfLoading(false);
     }
     load();
     return () => { cancelled = true; };
   }, [dateRange]);
 
-  if (perfLoading || !perfData) {
+  if (perfLoading) {
     return <div style={{ padding: 40, textAlign: 'center', color: C.muted }}>Loading agent performance data...</div>;
   }
+
+  if (perfError) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.red, marginBottom: 8 }}>Agent Performance Error</div>
+        <div style={{ fontSize: 12, color: C.muted, maxWidth: 500, margin: '0 auto' }}>{perfError}</div>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 12 }}>Make sure <code style={{ background: C.card, padding: '2px 6px', borderRadius: 3 }}>AGENT_PERF_SHEET_ID</code> is set in your environment variables.</div>
+      </div>
+    );
+  }
+
+  if (!perfData) return null;
 
   const { daily, agents } = perfData;
 
@@ -2491,7 +2513,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
   const { policies, calls, pnl } = data;
   return (
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans }}>
-      <style>{`input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }`}</style>
+      {/* White calendar date pickers rendered below */}
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '12px 24px', position: 'sticky', top: 0, zIndex: 50 }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -2509,7 +2531,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
               {[{ id: 'yesterday', label: 'Yest' }, { id: 'today', label: 'Today' }, { id: 'last7', label: '7D' }, { id: 'last30', label: '30D' }, { id: 'mtd', label: 'MTD' }, { id: 'wtd', label: 'WTD' }, { id: 'all', label: 'All' }].map(p => (
                 <button key={p.id} onClick={() => applyPreset(p.id)} style={{
@@ -2518,9 +2540,11 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
                 }}>{p.label}</button>
               ))}
             </div>
-            <input type="date" value={dateRange.start} onChange={e => setCustomRange('start', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: C.mono, outline: 'none', width: 150, cursor: 'pointer' }} />
-            <span style={{ color: C.muted, fontSize: 10 }}>–</span>
-            <input type="date" value={dateRange.end} onChange={e => setCustomRange('end', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: C.mono, outline: 'none', width: 150, cursor: 'pointer' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <DatePicker value={dateRange.start} onChange={v => setCustomRange('start', v)} />
+              <span style={{ color: C.muted, fontSize: 12, fontWeight: 600 }}>to</span>
+              <DatePicker value={dateRange.end} onChange={v => setCustomRange('end', v)} />
+            </div>
           </div>
         </div>
       </div>
@@ -2543,6 +2567,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
         {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
+        {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
       </div>
     </div>

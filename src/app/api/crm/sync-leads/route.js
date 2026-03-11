@@ -21,9 +21,9 @@ export async function POST(request) {
 
     // Fetch call logs, pricing (for billable calc), and existing leads
     const [callsRaw, pricingRaw, leadsRaw] = await Promise.all([
-      fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report', 0),
-      fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing', 300),
-      fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.LEADS_TAB_NAME || 'Leads', 0).catch(() => []),
+      fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report', 120),
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing', 600),
+      fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.LEADS_TAB_NAME || 'Leads', 120).catch(() => []),
     ]);
 
     // Build pricing lookup for billable determination

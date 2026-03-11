@@ -28,9 +28,9 @@ export async function GET(request) {
 
     const [callsRaw, commRaw, pricingRaw, agentGoalsRaw] = await Promise.all([
       fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report'),
-      fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1'),
-      fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing'),
-      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals').catch(() => []),
+      fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600), // Commission rates rarely change — 1hr cache
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing', 3600), // Pricing rarely changes — 1hr cache
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals', 1800).catch(() => []), // Agent goals — 30min cache
     ]);
 
     const commissionRates = commRaw
@@ -89,21 +89,46 @@ export async function GET(request) {
         const isGIWL = (carrier + ' ' + product).toLowerCase().includes('giwl');
         const agentNameRaw = (r['Agent'] || '').trim();
         const isSalaried = salaryAgents.has(agentNameRaw.toLowerCase());
+
+        // Look up carrier payout rate from commission rates sheet (used for GAR)
+        // This is the % the carrier pays the agency on each premium dollar
+        let carrierPayoutRate = 0;
+        if (premium > 0) {
+          const sheetCommission = calcCommission(premium, carrier, product, age, commissionRates);
+          if (sheetCommission > 0) {
+            carrierPayoutRate = sheetCommission / premium;
+          }
+          // Debug: log GIWL lookup results
+          if (isGIWL) {
+            console.log(`[dashboard] GIWL lookup: carrier="${carrier}" product="${product}" age=${age} sheetCommission=${sheetCommission} carrierPayoutRate=${carrierPayoutRate}`);
+          }
+          // If no sheet match, leave at 0 — GAR will just be premium × months (no rate markup)
+        }
+
+        // Agent commission: what the agency pays the agent
+        // Uses carrier payout rate if found in sheet, otherwise falls back to standard multipliers
         let commission = 0;
         let commissionRate = 0;
         if (!isSalaried && premium > 0) {
-          commission = calcCommission(premium, carrier, product, age, commissionRates);
-          if (commission === 0) {
-            // Fallback to hardcoded if no sheet rate matched
-            commission = isGIWL ? premium * 1.5 : premium * 3;
+          if (carrierPayoutRate > 0) {
+            commission = premium * carrierPayoutRate;
+            commissionRate = carrierPayoutRate;
+          } else {
+            // Fallback: GIWL = 1.5×, all others = 3× (agent commission multiplier)
+            const fallbackRate = isGIWL ? 1.5 : 3;
+            commission = premium * fallbackRate;
+            commissionRate = fallbackRate;
           }
-          commissionRate = commission / premium;
         }
+
+        // GAR: carrier payout. Uses carrier rate from sheet if available, otherwise just premium × months
         const leadSource = r['Lead Source']?.trim() || '';
         const months = advanceMonths(carrier);
-        const grossAdvancedRevenue = premium * months;
+        const grossAdvancedRevenue = carrierPayoutRate > 0
+          ? premium * carrierPayoutRate * months
+          : premium * months;
 
-        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} commission=${commission} ${isGIWL ? '(GIWL)' : ''}`);
+        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} carrierPayoutRate=${carrierPayoutRate} commission=${commission.toFixed(2)} commRate=${commissionRate} GAR=${grossAdvancedRevenue.toFixed(2)} months=${months} ${isGIWL ? '(GIWL)' : ''}`);
 
         const phoneRaw = String(r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
         const phone = phoneRaw.length === 10
@@ -185,6 +210,9 @@ export async function GET(request) {
       agentGoalsRaw
     ).catch(e => console.error('[dashboard] Agent sync failed:', e.message));
 
+    // Compute earliest submission date before filtering (for "All" preset start date)
+    const earliestDate = policies.reduce((min, p) => p.submitDate && (!min || p.submitDate < min) ? p.submitDate : min, null);
+
     if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
     if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }
 
@@ -261,7 +289,7 @@ export async function GET(request) {
 
     return NextResponse.json({
       policies, calls, pnl,
-      meta: { policyCount: policies.length, callCount: calls.length, dateRange: { start: startDate, end: endDate }, sourceTab },
+      meta: { policyCount: policies.length, callCount: calls.length, dateRange: { start: startDate, end: endDate }, earliestDate, sourceTab },
     });
   } catch (error) {
     console.error('Dashboard data API error:', error);

@@ -166,6 +166,15 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
     return { rate: r, score, ageOk, cOverlap, pOverlap };
   }).filter(Boolean).filter(s => s.score > 0.15);
 
+  // Debug: log matching attempts for GIWL
+  const isGIWLDebug = (carrier + ' ' + (product || '')).toLowerCase().includes('giwl');
+  if (isGIWLDebug) {
+    console.log(`[calcCommission] GIWL input: carrier="${carrier}" product="${product}" age=${age}`);
+    console.log(`[calcCommission] GIWL carrier words:`, getWords(carrier));
+    console.log(`[calcCommission] GIWL product words:`, getWords(product || ''));
+    console.log(`[calcCommission] GIWL scored matches:`, scored.map(s => `${s.rate.carrier}/${s.rate.product} score=${s.score.toFixed(3)} cO=${s.cOverlap.toFixed(2)} pO=${s.pOverlap.toFixed(2)} ageOk=${s.ageOk}`));
+  }
+
   if (scored.length === 0) return 0;
 
   // Prefer age-matched entries, then by score
@@ -175,6 +184,9 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
   });
 
   const best = scored[0];
+  if (isGIWLDebug) {
+    console.log(`[calcCommission] GIWL best match: ${best.rate.carrier}/${best.rate.product} rate=${best.rate.commissionRate} result=${(premium * best.rate.commissionRate).toFixed(2)}`);
+  }
   return premium * best.rate.commissionRate;
 }
 

@@ -12,9 +12,9 @@ export async function GET() {
   try {
     // Fetch both data sources in parallel
     const [carrierData, salesData, commissionData] = await Promise.all([
-      fetchSheet(process.env.CARRIER_REPORT_SHEET_ID, process.env.CARRIER_REPORT_TAB_NAME || 'Policies', 0),
-      fetchSheet(process.env.SALES_SHEET_ID, process.env.SALES_TAB_NAME || 'Sheet1', 0),
-      fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 0),
+      fetchSheet(process.env.CARRIER_REPORT_SHEET_ID, process.env.CARRIER_REPORT_TAB_NAME || 'Policies', 120),
+      fetchSheet(process.env.SALES_SHEET_ID, process.env.SALES_TAB_NAME || 'Sheet1', 120),
+      fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 600),
     ]);
 
     // ── Build carrier report lookup by policy number ──
