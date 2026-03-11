@@ -848,6 +848,7 @@ function PolicyStatusMini({ allTimePolicies, rangePolicies }) {
     return 'left';
   };
   const breakdown = ps => {
+    if (!ps) return { total: 0, active: 0, pending: 0, left: 0 };
     const total = ps.length;
     const active = ps.filter(p => clf(p) === 'active').length;
     const pending = ps.filter(p => clf(p) === 'pending').length;
@@ -895,7 +896,10 @@ function PolicyStatusMini({ allTimePolicies, rangePolicies }) {
   );
 }
 
-function GoalComparison({ policies, calls, pnl, goals, dateRange, allTimePolicies }) {
+function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, dateRange, allTimePolicies }) {
+  const policies = _policies || [];
+  const calls = _calls || [];
+  const pnl = _pnl || [];
   const [activeTile, setActiveTile] = useState(null);
   const cg = goals?.company || {};
   const meta = goals?.companyMeta || {};
@@ -1458,7 +1462,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }
 }
 
 // ─── P&L TAB ─────────────────────────────────────────
-function PnlTab({ pnl, policies, calls, goals, allTimePolicies }) {
+function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange }) {
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
@@ -2510,7 +2514,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
       </div>
     );
   }
-  const { policies, calls, pnl } = data;
+  const { policies = [], calls = [], pnl = [] } = data || {};
   return (
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans }}>
       {/* White calendar date pickers rendered below */}
@@ -2563,7 +2567,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} allTimePolicies={allTimePolicies || []} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
         {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
         {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
