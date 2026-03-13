@@ -30,11 +30,17 @@ export async function GET(request) {
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals', 1800).catch(() => []), // Agent goals — 30min cache
     ]);
 
+    // Log commission sheet columns so we can see what's available
+    if (commRaw.length > 0) {
+      console.log('[dashboard] Commission sheet columns:', Object.keys(commRaw[0]).filter(k => k !== '_rowIndex').join(', '));
+    }
+
     const commissionRates = commRaw
       .filter(r => r['Carrier'] && r['Commission Rate'])
       .map(r => {
-        // Parse advance length from "Advance Length" column (e.g. "9 months", "6", etc.)
-        const advMonthsRaw = r['Advance Length'] || '';
+        // Flexibly find the "Advance Length" column (handles case variations, extra spaces)
+        const advKey = Object.keys(r).find(k => /advance\s*length/i.test(k));
+        const advMonthsRaw = advKey ? r[advKey] : '';
         const advMonthsParsed = parseInt(advMonthsRaw.toString().replace(/[^0-9]/g, '')) || 0;
         return {
           carrier: r['Carrier']?.trim(),

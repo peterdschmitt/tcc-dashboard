@@ -117,7 +117,7 @@ export function parseDuration(raw) {
 }
 
 export function calcCommission(premium, carrier, product, age, commissionRates) {
-  if (!commissionRates || !carrier) return 0;
+  if (!commissionRates || !carrier) return { commission: 0, rate: 0, advanceMonths: 9, matched: false };
   const NOISE = new Set(['the','a','an','of','and','or','for','-','–','life','insurance','final','expense']);
   function getWords(s) { return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !NOISE.has(w)); }
   function wordOverlap(a, b) {
@@ -166,14 +166,7 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
     return { rate: r, score, ageOk, cOverlap, pOverlap };
   }).filter(Boolean).filter(s => s.score > 0.15);
 
-  // Debug: log matching attempts for GIWL
-  const isGIWLDebug = (carrier + ' ' + (product || '')).toLowerCase().includes('giwl');
-  if (isGIWLDebug) {
-    console.log(`[calcCommission] GIWL input: carrier="${carrier}" product="${product}" age=${age}`);
-    console.log(`[calcCommission] GIWL carrier words:`, getWords(carrier));
-    console.log(`[calcCommission] GIWL product words:`, getWords(product || ''));
-    console.log(`[calcCommission] GIWL scored matches:`, scored.map(s => `${s.rate.carrier}/${s.rate.product} score=${s.score.toFixed(3)} cO=${s.cOverlap.toFixed(2)} pO=${s.pOverlap.toFixed(2)} ageOk=${s.ageOk}`));
-  }
+  // Debug logging removed — was for GIWL investigation (resolved)
 
   if (scored.length === 0) return { commission: 0, rate: 0, advanceMonths: 9, matched: false };
 
@@ -184,9 +177,6 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
   });
 
   const best = scored[0];
-  if (isGIWLDebug) {
-    console.log(`[calcCommission] GIWL best match: ${best.rate.carrier}/${best.rate.product} rate=${best.rate.commissionRate} advMonths=${best.rate.advanceMonths} result=${(premium * best.rate.commissionRate).toFixed(2)}`);
-  }
   return {
     commission: premium * best.rate.commissionRate,
     rate: best.rate.commissionRate,

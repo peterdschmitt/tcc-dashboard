@@ -245,7 +245,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Carrier',       render: r => r.carrier,                                                                         color: C.text },
           { label: 'Product',       render: r => r.product || '—',                                                                  color: C.muted },
           { label: 'Premium',       render: r => fmtDollar(r.premium, 2),                                                           color: C.green },
-          { label: 'Adv Months',    render: r => r.premium > 0 ? Math.round(r.grossAdvancedRevenue / r.premium) + 'mo' : '—',      color: C.muted },
+          { label: 'Rate',          render: r => r.commissionRate ? (r.commissionRate * 100).toFixed(0) + '%' : '—',               color: C.accent },
+          { label: 'Adv Months',    render: r => r.advanceMonths ? r.advanceMonths + 'mo' : '—',                                    color: C.muted },
           { label: 'Gross Adv Rev', render: r => fmtDollar(r.grossAdvancedRevenue, 0),                                             color: C.green },
           { label: 'Commission',    render: r => fmtDollar(r.commission, 2),                                                        color: C.accent },
           { label: 'Lead Cost',     render: r => getCallCost(r) > 0 ? fmtDollar(getCallCost(r), 2) : '—',                         color: C.yellow },
@@ -255,7 +256,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
         totals: [
           'TOTAL', `${garCount} placed`, '', '', '',
           fmtDollar(garRows.reduce((s,r) => s+(r.premium||0),0), 2) + ` (avg ${fmtDollar(garCount > 0 ? garRows.reduce((s,r)=>s+(r.premium||0),0)/garCount : 0, 2)})`,
-          '',
+          '', '',
           fmtDollar(garTotalGAR, 0) + ` (avg ${fmtDollar(garCount > 0 ? garTotalGAR / garCount : 0, 0)})`,
           fmtDollar(garTotalComm, 2),
           fmtDollar(garTotalSpend, 2),
