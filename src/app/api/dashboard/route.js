@@ -36,7 +36,7 @@ export async function GET(request) {
     }
 
     const commissionRates = commRaw
-      .filter(r => r['Carrier'] && r['Commission Rate'])
+      .filter(r => r['Carrier'] && r['Commission Rate'] != null && r['Commission Rate'] !== '')
       .map(r => {
         // Flexibly find the "Advance Length" column (handles case variations, extra spaces)
         const advKey = Object.keys(r).find(k => /advance\s*length/i.test(k));
@@ -92,9 +92,19 @@ export async function GET(request) {
         }
         const premium = parseFloat(r['Monthly Premium']) || 0;
         const carrierProductRaw = r['Carrier + Product + Payout'] || r['Carrier'] || '';
-        const cpParts = carrierProductRaw.split(',').map(s => s.trim());
-        const carrier = cpParts[0] || '';
-        const product = cpParts.slice(1).join(', ').trim() || '';
+        let carrier, product;
+        if (carrierProductRaw.includes(',')) {
+          const cpParts = carrierProductRaw.split(',').map(s => s.trim());
+          carrier = cpParts[0] || '';
+          product = cpParts.slice(1).join(', ').trim() || '';
+        } else {
+          // No comma — split on " - " to separate carrier from product
+          // e.g. "CICA FE - GIWL - Premiums +10% in first 2 year"
+          //    → carrier = "CICA FE", product = "GIWL - Premiums +10% in first 2 year"
+          const dashParts = carrierProductRaw.split(/\s+-\s+/);
+          carrier = dashParts[0] || '';
+          product = dashParts.slice(1).join(' - ').trim() || '';
+        }
         const isGIWL = (carrier + ' ' + product).toLowerCase().includes('giwl');
         const agentNameRaw = (r['Agent'] || '').trim();
         const isSalaried = salaryAgents.has(agentNameRaw.toLowerCase());
@@ -107,19 +117,16 @@ export async function GET(request) {
         const carrierPayoutRate = commResult.rate;
         const months = commResult.advanceMonths;
 
-        // Agent commission: what the agency pays the agent
+        // Commission rate from sheet (always stored for display, even for salaried agents)
+        let commissionRate = carrierPayoutRate;
+        if (!commResult.matched && premium > 0) {
+          commissionRate = isGIWL ? 1.5 : 3; // fallback
+        }
+
+        // Agent commission: what the agency pays the agent (salaried agents = $0)
         let commission = 0;
-        let commissionRate = 0;
         if (!isSalaried && premium > 0) {
-          if (commResult.matched) {
-            commission = commResult.commission;
-            commissionRate = carrierPayoutRate;
-          } else {
-            // Fallback: GIWL = 1.5×, all others = 3× (agent commission multiplier)
-            const fallbackRate = isGIWL ? 1.5 : 3;
-            commission = premium * fallbackRate;
-            commissionRate = fallbackRate;
-          }
+          commission = premium * commissionRate;
         }
 
         // GAR: premium × carrier rate × advance months (all from commission rates sheet)

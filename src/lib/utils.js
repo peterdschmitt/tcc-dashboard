@@ -127,9 +127,19 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
     return shared / Math.min(wa.length, wb.length);
   }
 
-  const policyHasGraded = (product || '').toLowerCase().includes('graded');
-  const policyHasRop = (product || '').toLowerCase().includes('rop');
-  const carrierWords = getWords(carrier);
+  // Product aliases: policy term → commission sheet term (and vice versa)
+  const PRODUCT_ALIASES = {
+    'giwl': 'gi',         // Guaranteed Issue Whole Life = FE GI
+    'siwl': 'siwl',       // Simplified Issue Whole Life
+  };
+
+  // Combine carrier + product for full-text matching (handles cases where product info is in carrier field)
+  const fullPolicyText = (carrier + ' ' + (product || '')).toLowerCase();
+
+  const policyHasGraded = fullPolicyText.includes('graded');
+  const policyHasRop = fullPolicyText.includes('rop');
+  const policyHasGIWL = fullPolicyText.includes('giwl');
+  const policyHasSIWL = fullPolicyText.includes('siwl');
 
   // Score each commission rate entry
   const scored = commissionRates.map(r => {
@@ -138,22 +148,39 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
     if (cOverlap < 0.4) return null; // must share significant carrier words
 
     // Product match: word overlap between policy product and commission product
-    const pOverlap = wordOverlap(product || '', r.product);
+    // Also check carrier field for product keywords (some policies put everything in carrier)
+    const productText = product || '';
+    let pOverlap = wordOverlap(productText, r.product);
+
+    // If product overlap is low, also try matching against the full carrier+product string
+    if (pOverlap < 0.3) {
+      const fullOverlap = wordOverlap(carrier + ' ' + productText, r.carrier + ' ' + r.product);
+      if (fullOverlap > pOverlap) pOverlap = fullOverlap;
+    }
+
+    // Product alias matching: GIWL ↔ GI, etc.
+    const commProductLower = r.product.toLowerCase();
+    let aliasBonus = 0;
+    if (policyHasGIWL && (commProductLower.includes(' gi') || commProductLower.endsWith('gi'))) aliasBonus = 0.8;
+    if (policyHasSIWL && commProductLower.includes('siwl')) aliasBonus = 0.8;
 
     // Bonus: if graded/rop alignment
-    const commHasGraded = r.product.toLowerCase().includes('graded');
-    const commHasRop = r.product.toLowerCase().includes('rop');
-    const commHasImmediate = r.product.toLowerCase().includes('immediate') || r.product.toLowerCase().includes('standard');
+    const commHasGraded = commProductLower.includes('graded');
+    const commHasRop = commProductLower.includes('rop');
+    const commHasImmediate = commProductLower.includes('immediate') || commProductLower.includes('standard');
+    const commHasGI = commProductLower.includes(' gi') || commProductLower.endsWith('gi');
     let typeBonus = 0;
     if (policyHasGraded && commHasGraded) typeBonus = 0.3;
     else if (policyHasRop && commHasRop) typeBonus = 0.3;
-    else if (!policyHasGraded && !policyHasRop && commHasImmediate) typeBonus = 0.2;
-    else if (!policyHasGraded && !policyHasRop && !commHasGraded && !commHasRop) typeBonus = 0.1;
+    else if (policyHasGIWL && commHasGI) typeBonus = 0.4; // GIWL → GI match
+    else if (!policyHasGraded && !policyHasRop && !policyHasGIWL && commHasImmediate) typeBonus = 0.2;
+    else if (!policyHasGraded && !policyHasRop && !policyHasGIWL && !commHasGraded && !commHasRop && !commHasGI) typeBonus = 0.1;
     // Penalty if type mismatch
     if (policyHasGraded && !commHasGraded) typeBonus = -0.5;
-    if (!policyHasGraded && !policyHasRop && commHasGraded) typeBonus = -0.3;
+    if (!policyHasGraded && !policyHasRop && !policyHasGIWL && commHasGraded) typeBonus = -0.3;
+    if (policyHasGIWL && !commHasGI && commHasImmediate) typeBonus = -0.3; // GIWL should not match Standard/Immediate
 
-    const score = cOverlap * 0.4 + pOverlap * 0.4 + typeBonus * 0.2;
+    const score = cOverlap * 0.3 + pOverlap * 0.3 + typeBonus * 0.2 + aliasBonus * 0.2;
 
     // Age match
     let ageOk = true;
