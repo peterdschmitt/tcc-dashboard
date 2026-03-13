@@ -484,8 +484,8 @@ function TabSetupHelper({ section }) {
       example: ['John Smith', '3', '500', '5%'],
     },
     commission: {
-      headers: ['Carrier', 'Product', 'Age Range', 'Commission Rate'],
-      example: ['American Amicable', 'Senior Choice', '50-70', '135%'],
+      headers: ['Carrier', 'Product', 'Age Range', 'Commission Rate', 'Advance Length'],
+      example: ['American Amicable', 'Senior Choice', '50-70', '135%', '9'],
     },
   };
 

@@ -175,7 +175,7 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
     console.log(`[calcCommission] GIWL scored matches:`, scored.map(s => `${s.rate.carrier}/${s.rate.product} score=${s.score.toFixed(3)} cO=${s.cOverlap.toFixed(2)} pO=${s.pOverlap.toFixed(2)} ageOk=${s.ageOk}`));
   }
 
-  if (scored.length === 0) return 0;
+  if (scored.length === 0) return { commission: 0, rate: 0, advanceMonths: 9, matched: false };
 
   // Prefer age-matched entries, then by score
   scored.sort((a, b) => {
@@ -185,9 +185,16 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
 
   const best = scored[0];
   if (isGIWLDebug) {
-    console.log(`[calcCommission] GIWL best match: ${best.rate.carrier}/${best.rate.product} rate=${best.rate.commissionRate} result=${(premium * best.rate.commissionRate).toFixed(2)}`);
+    console.log(`[calcCommission] GIWL best match: ${best.rate.carrier}/${best.rate.product} rate=${best.rate.commissionRate} advMonths=${best.rate.advanceMonths} result=${(premium * best.rate.commissionRate).toFixed(2)}`);
   }
-  return premium * best.rate.commissionRate;
+  return {
+    commission: premium * best.rate.commissionRate,
+    rate: best.rate.commissionRate,
+    advanceMonths: best.rate.advanceMonths || 9,
+    matched: true,
+    matchedCarrier: best.rate.carrier,
+    matchedProduct: best.rate.product,
+  };
 }
 
 // ── Carrier → Sales sheet status mapping ──────────────────────────

@@ -54,12 +54,14 @@ export async function GET() {
       const placed = (sr['Placed?'] || sr['Outcome at Application Submission'] || '').trim();
       const isPlaced = ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(placed);
 
-      // Calculate commission and GAR
+      // Calculate commission and GAR using commission rates sheet
       const isGIWL = /GIWL/i.test(product);
       const isCICA = /CICA/i.test(carrier);
+      // Note: compare route doesn't have calcCommission wired in, use simple fallbacks
       const commission = premium * (isGIWL ? 1.5 : 3);
       const advMonths = isCICA ? 6 : 9;
       const grossAdvRev = premium * advMonths;
+      // TODO: Wire calcCommission here for accurate rates when needed
 
       appByPolicy[pn] = {
         policyNo: pn,

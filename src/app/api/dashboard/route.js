@@ -3,10 +3,7 @@ import { fetchSheet, ensureAgentsExist } from '@/lib/sheets';
 import { parseFlexDate, normalizePlacedStatus, normalizeCampaign, parseDuration, fuzzyMatchAgent, calcCommission } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
-function advanceMonths(carrier) {
-  if (!carrier) return 9;
-  return carrier.toLowerCase().includes('cica') ? 6 : 9;
-}
+// advanceMonths is now read from the commission rates sheet via calcCommission()
 
 export async function GET(request) {
   try {
@@ -35,12 +32,18 @@ export async function GET(request) {
 
     const commissionRates = commRaw
       .filter(r => r['Carrier'] && r['Commission Rate'])
-      .map(r => ({
-        carrier: r['Carrier']?.trim(),
-        product: r['Product']?.trim(),
-        ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
-        commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
-      }));
+      .map(r => {
+        // Parse advance length from "Advance Length" column (e.g. "9 months", "6", etc.)
+        const advMonthsRaw = r['Advance Length'] || '';
+        const advMonthsParsed = parseInt(advMonthsRaw.toString().replace(/[^0-9]/g, '')) || 0;
+        return {
+          carrier: r['Carrier']?.trim(),
+          product: r['Product']?.trim(),
+          ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
+          commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
+          advanceMonths: advMonthsParsed > 0 ? advMonthsParsed : 9, // default 9 if not specified
+        };
+      });
 
     const pricing = {};
     pricingRaw.forEach(r => {
@@ -66,7 +69,7 @@ export async function GET(request) {
 
     const allAgentNames = [...new Set(salesRaw.map(r => r['Agent']?.trim()).filter(Boolean))];
 
-    console.log('[dashboard] Commission rates:', commissionRates.map(r => `${r.carrier}/${r.product}/${r.ageRange}=${(r.commissionRate*100).toFixed(0)}%`).join(', '));
+    console.log('[dashboard] Commission rates:', commissionRates.map(r => `${r.carrier}/${r.product}/${r.ageRange}=${(r.commissionRate*100).toFixed(0)}%/${r.advanceMonths}mo`).join(', '));
     console.log('[dashboard] Sales columns:', salesRaw.length > 0 ? Object.keys(salesRaw[0]).join(', ') : 'NO DATA');
     console.log('[dashboard] First row carrier field:', salesRaw.length > 0 ? JSON.stringify(salesRaw[0]['Carrier + Product + Payout']) : 'N/A');
 
@@ -90,28 +93,20 @@ export async function GET(request) {
         const agentNameRaw = (r['Agent'] || '').trim();
         const isSalaried = salaryAgents.has(agentNameRaw.toLowerCase());
 
-        // Look up carrier payout rate from commission rates sheet (used for GAR)
-        // This is the % the carrier pays the agency on each premium dollar
-        let carrierPayoutRate = 0;
-        if (premium > 0) {
-          const sheetCommission = calcCommission(premium, carrier, product, age, commissionRates);
-          if (sheetCommission > 0) {
-            carrierPayoutRate = sheetCommission / premium;
-          }
-          // Debug: log GIWL lookup results
-          if (isGIWL) {
-            console.log(`[dashboard] GIWL lookup: carrier="${carrier}" product="${product}" age=${age} sheetCommission=${sheetCommission} carrierPayoutRate=${carrierPayoutRate}`);
-          }
-          // If no sheet match, leave at 0 — GAR will just be premium × months (no rate markup)
-        }
+        // Look up carrier payout rate AND advance months from commission rates sheet
+        const commResult = premium > 0
+          ? calcCommission(premium, carrier, product, age, commissionRates)
+          : { commission: 0, rate: 0, advanceMonths: 9, matched: false };
+
+        const carrierPayoutRate = commResult.rate;
+        const months = commResult.advanceMonths;
 
         // Agent commission: what the agency pays the agent
-        // Uses carrier payout rate if found in sheet, otherwise falls back to standard multipliers
         let commission = 0;
         let commissionRate = 0;
         if (!isSalaried && premium > 0) {
-          if (carrierPayoutRate > 0) {
-            commission = premium * carrierPayoutRate;
+          if (commResult.matched) {
+            commission = commResult.commission;
             commissionRate = carrierPayoutRate;
           } else {
             // Fallback: GIWL = 1.5×, all others = 3× (agent commission multiplier)
@@ -121,14 +116,13 @@ export async function GET(request) {
           }
         }
 
-        // GAR: carrier payout. Uses carrier rate from sheet if available, otherwise just premium × months
+        // GAR: premium × carrier rate × advance months (all from commission rates sheet)
         const leadSource = r['Lead Source']?.trim() || '';
-        const months = advanceMonths(carrier);
-        const grossAdvancedRevenue = carrierPayoutRate > 0
+        const grossAdvancedRevenue = commResult.matched
           ? premium * carrierPayoutRate * months
           : premium * months;
 
-        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} carrierPayoutRate=${carrierPayoutRate} commission=${commission.toFixed(2)} commRate=${commissionRate} GAR=${grossAdvancedRevenue.toFixed(2)} months=${months} ${isGIWL ? '(GIWL)' : ''}`);
+        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} rate=${carrierPayoutRate} months=${months} commission=${commission.toFixed(2)} GAR=${grossAdvancedRevenue.toFixed(2)} matched=${commResult.matched} ${commResult.matchedProduct || ''} ${isGIWL ? '(GIWL)' : ''}`);
 
         const phoneRaw = String(r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
         const phone = phoneRaw.length === 10
