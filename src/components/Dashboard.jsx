@@ -435,6 +435,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const spendRows = Object.values(bycamp).filter(r => r.spend > 0).sort((a, b) => b.spend - a.spend);
       const totalSpend = spendRows.reduce((s, r) => s + r.spend, 0);
       const totalBillable = spendRows.reduce((s, r) => s + r.billable, 0);
+      const totalCalls = spendRows.reduce((s, r) => s + r.total, 0);
+      const overallRpc = totalCalls > 0 ? totalSpend / totalCalls : 0;
       return {
         title: 'Lead Spend — By Publisher',
         summary: `${spendRows.length} publishers · ${fmt(totalBillable)} billable calls · ${fmtDollar(totalSpend)} total spend`,
@@ -442,6 +444,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Total Spend',      value: fmtDollar(totalSpend),                                                            color: C.yellow },
           { label: 'Billable Calls',   value: fmt(totalBillable),                                                               color: C.green },
           { label: 'Avg Cost/Call',    value: fmtDollar(totalBillable > 0 ? totalSpend / totalBillable : 0, 2),                color: C.text },
+          { label: 'RPC',             value: fmtDollar(overallRpc, 2),                                                          color: overallRpc <= 35 ? C.green : overallRpc <= 43 ? C.yellow : C.red },
         ],
         rows: spendRows,
         columns: [
@@ -453,14 +456,16 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Billable',      render: r => fmt(r.billable),                                                               color: C.green },
           { label: 'Bill Rate',     render: r => r.total > 0 ? fmtPct(r.billable / r.total * 100) : '—',                       color: C.muted },
           { label: 'Spend',         render: r => fmtDollar(r.spend, 2),                                                         color: () => C.yellow },
+          { label: 'RPC',           render: r => r.total > 0 ? fmtDollar(r.spend / r.total, 2) : '—',                          color: r => { const v = r.total > 0 ? r.spend / r.total : null; return !v ? C.muted : v <= 35 ? C.green : v <= 43 ? C.yellow : C.red; } },
           { label: 'Avg Cost/Call', render: r => r.billable > 0 ? fmtDollar(r.spend / r.billable, 2) : '—',                   color: C.muted },
         ],
         totals: [
           'TOTAL', '', '', '',
-          fmt(calls.length),
+          fmt(totalCalls),
           fmt(totalBillable),
-          fmtPct(calls.length > 0 ? totalBillable / calls.length * 100 : 0),
+          fmtPct(totalCalls > 0 ? totalBillable / totalCalls * 100 : 0),
           fmtDollar(totalSpend, 2),
+          fmtDollar(overallRpc, 2),
           fmtDollar(totalBillable > 0 ? totalSpend / totalBillable : 0, 2),
         ],
       };

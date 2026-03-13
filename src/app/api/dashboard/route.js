@@ -187,7 +187,8 @@ export async function GET(request) {
         const callDuration = parseDuration(r['Duration']);
         const callTypeRaw = (r['Call Type'] || '').trim().toLowerCase();
         const overrideRaw = (r['Billable Override'] || '').trim().toUpperCase();
-        const computedBillable = callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
+        const hasCost = (priceInfo.pricePerCall || 0) > 0;
+        const computedBillable = hasCost && callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
         const isBillable = overrideRaw === 'N' ? false : overrideRaw === 'Y' ? true : computedBillable;
         return {
           date, callTime, rep, campaign: rawCampaign, campaignCode: normalized,
