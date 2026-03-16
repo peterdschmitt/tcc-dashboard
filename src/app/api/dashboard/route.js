@@ -176,7 +176,7 @@ export async function GET(request) {
           ssnMatch: r['Social Security Billing Match']?.trim() || '',
           faceAmount: parseFloat(r['Face Amount']) || 0,
           premium, outcome: r['Outcome at Application Submission']?.trim(),
-          placed: normalizePlacedStatus(r['Placed?']),
+          placed: r['Policy Status']?.trim() || normalizePlacedStatus(r['Placed?']),
           submitDate, effectiveDate: parseFlexDate(r['Effective Date']),
           state: r['State']?.trim() || '',
           age, commission, commissionRate, advanceMonths: months,

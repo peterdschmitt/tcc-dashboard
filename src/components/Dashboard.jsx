@@ -2039,7 +2039,7 @@ function PolicyStatusTab({ policies, calls }) {
 
       {/* Sub-tab toggle */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[['period', 'By Period'], ['aging', 'Aging Report']].map(([val, lbl]) => (
+        {[['period', 'By Period'], ['waterfall', 'Waterfall'], ['aging', 'Aging Report']].map(([val, lbl]) => (
           <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
         ))}
       </div>
@@ -2071,6 +2071,190 @@ function PolicyStatusTab({ policies, calls }) {
           <SortableTable defaultSort="ageDays" onRowClick={r => setDrillPolicy(r)} columns={nonActiveColumns} rows={nonActivePolicies} />
         </Section>
       </>}
+
+      {subTab === 'waterfall' && (() => {
+        // Build weekly cohorts: columns = weeks (Mon–Sun), rows = status categories
+        const weekMap = {};
+        policies.forEach(p => {
+          if (!p.submitDate) return;
+          const d = new Date(p.submitDate + 'T00:00:00');
+          if (isNaN(d.getTime())) return;
+          const day = d.getDay();
+          const diff = day === 0 ? -6 : 1 - day;
+          d.setDate(d.getDate() + diff);
+          const wk = d.toISOString().slice(0, 10);
+          if (!weekMap[wk]) weekMap[wk] = [];
+          weekMap[wk].push(p);
+        });
+        const weekKeys = Object.keys(weekMap).sort();
+        const weekLabels = weekKeys.map(wk => {
+          const start = new Date(wk + 'T00:00:00');
+          const end = new Date(start); end.setDate(end.getDate() + 6);
+          const f = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+          return f(start) + ' –\n' + f(end);
+        });
+
+        // Count helpers per week
+        const isActive = p => p.placed === 'Active - In Force' || p.placed === 'Advance Released';
+        const isDeclined = p => p.placed === 'Declined';
+        const isPending = p => p.placed === 'Submitted - Pending';
+        const isCanceled = p => p.placed === 'Cancelled';
+        const isLapsed = p => p.placed === 'Lapsed';
+        const isNotPaid = p => p.placed === 'Not Yet Paid';
+
+        // Per-week counts
+        const wkData = {};
+        weekKeys.forEach(wk => {
+          const ps = weekMap[wk];
+          const submitted = ps.length;
+          const declined = ps.filter(isDeclined).length;
+          const pending = ps.filter(isPending).length;
+          const initialIF = submitted - declined - pending; // Only policies that got placed
+          const active = ps.filter(isActive).length;
+          const canceled = ps.filter(isCanceled).length;
+          const lapsed = ps.filter(isLapsed).length;
+          const notpaid = ps.filter(isNotPaid).length;
+          const activePrem = ps.filter(isActive).reduce((s, p) => s + p.premium, 0);
+          wkData[wk] = { submitted, declined, pending, initialIF, active, canceled, lapsed, notpaid, activePrem };
+        });
+
+        // Grand totals
+        const allPolicies = policies.filter(p => p.submitDate);
+        const gt = {
+          submitted: allPolicies.length,
+          declined: allPolicies.filter(isDeclined).length,
+          pending: allPolicies.filter(isPending).length,
+          active: allPolicies.filter(isActive).length,
+          canceled: allPolicies.filter(isCanceled).length,
+          lapsed: allPolicies.filter(isLapsed).length,
+          notpaid: allPolicies.filter(isNotPaid).length,
+          activePrem: allPolicies.filter(isActive).reduce((s, p) => s + p.premium, 0),
+        };
+        gt.initialIF = gt.submitted - gt.declined - gt.pending;
+
+        // Helper: format percentage of Initial In Force base, or '—' if base is 0
+        const pctOfBase = (val, base) => base > 0 ? (val / base * 100).toFixed(0) + '%' : '—';
+        const pctColor = (val, base) => {
+          if (base <= 0) return C.muted;
+          const pct = val / base * 100;
+          return pct >= 80 ? C.green : pct >= 60 ? C.yellow : C.red;
+        };
+
+        // Row definitions for the matrix
+        // Section 1: Submitted → Declined → Pending → Initial In Force
+        // Section 2: Placed status breakdown (% of Initial In Force)
+        // Section 3: In Force Rate + Premium
+        const HEADER_ROWS = [
+          { key: 'submitted', label: 'Total Submitted', color: C.accent, val: w => w.submitted, gtVal: gt.submitted },
+          { key: 'declined', label: 'Declined / Denied', color: '#f87171', val: w => w.declined, gtVal: gt.declined },
+          { key: 'pending', label: 'Pending', color: C.yellow, val: w => w.pending, gtVal: gt.pending },
+        ];
+        const IIF_ROW = { key: 'initialIF', label: 'Initial In Force', color: '#38bdf8' };
+        const STATUS_ROWS_DETAIL = [
+          { key: 'active', label: 'Active - In Force', color: C.green, val: w => w.active, gtVal: gt.active },
+          { key: 'canceled', label: 'Canceled', color: '#fb923c', val: w => w.canceled, gtVal: gt.canceled },
+          { key: 'lapsed', label: 'Lapsed', color: '#c084fc', val: w => w.lapsed, gtVal: gt.lapsed },
+          { key: 'notpaid', label: 'Not Yet Paid', color: '#94a3b8', val: w => w.notpaid, gtVal: gt.notpaid },
+        ];
+
+        const thStyle = { padding: '8px 12px', textAlign: 'center', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `2px solid ${C.border}`, background: C.surface, whiteSpace: 'pre-line', minWidth: 72 };
+        const tdStyle = { padding: '6px 12px', textAlign: 'center', fontSize: 13, fontFamily: 'monospace', borderBottom: `1px solid ${C.border}` };
+        const stickyLabel = (color, bold) => ({ ...tdStyle, textAlign: 'left', fontFamily: 'inherit', fontWeight: bold ? 700 : 600, fontSize: 11, color, position: 'sticky', left: 0, background: C.card, zIndex: 1 });
+        const totalColBorder = `2px solid ${C.accent}`;
+        const dividerRow = <tr key="div"><td colSpan={weekKeys.length + 2} style={{ height: 2, background: C.border, padding: 0 }} /></tr>;
+
+        return <Section title="Sales Cohort Waterfall" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Policies grouped by week sold · downstream %'s based on Initial In Force</span>}>
+          <div style={{ overflowX: 'auto', padding: 16 }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: weekKeys.length * 80 + 200 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, textAlign: 'left', width: 160, position: 'sticky', left: 0, zIndex: 2, background: C.surface }}>Status</th>
+                  {weekLabels.map((lbl, i) => <th key={weekKeys[i]} style={thStyle}>{lbl}</th>)}
+                  <th style={{ ...thStyle, color: C.accent, borderLeft: totalColBorder }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Section 1: Total Submitted, Declined */}
+                {HEADER_ROWS.map(r => (
+                  <tr key={r.key}>
+                    <td style={stickyLabel(r.color, false)}>{r.label}</td>
+                    {weekKeys.map(wk => {
+                      const val = r.val(wkData[wk]);
+                      return <td key={wk} style={{ ...tdStyle, color: val > 0 ? r.color : C.muted + '60', fontWeight: val > 0 ? 600 : 400 }}>{val}</td>;
+                    })}
+                    <td style={{ ...tdStyle, borderLeft: totalColBorder, color: r.gtVal > 0 ? r.color : C.muted, fontWeight: 700 }}>{r.gtVal}</td>
+                  </tr>
+                ))}
+
+                {/* Initial In Force row (highlighted) */}
+                <tr style={{ background: '#0c1a2e' }}>
+                  <td style={{ ...stickyLabel(IIF_ROW.color, true), background: '#0c1a2e' }}>
+                    {IIF_ROW.label}
+                  </td>
+                  {weekKeys.map(wk => {
+                    const w = wkData[wk];
+                    const pct = w.submitted > 0 ? (w.initialIF / w.submitted * 100).toFixed(0) + '%' : '—';
+                    return <td key={wk} style={{ ...tdStyle, fontWeight: 700, color: IIF_ROW.color }}>
+                      {w.initialIF}<span style={{ fontSize: 9, color: C.muted, marginLeft: 4 }}>{pct}</span>
+                    </td>;
+                  })}
+                  <td style={{ ...tdStyle, borderLeft: totalColBorder, fontWeight: 800, color: IIF_ROW.color }}>
+                    {gt.initialIF}<span style={{ fontSize: 9, color: C.muted, marginLeft: 4 }}>{gt.submitted > 0 ? (gt.initialIF / gt.submitted * 100).toFixed(0) + '%' : '—'}</span>
+                  </td>
+                </tr>
+
+                {dividerRow}
+
+                {/* Section 2: Status breakdown — counts + % of Initial In Force */}
+                {STATUS_ROWS_DETAIL.map(r => (
+                  <tr key={r.key}>
+                    <td style={stickyLabel(r.color, false)}>{r.label}</td>
+                    {weekKeys.map(wk => {
+                      const val = r.val(wkData[wk]);
+                      const base = wkData[wk].initialIF;
+                      const pct = base > 0 ? (val / base * 100).toFixed(0) + '%' : '';
+                      return <td key={wk} style={{ ...tdStyle, color: val > 0 ? r.color : C.muted + '60', fontWeight: val > 0 ? 600 : 400 }}>
+                        {val > 0 ? <>{val}<span style={{ fontSize: 9, color: C.muted, marginLeft: 3 }}>{pct}</span></> : val}
+                      </td>;
+                    })}
+                    <td style={{ ...tdStyle, borderLeft: totalColBorder, color: r.gtVal > 0 ? r.color : C.muted, fontWeight: 700 }}>
+                      {r.gtVal > 0 ? <>{r.gtVal}<span style={{ fontSize: 9, color: C.muted, marginLeft: 3 }}>{gt.initialIF > 0 ? (r.gtVal / gt.initialIF * 100).toFixed(0) + '%' : ''}</span></> : r.gtVal}
+                    </td>
+                  </tr>
+                ))}
+
+                {dividerRow}
+
+                {/* In Force Rate — Active / Initial In Force */}
+                <tr>
+                  <td style={stickyLabel(C.green, true)}>In Force Rate</td>
+                  {weekKeys.map(wk => {
+                    const w = wkData[wk];
+                    const rate = w.initialIF > 0 ? (w.active / w.initialIF * 100) : null;
+                    const rColor = rate === null ? C.muted : rate >= 80 ? C.green : rate >= 60 ? C.yellow : C.red;
+                    return <td key={wk} style={{ ...tdStyle, color: rColor, fontWeight: 700, fontSize: 14 }}>
+                      {rate !== null ? rate.toFixed(0) + '%' : '—'}
+                    </td>;
+                  })}
+                  <td style={{ ...tdStyle, borderLeft: totalColBorder, fontWeight: 800, fontSize: 14, color: gt.initialIF > 0 ? (gt.active / gt.initialIF * 100 >= 80 ? C.green : gt.active / gt.initialIF * 100 >= 60 ? C.yellow : C.red) : C.muted }}>
+                    {gt.initialIF > 0 ? (gt.active / gt.initialIF * 100).toFixed(1) + '%' : '—'}
+                  </td>
+                </tr>
+
+                {/* Active Premium */}
+                <tr>
+                  <td style={stickyLabel(C.muted, false)}>Active Premium</td>
+                  {weekKeys.map(wk => {
+                    const prem = wkData[wk].activePrem;
+                    return <td key={wk} style={{ ...tdStyle, color: prem > 0 ? C.green : C.muted + '60', fontWeight: prem > 0 ? 600 : 400 }}>{prem > 0 ? fmtDollar(prem) : '—'}</td>;
+                  })}
+                  <td style={{ ...tdStyle, borderLeft: totalColBorder, color: C.green, fontWeight: 700 }}>{fmtDollar(gt.activePrem)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Section>;
+      })()}
 
       {subTab === 'aging' && <>
         <Section title="Policy Aging Matrix" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Age = days since application submitted · click cell area to explore</span>}>
