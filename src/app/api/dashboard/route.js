@@ -23,11 +23,12 @@ export async function GET(request) {
       salesRaw = await fetchSheet(process.env.SALES_SHEET_ID, 'Sheet1');
     }
 
-    const [callsRaw, commRaw, pricingRaw, agentGoalsRaw] = await Promise.all([
+    const [callsRaw, commRaw, pricingRaw, agentGoalsRaw, agentPayoutRaw] = await Promise.all([
       fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report'),
       fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600), // Commission rates rarely change — 1hr cache
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing', 3600), // Pricing rarely changes — 1hr cache
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals', 1800).catch(() => []), // Agent goals — 30min cache
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_PAYOUT_TAB || 'Agent Payout Rates', 3600).catch(() => []), // Agent payout multipliers — 1hr cache
     ]);
 
     // Log commission sheet columns so we can see what's available
@@ -62,6 +63,20 @@ export async function GET(request) {
         category: (r['Category'] || '').trim(),
       };
     });
+
+    // Parse agent payout rates (what agency pays agents — separate from carrier payout)
+    // Sheet columns: Product Type, Multiplier
+    // Default: Standard = 3x, GIWL = 1.5x
+    const agentPayoutRates = {};
+    agentPayoutRaw.forEach(r => {
+      const type = (r['Product Type'] || '').trim().toLowerCase();
+      const multiplier = parseFloat(r['Multiplier'] || '0') || 0;
+      if (type && multiplier > 0) agentPayoutRates[type] = multiplier;
+    });
+    // Ensure defaults exist
+    if (!agentPayoutRates['standard']) agentPayoutRates['standard'] = 3;
+    if (!agentPayoutRates['giwl']) agentPayoutRates['giwl'] = 1.5;
+    console.log('[dashboard] Agent payout rates:', Object.entries(agentPayoutRates).map(([k,v]) => `${k}=${v}x`).join(', '));
 
     console.log('[dashboard] Pricing loaded:', Object.entries(pricing).map(([k,v]) => k + '=$' + v.pricePerCall + '/buf=' + v.buffer + 's').join(', '));
 
@@ -117,16 +132,14 @@ export async function GET(request) {
         const carrierPayoutRate = commResult.rate;
         const months = commResult.advanceMonths;
 
-        // Commission rate from sheet (always stored for display, even for salaried agents)
-        let commissionRate = carrierPayoutRate;
-        if (!commResult.matched && premium > 0) {
-          commissionRate = isGIWL ? 1.5 : 3; // fallback
-        }
+        // Agent commission multiplier: from Agent Payout Rates sheet (GIWL = 1.5x, Standard = 3x)
+        const agentMultiplier = isGIWL ? (agentPayoutRates['giwl'] || 1.5) : (agentPayoutRates['standard'] || 3);
+        const commissionRate = agentMultiplier;
 
         // Agent commission: what the agency pays the agent (salaried agents = $0)
         let commission = 0;
         if (!isSalaried && premium > 0) {
-          commission = premium * commissionRate;
+          commission = premium * agentMultiplier;
         }
 
         // GAR: premium × carrier rate × advance months (all from commission rates sheet)

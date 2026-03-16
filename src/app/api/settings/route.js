@@ -21,6 +21,10 @@ function getSheetConfig(section) {
       sheetId: process.env.COMMISSION_SHEET_ID,
       tabName: process.env.COMMISSION_TAB_NAME || 'Sheet1',
     },
+    agentPayout: {
+      sheetId: process.env.GOALS_SHEET_ID,
+      tabName: process.env.AGENT_PAYOUT_TAB || 'Agent Payout Rates',
+    },
   };
   return configs[section];
 }
@@ -34,7 +38,7 @@ export async function GET(request) {
     if (section === 'all') {
       // Load all sections at once
       const results = {};
-      for (const sec of ['pricing', 'companyGoals', 'agentGoals', 'commission']) {
+      for (const sec of ['pricing', 'companyGoals', 'agentGoals', 'commission', 'agentPayout']) {
         try {
           const cfg = getSheetConfig(sec);
           const { headers, data } = await readRawSheet(cfg.sheetId, cfg.tabName);
