@@ -146,6 +146,8 @@ export async function GET(request) {
           premium,
           agent: sr['Agent'] || '',
           status: sr['Policy Status']?.trim() || sr['Placed?']?.trim() || '',
+          submitDate: sr['Application Submitted Date']?.trim() || '',
+          effectiveDate: sr['Effective Date']?.trim() || '',
           expectedCommission: Math.round(expectedComm * 100) / 100,
           totalPaid: 0,
           totalClawback: 0,

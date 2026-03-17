@@ -1,0 +1,480 @@
+'use client';
+import { useState, useEffect } from 'react';
+import { C, fmt, fmtDollar, fmtPct } from '../shared/theme';
+import CommissionStatementsTab from './CommissionStatementsTab';
+
+function compareValues(a, b, key) {
+  let va = a?.[key], vb = b?.[key];
+  if (va == null && vb == null) return 0;
+  if (va == null) return 1;
+  if (vb == null) return -1;
+  const na = typeof va === 'number' ? va : parseFloat(va);
+  const nb = typeof vb === 'number' ? vb : parseFloat(vb);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base' });
+}
+function sortData(data, sortKey, sortDir) {
+  if (!sortKey || !data) return data;
+  return [...data].sort((a, b) => { const cmp = compareValues(a, b, sortKey); return sortDir === 'desc' ? -cmp : cmp; });
+}
+function useSort(defaultKey = null, defaultDir = 'asc') {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const toggle = (key) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('asc'); } };
+  return { sortKey, sortDir, toggle };
+}
+function SortTh({ label, field, sortKey, sortDir, onSort, style }) {
+  const active = sortKey === field;
+  return (
+    <th onClick={() => onSort(field)} style={{ ...style, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', color: active ? C.accent : style?.color || C.muted }}>
+      {label} <span style={{ fontSize: 8, opacity: active ? 1 : 0.3 }}>{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+    </th>
+  );
+}
+function Section({ title, children, rightContent }) {
+  return (
+    <div style={{ marginTop: 20, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1.2 }}>{title}</div>
+        {rightContent}
+      </div>
+      {children}
+    </div>
+  );
+}
+function KPICard({ label, value, color, subtitle }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 16px', minWidth: 120, borderTop: `3px solid ${color || C.accent}` }}>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: color || C.text, fontFamily: C.mono, marginTop: 4 }}>{value}</div>
+      {subtitle && <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{subtitle}</div>}
+    </div>
+  );
+}
+
+// Parse dates in MM-DD-YYYY or YYYY-MM-DD format
+function parseDate(str) {
+  if (!str) return null;
+  const mdy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (mdy) return new Date(parseInt(mdy[3]), parseInt(mdy[1]) - 1, parseInt(mdy[2]));
+  const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (ymd) return new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+const STATUS_COLORS = {
+  active: { bg: C.greenDim, text: C.green, label: 'Comm Active' },
+  clawback: { bg: C.redDim, text: C.red, label: 'Clawback' },
+  pending: { bg: '#2e2a0a', text: '#facc15', label: 'No Commission' },
+};
+
+export default function CombinedPoliciesTab() {
+  const [subTab, setSubTab] = useState('combined');
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [groupBy, setGroupBy] = useState('none');
+  const [selectedPolicy, setSelectedPolicy] = useState(null);
+  const [cashFlow, setCashFlow] = useState(null);
+  const [cashFlowLoading, setCashFlowLoading] = useState(false);
+  const mainSort = useSort('premium', 'desc');
+  const unmatchedSort = useSort('commissionAmount', 'desc');
+
+  useEffect(() => {
+    fetch('/api/combined-policies')
+      .then(r => r.json())
+      .then(d => { if (d.error) setError(d.error); else setData(d); })
+      .catch(e => setError(e.message));
+  }, []);
+
+  // Load cash flow when a policy is selected
+  useEffect(() => {
+    if (!selectedPolicy) { setCashFlow(null); return; }
+    if (selectedPolicy.entries === 0) { setCashFlow({ entries: [], totalPaid: 0, totalClawback: 0, netCommission: 0 }); return; }
+    setCashFlowLoading(true);
+    fetch(`/api/commission-statements/policy/${encodeURIComponent(selectedPolicy.policyNumber)}`)
+      .then(r => r.json())
+      .then(d => { setCashFlow(d.error ? null : d); setCashFlowLoading(false); })
+      .catch(() => { setCashFlow(null); setCashFlowLoading(false); });
+  }, [selectedPolicy]);
+
+  const pillStyle = (active) => ({
+    background: active ? C.accent : 'transparent',
+    border: `1px solid ${active ? C.accent : C.border}`,
+    borderRadius: 6, padding: '5px 14px', fontSize: 11, fontWeight: 600,
+    color: active ? '#fff' : C.muted, cursor: 'pointer',
+  });
+  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
+  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
+
+  const { policies = [], unmatchedLedger = [], summary = {} } = data || {};
+
+  // Pre-compute dates and days active
+  const enriched = policies.map(p => {
+    const d = parseDate(p.effectiveDate) || parseDate(p.submitDate);
+    return { ...p, _effDateParsed: d, _daysActive: d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null };
+  });
+
+  const sorted = sortData(enriched, mainSort.sortKey, mainSort.sortDir);
+
+  // Build groups
+  const statusColor = (s) => {
+    const v = (s || '').toLowerCase();
+    if (v.includes('active') || v.includes('in force')) return C.green;
+    if (v.includes('pending') || v.includes('submitted')) return '#facc15';
+    if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed') || v.includes('rejected') || v.includes('terminated') || v.includes('not taken')) return C.red;
+    if (v.includes('hold') || v.includes('need') || v.includes('not paid')) return '#fb923c'; // orange
+    return C.muted;
+  };
+  const statusBg = (s) => {
+    const v = (s || '').toLowerCase();
+    if (v.includes('active') || v.includes('in force')) return C.greenDim;
+    if (v.includes('pending') || v.includes('submitted')) return '#2e2a0a';
+    if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed') || v.includes('rejected') || v.includes('terminated') || v.includes('not taken')) return C.redDim;
+    if (v.includes('hold') || v.includes('need') || v.includes('not paid')) return '#2e1a0a'; // dark orange
+    return '#1a2538';
+  };
+
+  let groups;
+  if (groupBy === 'commissionStatus') {
+    const map = {};
+    sorted.forEach(p => { const k = p.commissionStatus; if (!map[k]) map[k] = []; map[k].push(p); });
+    const order = ['pending', 'clawback', 'active'];
+    groups = order.filter(k => map[k]).map(k => ({ label: STATUS_COLORS[k]?.label || k, color: STATUS_COLORS[k]?.text || C.muted, policies: map[k] }));
+  } else if (groupBy === 'carrier') {
+    const map = {};
+    sorted.forEach(p => { const k = p.carrier || 'Unknown'; if (!map[k]) map[k] = []; map[k].push(p); });
+    groups = Object.entries(map).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ label: k, color: C.accent, policies: v }));
+  } else if (groupBy === 'month') {
+    const map = {};
+    sorted.forEach(p => {
+      const d = parseDate(p.submitDate) || parseDate(p.effectiveDate);
+      const m = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+      if (!map[m]) map[m] = [];
+      map[m].push(p);
+    });
+    groups = Object.entries(map).sort((a, b) => b[0].localeCompare(a[0])).map(([k, v]) => {
+      const lbl = k === 'Unknown' ? 'Unknown' : new Date(parseInt(k.split('-')[0]), parseInt(k.split('-')[1]) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      return { label: lbl, color: C.accent, policies: v };
+    });
+  } else if (groupBy === 'status') {
+    const map = {};
+    sorted.forEach(p => { const k = p.status || 'Unknown'; if (!map[k]) map[k] = []; map[k].push(p); });
+    groups = Object.entries(map).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ label: k, color: statusColor(k), policies: v }));
+  } else {
+    groups = [{ label: 'All Policies', color: C.accent, policies: sorted }];
+  }
+
+  const renderRow = (p, i) => {
+    const isSelP = selectedPolicy?.policyNumber === p.policyNumber;
+    const cs = STATUS_COLORS[p.commissionStatus] || STATUS_COLORS.pending;
+    const days = p._daysActive;
+    const daysColor = days === null ? C.muted : days > 180 ? C.green : days > 90 ? C.accent : days > 30 ? '#facc15' : C.muted;
+    return (
+      <tr key={i}
+        style={{ cursor: 'pointer', background: isSelP ? 'rgba(91,159,255,0.08)' : 'transparent', borderLeft: isSelP ? `3px solid ${C.accent}` : '3px solid transparent', transition: 'background 0.15s ease' }}
+        onClick={() => setSelectedPolicy(isSelP ? null : p)}
+        onMouseOver={e => { if (!isSelP) e.currentTarget.style.background = 'rgba(91,159,255,0.05)'; }}
+        onMouseOut={e => { if (!isSelP) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <td style={{ ...tdStyle, width: 28, padding: '6px 4px', textAlign: 'center', fontSize: 12, color: isSelP ? C.accent : C.muted }}>{isSelP ? '▾' : '▸'}</td>
+        <td style={tdStyle}>{p.policyNumber}</td>
+        <td style={tdStyle}>{p.insuredName}</td>
+        <td style={{ ...tdStyle, fontSize: 10 }}>{p.carrier}</td>
+        <td style={tdStyle}>{fmtDollar(p.premium)}</td>
+        <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
+        <td style={{ ...tdStyle, color: p.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(p.totalPaid)}</td>
+        <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(p.totalClawback)}</td>
+        <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
+        <td style={{ ...tdStyle, color: Math.abs(p.balance) < 1 ? C.green : '#facc15' }}>{fmtDollar(p.balance)}</td>
+        <td style={{ ...tdStyle, fontSize: 10 }}>{p._effDateParsed ? p._effDateParsed.toLocaleDateString() : '—'}</td>
+        <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
+        <td style={tdStyle}>
+          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text }}>{cs.label}</span>
+        </td>
+        <td style={tdStyle}>
+          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: statusBg(p.status), color: statusColor(p.status) }}>{p.status || '—'}</span>
+        </td>
+      </tr>
+    );
+  };
+
+  const tableHeader = (
+    <thead>
+      <tr>
+        <th style={{ ...thStyle, width: 28, padding: '6px 4px' }}></th>
+        <SortTh label="Policy #" field="policyNumber" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Insured" field="insuredName" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Carrier" field="carrier" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Premium" field="premium" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Expected" field="expectedCommission" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Paid" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Clawback" field="totalClawback" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Net" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Balance" field="balance" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Effective" field="effectiveDate" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Days" field="_daysActive" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Comm Status" field="commissionStatus" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Status" field="status" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+      </tr>
+    </thead>
+  );
+
+  return (
+    <div>
+      {/* Sub-tab toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[['combined', 'Combined Policies'], ['statements', 'Commission Statements']].map(([val, lbl]) => (
+          <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
+        ))}
+      </div>
+
+      {subTab === 'statements' && <CommissionStatementsTab />}
+
+      {subTab === 'combined' && <>
+      {error ? <div style={{ color: C.red, padding: 40, textAlign: 'center' }}>Error: {error}</div>
+       : !data ? <div style={{ color: C.muted, padding: 40, textAlign: 'center' }}>Loading combined policy data...</div>
+       : <>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: 4 }}>Combined Policy Information</div>
+        <div style={{ fontSize: 12, color: C.muted }}>
+          All policies from the sales tracker cross-referenced with carrier commission statements. Identifies policies without commission activity.
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <KPICard label="Total Policies" value={summary.totalPolicies} color={C.accent} />
+        <KPICard label="With Commission" value={summary.withCommission} color={C.green} />
+        <KPICard label="No Commission Yet" value={summary.pending} color="#facc15" subtitle={fmtDollar(summary.pendingPremium) + ' premium'} />
+        <KPICard label="Clawbacks" value={summary.clawbacks} color={C.red} />
+        <KPICard label="Orphaned Carrier" value={summary.orphaned} color={C.muted} />
+        <KPICard label="Total Premium" value={fmtDollar(summary.totalPremium)} color={C.accent} />
+        <KPICard label="Total Received" value={fmtDollar(summary.totalReceived)} color={C.green} />
+      </div>
+
+      {/* Status Financial Impact table */}
+      <Section title="Financial Impact by Policy Status">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Status</th>
+                <th style={{ ...thStyle, textAlign: 'center' }}>Count</th>
+                <th style={thStyle}>Premium</th>
+                <th style={thStyle}>Expected</th>
+                <th style={thStyle}>Paid</th>
+                <th style={thStyle}>Clawback</th>
+                <th style={thStyle}>Net</th>
+                <th style={thStyle}>Balance</th>
+                <th style={{ ...thStyle, textAlign: 'center' }}>Avg Days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const statusMap = {};
+                enriched.forEach(p => {
+                  const s = p.status || 'Unknown';
+                  if (!statusMap[s]) statusMap[s] = { status: s, count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, daysSum: 0, daysCount: 0 };
+                  const row = statusMap[s];
+                  row.count++;
+                  row.premium += p.premium;
+                  row.expected += p.expectedCommission;
+                  row.paid += p.totalPaid;
+                  row.clawback += p.totalClawback;
+                  row.net += p.netReceived;
+                  row.balance += p.balance;
+                  if (p._daysActive != null) { row.daysSum += p._daysActive; row.daysCount++; }
+                });
+                const rows = Object.values(statusMap).sort((a, b) => b.count - a.count);
+                const totals = rows.reduce((t, r) => ({ count: t.count + r.count, premium: t.premium + r.premium, expected: t.expected + r.expected, paid: t.paid + r.paid, clawback: t.clawback + r.clawback, net: t.net + r.net, balance: t.balance + r.balance, daysSum: t.daysSum + r.daysSum, daysCount: t.daysCount + r.daysCount }), { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, daysSum: 0, daysCount: 0 });
+                return (
+                  <>
+                    {rows.map((r, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${C.surface}88` }}>
+                        <td style={tdStyle}>
+                          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: statusBg(r.status), color: statusColor(r.status) }}>{r.status}</span>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{r.count}</td>
+                        <td style={tdStyle}>{fmtDollar(r.premium)}</td>
+                        <td style={tdStyle}>{fmtDollar(r.expected)}</td>
+                        <td style={{ ...tdStyle, color: r.paid > 0 ? C.green : C.muted }}>{fmtDollar(r.paid)}</td>
+                        <td style={{ ...tdStyle, color: r.clawback > 0 ? C.red : C.muted }}>{fmtDollar(r.clawback)}</td>
+                        <td style={{ ...tdStyle, color: r.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(r.net)}</td>
+                        <td style={{ ...tdStyle, color: Math.abs(r.balance) < 1 ? C.green : '#facc15' }}>{fmtDollar(r.balance)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{r.daysCount > 0 ? Math.round(r.daysSum / r.daysCount) + 'd' : '—'}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ background: C.surface, fontWeight: 700, borderTop: `2px solid ${C.accent}` }}>
+                      <td style={{ ...tdStyle, color: C.accent }}>TOTAL</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: C.accent }}>{totals.count}</td>
+                      <td style={tdStyle}>{fmtDollar(totals.premium)}</td>
+                      <td style={tdStyle}>{fmtDollar(totals.expected)}</td>
+                      <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(totals.paid)}</td>
+                      <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(totals.clawback)}</td>
+                      <td style={{ ...tdStyle, color: totals.net >= 0 ? C.green : C.red }}>{fmtDollar(totals.net)}</td>
+                      <td style={{ ...tdStyle, color: '#facc15' }}>{fmtDollar(totals.balance)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{totals.daysCount > 0 ? Math.round(totals.daysSum / totals.daysCount) + 'd' : '—'}</td>
+                    </tr>
+                  </>
+                );
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Group by toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: 'uppercase' }}>Group by:</span>
+        {[['none', 'None'], ['commissionStatus', 'Comm Status'], ['status', 'Policy Status'], ['carrier', 'Carrier'], ['month', 'Month']].map(([val, lbl]) => (
+          <button key={val} style={pillStyle(groupBy === val)} onClick={() => setGroupBy(val)}>{lbl}</button>
+        ))}
+      </div>
+
+      {/* Grouped tables */}
+      {groups.map((g, gi) => {
+        const grpPremium = g.policies.reduce((s, p) => s + p.premium, 0);
+        const grpPaid = g.policies.reduce((s, p) => s + p.totalPaid, 0);
+        const grpNet = g.policies.reduce((s, p) => s + p.netReceived, 0);
+        return (
+          <Section key={gi} title={
+            groupBy === 'none' ? `All Policies (${g.policies.length})` :
+            `${g.label} — ${g.policies.length} ${g.policies.length === 1 ? 'policy' : 'policies'} · Premium ${fmtDollar(grpPremium)} · Net ${fmtDollar(grpNet)}`
+          }>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                {tableHeader}
+                <tbody>
+                  {g.policies.map(renderRow)}
+                  {groupBy !== 'none' && g.policies.length > 1 && (
+                    <tr style={{ background: C.surface, fontWeight: 700 }}>
+                      <td style={tdStyle}></td>
+                      <td colSpan={2} style={{ ...tdStyle, fontSize: 10, color: C.muted }}>SUBTOTAL ({g.policies.length})</td>
+                      <td style={tdStyle}></td>
+                      <td style={tdStyle}>{fmtDollar(grpPremium)}</td>
+                      <td style={tdStyle}>{fmtDollar(g.policies.reduce((s, p) => s + p.expectedCommission, 0))}</td>
+                      <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grpPaid)}</td>
+                      <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(g.policies.reduce((s, p) => s + p.totalClawback, 0))}</td>
+                      <td style={{ ...tdStyle, color: grpNet >= 0 ? C.green : C.red }}>{fmtDollar(grpNet)}</td>
+                      <td style={{ ...tdStyle, color: '#facc15' }}>{fmtDollar(g.policies.reduce((s, p) => s + p.balance, 0))}</td>
+                      <td style={tdStyle}></td>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: C.muted, fontSize: 10 }}>
+                        {Math.round(g.policies.filter(p => p._daysActive != null).reduce((s, p) => s + (p._daysActive || 0), 0) / Math.max(1, g.policies.filter(p => p._daysActive != null).length))}d avg
+                      </td>
+                      <td style={tdStyle}></td>
+                      <td style={tdStyle}></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+        );
+      })}
+
+      {/* Cash Flow drill-down for selected policy */}
+      {selectedPolicy && (
+        <Section title={`Cash Flow — ${selectedPolicy.insuredName} (${selectedPolicy.policyNumber})`}>
+          {cashFlowLoading ? (
+            <div style={{ color: C.muted, fontSize: 12 }}>Loading cash flow...</div>
+          ) : selectedPolicy.entries === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center' }}>
+              <div style={{ fontSize: 13, color: '#facc15', fontWeight: 700, marginBottom: 6 }}>No Commission Activity</div>
+              <div style={{ fontSize: 11, color: C.muted }}>
+                This policy ({selectedPolicy.policyNumber}) was submitted on {selectedPolicy.submitDate || '—'} but has not appeared in any carrier commission statement yet.
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
+                Premium: {fmtDollar(selectedPolicy.premium)} · Expected Commission: {fmtDollar(selectedPolicy.expectedCommission)} · Status: {selectedPolicy.status}
+              </div>
+            </div>
+          ) : cashFlow ? (() => {
+            const entries = (cashFlow.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
+            let running = 0;
+            const withRunning = entries.map(e => { running += e.commissionAmount || 0; return { ...e, runningBalance: running }; });
+            return (
+              <div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <KPICard label="Premium" value={fmtDollar(selectedPolicy.premium)} color={C.accent} />
+                  <KPICard label="Total Paid" value={fmtDollar(cashFlow.totalPaid || 0)} color={C.green} />
+                  <KPICard label="Clawbacks" value={fmtDollar(cashFlow.totalClawback || 0)} color={(cashFlow.totalClawback || 0) > 0 ? C.red : C.muted} />
+                  <KPICard label="Net Commission" value={fmtDollar(cashFlow.netCommission || 0)} color={(cashFlow.netCommission || 0) >= 0 ? C.green : C.red} />
+                </div>
+                {withRunning.length > 0 && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={thStyle}>Date</th>
+                          <th style={thStyle}>Type</th>
+                          <th style={thStyle}>Amount</th>
+                          <th style={thStyle}>Running Balance</th>
+                          <th style={thStyle}>Statement File</th>
+                          <th style={thStyle}>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {withRunning.map((e, i) => (
+                          <tr key={i}>
+                            <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
+                            <td style={tdStyle}>
+                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim, color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red }}>{e.transactionType}</span>
+                            </td>
+                            <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+                            <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
+                            <td style={{ ...tdStyle, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
+                            <td style={{ ...tdStyle, fontSize: 10, color: C.muted }}>{e.notes || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
+            <div style={{ color: C.red, fontSize: 12 }}>Failed to load cash flow data.</div>
+          )}
+        </Section>
+      )}
+
+      {/* Unmatched carrier records */}
+      {unmatchedLedger.length > 0 && (
+        <Section title={`Orphaned Carrier Records (${unmatchedLedger.length})`} rightContent={<span style={{ fontSize: 10, color: C.muted }}>Ledger entries with no matching sales tracker policy</span>}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <SortTh label="Policy #" field="policyNumber" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Insured" field="insuredName" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Agent" field="agent" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Carrier" field="carrier" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Type" field="transactionType" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Amount" field="commissionAmount" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="Date" field="statementDate" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                  <SortTh label="File" field="statementFile" {...unmatchedSort} onSort={unmatchedSort.toggle} style={thStyle} />
+                </tr>
+              </thead>
+              <tbody>
+                {sortData(unmatchedLedger, unmatchedSort.sortKey, unmatchedSort.sortDir).map((r, i) => (
+                  <tr key={i} style={{ background: C.redDim }}>
+                    <td style={tdStyle}>{r.policyNumber}</td>
+                    <td style={tdStyle}>{r.insuredName}</td>
+                    <td style={tdStyle}>{r.agent}</td>
+                    <td style={{ ...tdStyle, fontSize: 10 }}>{r.carrier}</td>
+                    <td style={tdStyle}>{r.transactionType}</td>
+                    <td style={{ ...tdStyle, color: r.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(r.commissionAmount)}</td>
+                    <td style={{ ...tdStyle, fontSize: 10 }}>{r.statementDate || '—'}</td>
+                    <td style={{ ...tdStyle, fontSize: 10, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.statementFile || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+      </>}
+      </>}
+    </div>
+  );
+}

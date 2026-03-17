@@ -104,6 +104,7 @@ export default function CommissionStatementsTab() {
   const reconSort = useSort('balance', 'desc');
   const matchedSort = useSort(null);
   const unmatchedSort = useSort(null);
+  const [reconGroupBy, setReconGroupBy] = useState('none'); // 'none' | 'status' | 'month'
 
   // Load data on mount and tab change
   useEffect(() => {
@@ -771,75 +772,175 @@ export default function CommissionStatementsTab() {
                 <KPICard label="Discrepancies" value={reconciliation.summary.discrepancies} color={reconciliation.summary.discrepancies > 0 ? C.yellow : C.muted} />
               </div>
 
-              <Section title="Policy Commission Balance">
-                {reconciliation.policies.length === 0 ? (
+              {/* Status breakdown counts */}
+              {(() => {
+                const counts = {};
+                (reconciliation.policies || []).forEach(p => {
+                  const s = p.status || 'Unknown';
+                  counts[s] = (counts[s] || 0) + 1;
+                });
+                const statusColor = (s) => s.includes('Active') || s.includes('In Force') ? C.green : s.includes('Pending') ? C.yellow : s.includes('Cancel') || s.includes('Declined') || s.includes('Lapsed') ? C.red : C.muted;
+                return Object.keys(counts).length > 0 ? (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
+                      <KPICard key={status} label={status} value={count} color={statusColor(status)} />
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+
+              {/* Group by toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: 'uppercase' }}>Group by:</span>
+                {[['none', 'None'], ['status', 'Status'], ['month', 'Month'], ['carrier', 'Carrier']].map(([val, lbl]) => (
+                  <button key={val} style={pillStyle(reconGroupBy === val)} onClick={() => setReconGroupBy(val)}>{lbl}</button>
+                ))}
+              </div>
+
+              {reconciliation.policies.length === 0 ? (
+                <Section title="Policy Commission Balance">
                   <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', padding: 20 }}>
                     No commission activity recorded yet. Upload a statement first.
                   </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={{ ...thStyle, width: 28, padding: '6px 4px' }}></th>
-                          <SortTh label="Policy #" field="policyNumber" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Insured" field="insuredName" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Carrier" field="carrier" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Premium" field="premium" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Expected" field="expectedCommission" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Paid" field="totalPaid" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Clawback" field="totalClawback" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Net" field="netReceived" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Balance" field="balance" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                          <SortTh label="Status" field="status" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortData(reconciliation.policies, reconSort.sortKey, reconSort.sortDir)
-                          .map((p, i) => {
-                          const isSelP = selectedPolicy?.policyNumber === p.policyNumber;
-                          const baseBg = Math.abs(p.balance) > 100 ? C.redDim : p.totalClawback > 0 ? C.yellowDim : 'transparent';
-                          return (
-                          <tr key={i}
-                            style={{
-                              cursor: 'pointer',
-                              background: isSelP ? 'rgba(91,159,255,0.08)' : baseBg,
-                              borderLeft: isSelP ? `3px solid ${C.accent}` : '3px solid transparent',
-                              transition: 'background 0.15s ease',
-                            }}
-                            onClick={() => setSelectedPolicy(isSelP ? null : p)}
-                            onMouseOver={e => { if (!isSelP) e.currentTarget.style.background = 'rgba(91,159,255,0.05)'; }}
-                            onMouseOut={e => { if (!isSelP) e.currentTarget.style.background = baseBg; }}
-                          >
-                            <td style={{ ...tdStyle, width: 28, padding: '6px 4px', textAlign: 'center', fontSize: 12, color: isSelP ? C.accent : C.muted }}>
-                              {isSelP ? '▾' : '▸'}
-                            </td>
-                            <td style={tdStyle}>{p.policyNumber}</td>
-                            <td style={tdStyle}>{p.insuredName}</td>
-                            <td style={{ ...tdStyle, fontSize: 10 }}>{p.carrier}</td>
-                            <td style={tdStyle}>{fmtDollar(p.premium)}</td>
-                            <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
-                            <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(p.totalPaid)}</td>
-                            <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(p.totalClawback)}</td>
-                            <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(p.netReceived)}</td>
-                            <td style={{ ...tdStyle, color: Math.abs(p.balance) < 1 ? C.green : C.yellow }}>{fmtDollar(p.balance)}</td>
-                            <td style={tdStyle}>
-                              <span style={{
-                                fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
-                                background: p.status.includes('Active') ? C.greenDim : p.status.includes('Cancelled') ? C.redDim : C.yellowDim,
-                                color: p.status.includes('Active') ? C.green : p.status.includes('Cancelled') ? C.red : C.yellow,
-                              }}>
-                                {p.status || '—'}
-                              </span>
-                            </td>
-                          </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Section>
+                </Section>
+              ) : (() => {
+                // Build groups
+                const policies = sortData(reconciliation.policies, reconSort.sortKey, reconSort.sortDir);
+                const statusColor = (s) => (s || '').includes('Active') || (s || '').includes('In Force') ? C.green : (s || '').includes('Pending') ? C.yellow : (s || '').includes('Cancel') || (s || '').includes('Declined') || (s || '').includes('Lapsed') ? C.red : C.muted;
+
+                let groups;
+                if (reconGroupBy === 'status') {
+                  const map = {};
+                  policies.forEach(p => { const k = p.status || 'Unknown'; if (!map[k]) map[k] = []; map[k].push(p); });
+                  groups = Object.entries(map).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ label: k, color: statusColor(k), policies: v }));
+                } else if (reconGroupBy === 'carrier') {
+                  const map = {};
+                  policies.forEach(p => { const k = p.carrier || 'Unknown'; if (!map[k]) map[k] = []; map[k].push(p); });
+                  groups = Object.entries(map).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ label: k, color: C.accent, policies: v }));
+                } else if (reconGroupBy === 'month') {
+                  const map = {};
+                  policies.forEach(p => {
+                    const d = parseDate(p.submitDate) || parseDate(p.effectiveDate);
+                    const m = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+                    if (!map[m]) map[m] = [];
+                    map[m].push(p);
+                  });
+                  groups = Object.entries(map).sort((a, b) => b[0].localeCompare(a[0])).map(([k, v]) => {
+                    const lbl = k === 'Unknown' ? 'Unknown' : new Date(parseInt(k.split('-')[0]), parseInt(k.split('-')[1]) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+                    return { label: lbl, color: C.accent, policies: v };
+                  });
+                } else {
+                  groups = [{ label: 'All Policies', color: C.accent, policies }];
+                }
+
+                // Parse dates that may be MM-DD-YYYY or YYYY-MM-DD
+                const parseDate = (str) => {
+                  if (!str) return null;
+                  // MM-DD-YYYY or MM/DD/YYYY
+                  const mdy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+                  if (mdy) return new Date(parseInt(mdy[3]), parseInt(mdy[1]) - 1, parseInt(mdy[2]));
+                  // YYYY-MM-DD
+                  const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+                  if (ymd) return new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
+                  const d = new Date(str);
+                  return isNaN(d.getTime()) ? null : d;
+                };
+
+                // Pre-compute _daysActive and _effDateParsed for sorting/display
+                policies.forEach(p => {
+                  const d = parseDate(p.effectiveDate) || parseDate(p.submitDate);
+                  p._effDateParsed = d;
+                  p._daysActive = d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null;
+                });
+
+                const renderPolicyRow = (p, i) => {
+                  const isSelP = selectedPolicy?.policyNumber === p.policyNumber;
+                  const baseBg = Math.abs(p.balance) > 100 ? C.redDim : p.totalClawback > 0 ? C.yellowDim : 'transparent';
+                  const days = p._daysActive;
+                  const daysColor = days === null ? C.muted : days > 180 ? C.green : days > 90 ? C.accent : days > 30 ? C.yellow : C.muted;
+                  return (
+                    <tr key={i}
+                      style={{ cursor: 'pointer', background: isSelP ? 'rgba(91,159,255,0.08)' : baseBg, borderLeft: isSelP ? `3px solid ${C.accent}` : '3px solid transparent', transition: 'background 0.15s ease' }}
+                      onClick={() => setSelectedPolicy(isSelP ? null : p)}
+                      onMouseOver={e => { if (!isSelP) e.currentTarget.style.background = 'rgba(91,159,255,0.05)'; }}
+                      onMouseOut={e => { if (!isSelP) e.currentTarget.style.background = baseBg; }}
+                    >
+                      <td style={{ ...tdStyle, width: 28, padding: '6px 4px', textAlign: 'center', fontSize: 12, color: isSelP ? C.accent : C.muted }}>{isSelP ? '▾' : '▸'}</td>
+                      <td style={tdStyle}>{p.policyNumber}</td>
+                      <td style={tdStyle}>{p.insuredName}</td>
+                      <td style={{ ...tdStyle, fontSize: 10 }}>{p.carrier}</td>
+                      <td style={tdStyle}>{fmtDollar(p.premium)}</td>
+                      <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
+                      <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(p.totalPaid)}</td>
+                      <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(p.totalClawback)}</td>
+                      <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(p.netReceived)}</td>
+                      <td style={{ ...tdStyle, color: Math.abs(p.balance) < 1 ? C.green : C.yellow }}>{fmtDollar(p.balance)}</td>
+                      <td style={{ ...tdStyle, fontSize: 10 }}>{p._effDateParsed ? p._effDateParsed.toLocaleDateString() : '—'}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
+                      <td style={tdStyle}>
+                        <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: (p.status || '').includes('Active') ? C.greenDim : (p.status || '').includes('Cancelled') ? C.redDim : C.yellowDim, color: statusColor(p.status) }}>{p.status || '—'}</span>
+                      </td>
+                    </tr>
+                  );
+                };
+
+                const tableHeader = (
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, width: 28, padding: '6px 4px' }}></th>
+                      <SortTh label="Policy #" field="policyNumber" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Insured" field="insuredName" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Carrier" field="carrier" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Premium" field="premium" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Expected" field="expectedCommission" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Paid" field="totalPaid" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Clawback" field="totalClawback" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Net" field="netReceived" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Balance" field="balance" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Effective" field="effectiveDate" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Days" field="_daysActive" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Status" field="status" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                    </tr>
+                  </thead>
+                );
+
+                return groups.map((g, gi) => {
+                  const grpPaid = g.policies.reduce((s, p) => s + p.totalPaid, 0);
+                  const grpClawback = g.policies.reduce((s, p) => s + p.totalClawback, 0);
+                  const grpNet = g.policies.reduce((s, p) => s + p.netReceived, 0);
+                  const grpPremium = g.policies.reduce((s, p) => s + p.premium, 0);
+                  return (
+                    <Section key={gi} title={
+                      reconGroupBy === 'none' ? 'Policy Commission Balance' :
+                      `${g.label} — ${g.policies.length} ${g.policies.length === 1 ? 'policy' : 'policies'} · Premium ${fmtDollar(grpPremium)} · Net ${fmtDollar(grpNet)}`
+                    }>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          {tableHeader}
+                          <tbody>
+                            {g.policies.map(renderPolicyRow)}
+                            {reconGroupBy !== 'none' && g.policies.length > 1 && (
+                              <tr style={{ background: C.surface, fontWeight: 700 }}>
+                                <td style={tdStyle}></td>
+                                <td colSpan={3} style={{ ...tdStyle, fontSize: 10, color: C.muted }}>SUBTOTAL ({g.policies.length})</td>
+                                <td style={tdStyle}>{fmtDollar(grpPremium)}</td>
+                                <td style={tdStyle}>{fmtDollar(g.policies.reduce((s, p) => s + p.expectedCommission, 0))}</td>
+                                <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grpPaid)}</td>
+                                <td style={{ ...tdStyle, color: grpClawback > 0 ? C.red : C.muted }}>{fmtDollar(grpClawback)}</td>
+                                <td style={{ ...tdStyle, color: grpNet >= 0 ? C.green : C.red }}>{fmtDollar(grpNet)}</td>
+                                <td style={{ ...tdStyle, color: C.yellow }}>{fmtDollar(g.policies.reduce((s, p) => s + p.balance, 0))}</td>
+                                <td style={tdStyle}></td>
+                                <td style={{ ...tdStyle, textAlign: 'center', color: C.muted, fontSize: 10 }}>{Math.round(g.policies.filter(p => p._daysActive != null).reduce((s, p) => s + (p._daysActive || 0), 0) / Math.max(1, g.policies.filter(p => p._daysActive != null).length))}d avg</td>
+                                <td style={tdStyle}></td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Section>
+                  );
+                });
+              })()}
 
               {/* Policy Cash Flow drill-down */}
               {selectedPolicy && (

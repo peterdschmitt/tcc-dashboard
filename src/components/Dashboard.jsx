@@ -6,6 +6,7 @@ import BusinessHealthTab from './tabs/BusinessHealthTab';
 import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
+import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import DatePicker from './shared/DatePicker';
 
 const C = {
@@ -22,8 +23,9 @@ const TABS = [
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
+  { id: 'combined-policies', label: 'Combined Policies' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },  { id: 'commissions', label: 'Commissions' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },  { id: 'commission-statements', label: 'Commission Statements' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -2768,7 +2770,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
-        {activeTab === 'commission-statements' && <CommissionStatementsTab />}
+        {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
       </div>
     </div>
   );
