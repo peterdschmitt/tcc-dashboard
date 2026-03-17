@@ -920,7 +920,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalLeadSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
-  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
   const billable = calls.filter(c => c.isBillable).length;
   const totalCalls = calls.length;
@@ -1050,7 +1050,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
   const cg = goals?.company || {};
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
-  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
   const totalCalls = calls.length;
   const billable = calls.filter(c => c.isBillable).length;
@@ -1064,7 +1064,8 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
   policies.forEach(p => {
     if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
     byDay[p.submitDate].apps++;
-    if (isPlaced(p)) { byDay[p.submitDate].placed++; byDay[p.submitDate].premium += p.premium; byDay[p.submitDate].commission += p.commission; byDay[p.submitDate].gar += p.grossAdvancedRevenue; }
+    byDay[p.submitDate].gar += p.grossAdvancedRevenue;
+    if (isPlaced(p)) { byDay[p.submitDate].placed++; byDay[p.submitDate].premium += p.premium; byDay[p.submitDate].commission += p.commission; }
   });
   calls.forEach(c => {
     if (!byDay[c.date]) byDay[c.date] = { date: c.date, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
@@ -1195,7 +1196,8 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
     pp.forEach(p => {
       if (!agentMap[p.agent]) agentMap[p.agent] = { agent: p.agent, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
       agentMap[p.agent].apps++;
-      if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; agentMap[p.agent].gar += p.grossAdvancedRevenue; }
+      agentMap[p.agent].gar += p.grossAdvancedRevenue;
+      if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; }
     });
     (pub.agentBreakdown || []).forEach(a => {
       if (!agentMap[a.agent]) agentMap[a.agent] = { agent: a.agent, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
@@ -1205,7 +1207,8 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
     pp.forEach(p => {
       if (!carrierMap[p.carrier]) carrierMap[p.carrier] = { carrier: p.carrier, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
       carrierMap[p.carrier].apps++;
-      if (isPlaced(p)) { carrierMap[p.carrier].placed++; carrierMap[p.carrier].premium += p.premium; carrierMap[p.carrier].commission += p.commission; carrierMap[p.carrier].gar += p.grossAdvancedRevenue; }
+      carrierMap[p.carrier].gar += p.grossAdvancedRevenue;
+      if (isPlaced(p)) { carrierMap[p.carrier].placed++; carrierMap[p.carrier].premium += p.premium; carrierMap[p.carrier].commission += p.commission; }
     });
     return (
       <>
@@ -1284,7 +1287,8 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) 
   policies.forEach(p => {
     if (!agentMap[p.agent]) agentMap[p.agent] = { agent: p.agent, apps: 0, placed: 0, premium: 0, commission: 0, faceAmount: 0, gar: 0 };
     agentMap[p.agent].apps++;
-    if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; agentMap[p.agent].faceAmount += p.faceAmount; agentMap[p.agent].gar += p.grossAdvancedRevenue; }
+    agentMap[p.agent].gar += p.grossAdvancedRevenue;
+    if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; agentMap[p.agent].faceAmount += p.faceAmount; }
   });
   calls.forEach(c => {
     if (!c.rep) return;
@@ -1310,7 +1314,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) 
     const carrierMap = {}, sourceMap = {};
     ap.forEach(p => {
       if (!carrierMap[p.carrier]) carrierMap[p.carrier] = { carrier: p.carrier, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
-      carrierMap[p.carrier].apps++; if (isPlaced(p)) { carrierMap[p.carrier].placed++; carrierMap[p.carrier].premium += p.premium; carrierMap[p.carrier].commission += p.commission; carrierMap[p.carrier].gar += p.grossAdvancedRevenue; }
+      carrierMap[p.carrier].apps++; carrierMap[p.carrier].gar += p.grossAdvancedRevenue; if (isPlaced(p)) { carrierMap[p.carrier].placed++; carrierMap[p.carrier].premium += p.premium; carrierMap[p.carrier].commission += p.commission; }
       if (!sourceMap[p.leadSource]) sourceMap[p.leadSource] = { leadSource: p.leadSource, apps: 0, placed: 0, premium: 0 };
       sourceMap[p.leadSource].apps++; if (isPlaced(p)) { sourceMap[p.leadSource].placed++; sourceMap[p.leadSource].premium += p.premium; }
     });
@@ -1394,8 +1398,8 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }
   policies.forEach(p => {
     const key = [p.carrier, p.product].join('|||');
     if (!carrierMap[key]) carrierMap[key] = { key, carrier: p.carrier || '—', product: p.product || '—', apps: 0, placed: 0, premium: 0, commission: 0, faceAmount: 0, gar: 0, agents: new Set(), states: new Set() };
-    carrierMap[key].apps++; carrierMap[key].agents.add(p.agent); carrierMap[key].states.add(p.state);
-    if (isPlaced(p)) { carrierMap[key].placed++; carrierMap[key].premium += p.premium; carrierMap[key].commission += p.commission; carrierMap[key].faceAmount += p.faceAmount; carrierMap[key].gar += p.grossAdvancedRevenue; }
+    carrierMap[key].apps++; carrierMap[key].agents.add(p.agent); carrierMap[key].states.add(p.state); carrierMap[key].gar += p.grossAdvancedRevenue;
+    if (isPlaced(p)) { carrierMap[key].placed++; carrierMap[key].premium += p.premium; carrierMap[key].commission += p.commission; carrierMap[key].faceAmount += p.faceAmount; }
   });
   const carrierRows = Object.values(carrierMap).map(c => ({ ...c, agentCount: c.agents.size, stateCount: c.states.size })).sort((a, b) => b.premium - a.premium);
 
@@ -1411,7 +1415,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }
     const agentMap = {};
     cp.forEach(p => {
       if (!agentMap[p.agent]) agentMap[p.agent] = { agent: p.agent, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
-      agentMap[p.agent].apps++; if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; agentMap[p.agent].gar += p.grossAdvancedRevenue; }
+      agentMap[p.agent].apps++; agentMap[p.agent].gar += p.grossAdvancedRevenue; if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; }
     });
     return (
       <>
@@ -1473,7 +1477,7 @@ function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange }) {
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
-  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
   const totalSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
   const totalCalls = calls.length;
   const billable = calls.filter(c => c.isBillable).length;
@@ -1662,7 +1666,7 @@ function PoliciesTab({ policies }) {
   const placed = sorted.filter(isPlaced);
   const totalPrem = placed.reduce((s, p) => s + p.premium, 0);
   const totalFace = placed.reduce((s, p) => s + p.faceAmount, 0);
-  const totalGAR = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+  const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
 
   return (

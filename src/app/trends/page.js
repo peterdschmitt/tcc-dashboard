@@ -138,7 +138,8 @@ export default function TrendsPage() {
     data.policies.forEach(p => {
       if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
       byDay[p.submitDate].apps++;
-      if (isPlaced(p)) { byDay[p.submitDate].placed++; byDay[p.submitDate].premium += p.premium; byDay[p.submitDate].commission += p.commission; byDay[p.submitDate].gar += p.grossAdvancedRevenue; }
+      byDay[p.submitDate].gar += p.grossAdvancedRevenue;
+      if (isPlaced(p)) { byDay[p.submitDate].placed++; byDay[p.submitDate].premium += p.premium; byDay[p.submitDate].commission += p.commission; }
     });
     data.calls.forEach(c => {
       if (!byDay[c.date]) byDay[c.date] = { date: c.date, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
@@ -168,7 +169,8 @@ export default function TrendsPage() {
         const key = p.leadSource;
         if (!byDay[p.submitDate][key + '_apps']) { byDay[p.submitDate][key + '_apps'] = 0; byDay[p.submitDate][key + '_placed'] = 0; byDay[p.submitDate][key + '_premium'] = 0; byDay[p.submitDate][key + '_commission'] = 0; byDay[p.submitDate][key + '_gar'] = 0; }
         byDay[p.submitDate][key + '_apps']++;
-        if (isPlaced(p)) { byDay[p.submitDate][key + '_placed']++; byDay[p.submitDate][key + '_premium'] += p.premium; byDay[p.submitDate][key + '_commission'] += p.commission; byDay[p.submitDate][key + '_gar'] += p.grossAdvancedRevenue; }
+        byDay[p.submitDate][key + '_gar'] += p.grossAdvancedRevenue;
+        if (isPlaced(p)) { byDay[p.submitDate][key + '_placed']++; byDay[p.submitDate][key + '_premium'] += p.premium; byDay[p.submitDate][key + '_commission'] += p.commission; }
       });
       data.calls.forEach(c => {
         if (!selectedItems.includes(c.campaignCode)) return;
@@ -185,7 +187,8 @@ export default function TrendsPage() {
         const key = p.agent;
         if (!byDay[p.submitDate][key + '_apps']) { byDay[p.submitDate][key + '_apps'] = 0; byDay[p.submitDate][key + '_placed'] = 0; byDay[p.submitDate][key + '_premium'] = 0; byDay[p.submitDate][key + '_commission'] = 0; byDay[p.submitDate][key + '_gar'] = 0; }
         byDay[p.submitDate][key + '_apps']++;
-        if (isPlaced(p)) { byDay[p.submitDate][key + '_placed']++; byDay[p.submitDate][key + '_premium'] += p.premium; byDay[p.submitDate][key + '_commission'] += p.commission; byDay[p.submitDate][key + '_gar'] += p.grossAdvancedRevenue; }
+        byDay[p.submitDate][key + '_gar'] += p.grossAdvancedRevenue;
+        if (isPlaced(p)) { byDay[p.submitDate][key + '_placed']++; byDay[p.submitDate][key + '_premium'] += p.premium; byDay[p.submitDate][key + '_commission'] += p.commission; }
       });
       data.calls.forEach(c => {
         if (!c.rep || !selectedItems.includes(c.rep)) return;
@@ -224,7 +227,7 @@ export default function TrendsPage() {
     const placed = data.policies.filter(isPlaced);
     const prem = placed.reduce((s, p) => s + p.premium, 0);
     const comm = placed.reduce((s, p) => s + p.commission, 0);
-    const gar = placed.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+    const gar = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
     const spend = data.calls.reduce((s, c) => s + c.cost, 0);
     const bill = data.calls.filter(c => c.isBillable).length;
     return {
