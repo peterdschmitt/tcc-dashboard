@@ -7,3 +7,4 @@ node_modules/
 *.tsbuildinfo
 env.vercel
 .env.local
+.vercel

@@ -8,12 +8,14 @@
     "start": "next start"
   },
   "dependencies": {
+    "date-fns": "^3.6.0",
+    "googleapis": "^144.0.0",
     "next": "^14.2.0",
+    "pdf-parse": "^1.1.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "googleapis": "^144.0.0",
     "recharts": "^2.12.0",
-    "date-fns": "^3.6.0"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "eslint": "^8.0.0",

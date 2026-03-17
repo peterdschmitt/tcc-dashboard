@@ -5,6 +5,7 @@ import RetentionDashboardTab from './tabs/RetentionDashboardTab';
 import BusinessHealthTab from './tabs/BusinessHealthTab';
 import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
+import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import DatePicker from './shared/DatePicker';
 
 const C = {
@@ -22,7 +23,7 @@ const TABS = [
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },  { id: 'commissions', label: 'Commissions' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },  { id: 'commission-statements', label: 'Commission Statements' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -2161,7 +2162,7 @@ function PolicyStatusTab({ policies, calls }) {
         const tdStyle = { padding: '6px 12px', textAlign: 'center', fontSize: 13, fontFamily: 'monospace', borderBottom: `1px solid ${C.border}` };
         const stickyLabel = (color, bold) => ({ ...tdStyle, textAlign: 'left', fontFamily: 'inherit', fontWeight: bold ? 700 : 600, fontSize: 11, color, position: 'sticky', left: 0, background: C.card, zIndex: 1 });
         const totalColBorder = `2px solid ${C.accent}`;
-        const dividerRow = <tr key="div"><td colSpan={weekKeys.length + 2} style={{ height: 2, background: C.border, padding: 0 }} /></tr>;
+        const dividerRow = (k) => <tr key={`div-${k}`}><td colSpan={weekKeys.length + 2} style={{ height: 2, background: C.border, padding: 0 }} /></tr>;
 
         return <Section title="Sales Cohort Waterfall" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Policies grouped by week sold · downstream %'s based on Initial In Force</span>}>
           <div style={{ overflowX: 'auto', padding: 16 }}>
@@ -2203,7 +2204,7 @@ function PolicyStatusTab({ policies, calls }) {
                   </td>
                 </tr>
 
-                {dividerRow}
+                {dividerRow(1)}
 
                 {/* Section 2: Status breakdown — counts + % of Initial In Force */}
                 {STATUS_ROWS_DETAIL.map(r => (
@@ -2223,7 +2224,7 @@ function PolicyStatusTab({ policies, calls }) {
                   </tr>
                 ))}
 
-                {dividerRow}
+                {dividerRow(2)}
 
                 {/* In Force Rate — Active / Initial In Force */}
                 <tr>
@@ -2763,6 +2764,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
+        {activeTab === 'commission-statements' && <CommissionStatementsTab />}
       </div>
     </div>
   );

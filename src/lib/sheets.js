@@ -17,16 +17,24 @@ export async function getAuth() {
   }
   cachedAuth = new google.auth.GoogleAuth({
     credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    scopes: [
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/drive.readonly',
+    ],
   });
   return cachedAuth;
 }
 
-// ─── WRITE HELPERS ─────────────────────────────────
+// ─── CLIENT HELPERS ─────────────────────────────────
 
 export async function getSheetsClient() {
   const auth = await getAuth();
   return google.sheets({ version: 'v4', auth });
+}
+
+export async function getDriveClient() {
+  const auth = await getAuth();
+  return google.drive({ version: 'v3', auth });
 }
 
 /** Read raw rows (with headers) from a tab */

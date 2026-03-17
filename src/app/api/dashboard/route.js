@@ -266,22 +266,22 @@ export async function GET(request) {
       }
       const pub = pnlByPublisher[key];
       pub.appCount++;
+      pub.grossAdvancedRevenue += pol.grossAdvancedRevenue;
       const isPlaced = ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(pol.placed);
       if (isPlaced) {
         pub.totalPremium += pol.premium;
         pub.totalCommission += pol.commission;
         pub.placedCount++;
         pub.totalFace += pol.faceAmount;
-        pub.grossAdvancedRevenue += pol.grossAdvancedRevenue;
       }
       if (pol.agent) {
         if (!pub.agents[pol.agent]) pub.agents[pol.agent] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0, grossAdvancedRevenue: 0 };
         pub.agents[pol.agent].appCount++;
+        pub.agents[pol.agent].grossAdvancedRevenue += pol.grossAdvancedRevenue;
         if (isPlaced) {
           pub.agents[pol.agent].totalPremium += pol.premium;
           pub.agents[pol.agent].totalCommission += pol.commission;
           pub.agents[pol.agent].placedCount++;
-          pub.agents[pol.agent].grossAdvancedRevenue += pol.grossAdvancedRevenue;
         }
       }
     });
