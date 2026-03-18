@@ -78,6 +78,8 @@ export default function CombinedPoliciesTab() {
   const [groupBy, setGroupBy] = useState('none');
   const [selectedPolicy, setSelectedPolicy] = useState(null);
   const [cashFlow, setCashFlow] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResult, setSearchResult] = useState(null); // policy to show in modal
   const [cashFlowLoading, setCashFlowLoading] = useState(false);
   const mainSort = useSort('premium', 'desc');
   const unmatchedSort = useSort('commissionAmount', 'desc');
@@ -222,14 +224,62 @@ export default function CombinedPoliciesTab() {
     </thead>
   );
 
+  // Search logic
+  const searchResults = searchQuery.length >= 2 ? enriched.filter(p => {
+    const q = searchQuery.toLowerCase();
+    return (p.policyNumber || '').toLowerCase().includes(q) || (p.insuredName || '').toLowerCase().includes(q);
+  }).slice(0, 10) : [];
+
   return (
     <div>
-      {/* Sub-tab toggle */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[['combined', 'Combined Policies'], ['commissions', 'Agent Commissions'], ['statements', 'Commission Statements']].map(([val, lbl]) => (
-          <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
-        ))}
+      {/* Search bar + Sub-tab toggle row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['combined', 'Combined Policies'], ['commissions', 'Agent Commissions'], ['statements', 'Commission Statements']].map(([val, lbl]) => (
+            <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
+          ))}
+        </div>
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            placeholder="Search policy # or name..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, fontSize: 12, padding: '6px 12px', fontFamily: C.mono, width: 240, outline: 'none' }}
+          />
+          {searchQuery && <span onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: C.muted, cursor: 'pointer', fontSize: 14 }}>×</span>}
+          {/* Search dropdown */}
+          {searchResults.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, width: 420, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, zIndex: 100, maxHeight: 360, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+              {searchResults.map((p, i) => {
+                const cs = STATUS_COLORS[p.commissionStatus] || STATUS_COLORS.pending;
+                return (
+                  <div key={i}
+                    onClick={() => { setSearchResult(p); setSearchQuery(''); }}
+                    style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: i < searchResults.length - 1 ? `1px solid ${C.border}` : 'none', transition: 'background 0.1s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(91,159,255,0.08)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{p.insuredName}</span>
+                        <span style={{ fontSize: 11, color: C.muted, marginLeft: 8, fontFamily: C.mono }}>{p.policyNumber}</span>
+                      </div>
+                      <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text }}>{cs.label}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+                      {p.carrier} · {fmtDollar(p.premium)}/mo · {p.agent}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Search Result Modal */}
+      {searchResult && <PolicyDetailModal policy={searchResult} onClose={() => setSearchResult(null)} />}
 
       {subTab === 'statements' && <CommissionStatementsTab />}
 
@@ -675,6 +725,134 @@ function AgentCommissionsView({ policies, thStyle, tdStyle }) {
           </>
         );
       })()}
+    </div>
+  );
+}
+
+// Modal overlay showing full policy detail + cash flow
+function PolicyDetailModal({ policy, onClose }) {
+  const [cashData, setCashData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (policy.entries > 0) {
+      fetch(`/api/commission-statements/policy/${encodeURIComponent(policy.policyNumber)}`)
+        .then(r => r.json())
+        .then(d => { setCashData(d.error ? null : d); setLoading(false); })
+        .catch(() => { setCashData(null); setLoading(false); });
+    } else {
+      setLoading(false);
+    }
+  }, [policy]);
+
+  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
+  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
+  const cs = STATUS_COLORS[policy.commissionStatus] || STATUS_COLORS.pending;
+  const d = parseDate(policy.effectiveDate) || parseDate(policy.submitDate);
+  const days = d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null;
+
+  const sc = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.green; if (v.includes('pending') || v.includes('submitted')) return '#facc15'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.red; if (v.includes('hold') || v.includes('need')) return '#fb923c'; return C.muted; };
+  const sb = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.greenDim; if (v.includes('pending') || v.includes('submitted')) return '#2e2a0a'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.redDim; if (v.includes('hold') || v.includes('need')) return '#2e1a0a'; return '#1a2538'; };
+
+  // Cash flow running balance
+  const entries = cashData ? (cashData.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || '')) : [];
+  let running = 0;
+  const withRunning = entries.map(e => { running += e.commissionAmount || 0; return { ...e, runningBalance: running }; });
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 40, overflowY: 'auto' }}
+      onClick={onClose}
+    >
+      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, width: '90%', maxWidth: 1100, maxHeight: 'calc(100vh - 80px)', overflowY: 'auto', padding: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.text }}>{policy.insuredName}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+              Policy {policy.policyNumber} · {policy.carrier} · {policy.agent}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 14, padding: '4px 12px', cursor: 'pointer' }}>✕ Close</button>
+        </div>
+
+        {/* KPI cards */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+          <KPICard label="Premium" value={fmtDollar(policy.premium)} color={C.accent} />
+          <KPICard label="Expected" value={fmtDollar(policy.expectedCommission)} color={C.muted} />
+          <KPICard label="Paid" value={fmtDollar(policy.totalPaid)} color={policy.totalPaid > 0 ? C.green : C.muted} />
+          <KPICard label="Clawback" value={fmtDollar(policy.totalClawback)} color={policy.totalClawback > 0 ? C.red : C.muted} />
+          <KPICard label="Net" value={fmtDollar(policy.netReceived)} color={policy.netReceived >= 0 ? C.green : C.red} />
+          <KPICard label="Balance" value={fmtDollar(policy.balance)} color={Math.abs(policy.balance) < 1 ? C.green : '#facc15'} />
+          <KPICard label="Days Active" value={days !== null ? days : '—'} color={C.accent} />
+        </div>
+
+        {/* Policy details grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 1, padding: 1, background: C.border, borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+          {[
+            ['Policy #', policy.policyNumber],
+            ['Insured', policy.insuredName],
+            ['Agent', policy.agent],
+            ['Carrier', policy.carrier],
+            ['Product', policy.product || '—'],
+            ['Monthly Premium', fmtDollar(policy.premium)],
+            ['Effective Date', d ? d.toLocaleDateString() : '—'],
+            ['Submit Date', policy.submitDate || '—'],
+            ['Policy Status', policy.status || '—'],
+            ['Comm Status', cs.label],
+            ['Expected Commission', fmtDollar(policy.expectedCommission)],
+            ['Ledger Entries', policy.entries],
+          ].map(([label, val], i) => (
+            <div key={i} style={{ background: C.card, padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>{label}</span>
+              <span style={{ fontSize: 12, color: label === 'Policy Status' ? sc(String(val)) : label === 'Comm Status' ? cs.text : C.text, fontFamily: C.mono, fontWeight: 600 }}>{val}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Commission Cash Flow */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Commission Cash Flow</div>
+        {loading ? (
+          <div style={{ color: C.muted, fontSize: 12 }}>Loading...</div>
+        ) : policy.entries === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', background: C.card, borderRadius: 8, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 13, color: '#facc15', fontWeight: 700, marginBottom: 4 }}>No Commission Activity</div>
+            <div style={{ fontSize: 11, color: C.muted }}>This policy has not appeared in any carrier commission statement yet.</div>
+          </div>
+        ) : withRunning.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Date</th>
+                  <th style={thStyle}>Type</th>
+                  <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>Running Balance</th>
+                  <th style={thStyle}>Statement File</th>
+                  <th style={thStyle}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {withRunning.map((e, i) => (
+                  <tr key={i}>
+                    <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
+                    <td style={tdStyle}>
+                      <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim, color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red }}>{e.transactionType}</span>
+                    </td>
+                    <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+                    <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
+                    <td style={{ ...tdStyle, fontSize: 10 }}>{e.statementFile || '—'}</td>
+                    <td style={{ ...tdStyle, fontSize: 10, color: C.muted }}>{e.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ color: C.muted, fontSize: 12 }}>No ledger entries found.</div>
+        )}
+      </div>
     </div>
   );
 }
