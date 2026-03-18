@@ -35,17 +35,18 @@ function useSort(defaultKey = null, defaultDir = 'asc') {
 }
 
 /** Sortable table header cell */
-function SortTh({ label, field, sortKey, sortDir, onSort, style }) {
+function SortTh({ label, field, sortKey, sortDir, onSort, style, tooltip }) {
   const active = sortKey === field;
   return (
     <th
+      title={tooltip || ''}
       onClick={() => onSort(field)}
       style={{
-        ...style, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+        ...style, cursor: tooltip ? 'help' : 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
         color: active ? C.accent : style?.color || C.muted,
       }}
     >
-      {label} <span style={{ fontSize: 8, opacity: active ? 1 : 0.3 }}>{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      {label}{tooltip && <span style={{ marginLeft: 3, fontSize: 7, opacity: 0.5 }}>ⓘ</span>} <span style={{ fontSize: 8, opacity: active ? 1 : 0.3 }}>{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
     </th>
   );
 }
@@ -59,13 +60,14 @@ function Section({ title, children }) {
   );
 }
 
-function KPICard({ label, value, color, subtitle }) {
+function KPICard({ label, value, color, subtitle, tooltip }) {
   return (
-    <div style={{
+    <div title={tooltip || ''} style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
       padding: '12px 16px', minWidth: 120, borderTop: `3px solid ${color || C.accent}`,
+      cursor: tooltip ? 'help' : 'default',
     }}>
-      <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}{tooltip && <span style={{ marginLeft: 4, fontSize: 8, opacity: 0.6 }}>ⓘ</span>}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color: color || C.text, fontFamily: C.mono, marginTop: 4 }}>{value}</div>
       {subtitle && <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{subtitle}</div>}
     </div>
@@ -765,11 +767,11 @@ export default function CommissionStatementsTab() {
             <>
               {/* KPI row */}
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                <KPICard label="Policies with Activity" value={reconciliation.summary.totalPolicies} color={C.accent} />
-                <KPICard label="Total Expected" value={fmtDollar(reconciliation.summary.totalExpected)} color={C.muted} />
-                <KPICard label="Total Received" value={fmtDollar(reconciliation.summary.totalReceived)} color={C.green} />
-                <KPICard label="Variance" value={fmtDollar(reconciliation.summary.variance)} color={reconciliation.summary.variance >= 0 ? C.green : C.red} />
-                <KPICard label="Discrepancies" value={reconciliation.summary.discrepancies} color={reconciliation.summary.discrepancies > 0 ? C.yellow : C.muted} />
+                <KPICard label="Policies with Activity" value={reconciliation.summary.totalPolicies} color={C.accent} tooltip="Count of policies that have at least one entry in the Commission Ledger (from uploaded carrier statements)" />
+                <KPICard label="Total Expected" value={fmtDollar(reconciliation.summary.totalExpected)} color={C.muted} tooltip="Sum of expected commissions across all policies with activity. Expected = Premium × Commission Rate × 9 months (from Commission Rates sheet)" />
+                <KPICard label="Total Received" value={fmtDollar(reconciliation.summary.totalReceived)} color={C.green} tooltip="Net commission received from carriers = Total Paid - Total Clawbacks (from uploaded commission statements)" />
+                <KPICard label="Variance" value={fmtDollar(reconciliation.summary.variance)} color={reconciliation.summary.variance >= 0 ? C.green : C.red} tooltip="Difference between what was received and what was expected. Variance = Total Received - Total Expected. Negative means carriers owe more." />
+                <KPICard label="Discrepancies" value={reconciliation.summary.discrepancies} color={reconciliation.summary.discrepancies > 0 ? C.yellow : C.muted} tooltip="Number of policies where the outstanding balance exceeds $1. These may need follow-up with the carrier." />
               </div>
 
               {/* Status breakdown counts */}
@@ -888,18 +890,18 @@ export default function CommissionStatementsTab() {
                   <thead>
                     <tr>
                       <th style={{ ...thStyle, width: 28, padding: '6px 4px' }}></th>
-                      <SortTh label="Policy #" field="policyNumber" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Insured" field="insuredName" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Carrier" field="carrier" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Premium" field="premium" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Expected" field="expectedCommission" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Paid" field="totalPaid" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Clawback" field="totalClawback" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Net" field="netReceived" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Balance" field="balance" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Effective" field="effectiveDate" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Days" field="_daysActive" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
-                      <SortTh label="Status" field="status" {...reconSort} onSort={reconSort.toggle} style={thStyle} />
+                      <SortTh label="Policy #" field="policyNumber" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Policy number from the sales/application tracker" />
+                      <SortTh label="Insured" field="insuredName" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Policyholder name from the sales tracker (First + Last)" />
+                      <SortTh label="Carrier" field="carrier" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Insurance carrier from the 'Carrier + Product + Payout' field in the sales tracker" />
+                      <SortTh label="Premium" field="premium" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Monthly premium from the sales tracker" />
+                      <SortTh label="Expected" field="expectedCommission" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Expected total commission = Premium × Commission Rate × 9 months advance. Rate comes from the Commission Rates sheet." />
+                      <SortTh label="Paid" field="totalPaid" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Total advances paid by the carrier, from uploaded commission statements (positive amounts in the Commission Ledger)" />
+                      <SortTh label="Clawback" field="totalClawback" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Total chargebacks/recoveries from the carrier, from uploaded commission statements (negative amounts in the Commission Ledger)" />
+                      <SortTh label="Net" field="netReceived" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Net commission received = Paid - Clawback. From carrier commission statements." />
+                      <SortTh label="Balance" field="balance" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Outstanding balance = Expected - Paid + Clawback. Positive means carrier still owes money. Zero means fully paid." />
+                      <SortTh label="Effective" field="effectiveDate" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Policy effective date from the sales tracker" />
+                      <SortTh label="Days" field="_daysActive" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Days since effective date. Calculated as today minus effective date." />
+                      <SortTh label="Status" field="status" {...reconSort} onSort={reconSort.toggle} style={thStyle} tooltip="Policy status from the sales tracker (Policy Status or Placed? column)" />
                     </tr>
                   </thead>
                 );
