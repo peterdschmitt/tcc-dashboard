@@ -185,15 +185,24 @@ function parseAnnualizationLine(line) {
   const isRecovery = /GENERICATTAE/i.test(commType);
   const transactionType = isRecovery ? 'recovery' : 'advance';
 
-  // Parse dollar amounts from the rest of the line
-  // Extract all dollar amounts (positive or negative/parenthesized)
+  // Parse dollar amounts and percentages from the rest of the line
   const amounts = extractAmounts(amountsStr);
+  const pcts = extractPercentages(amountsStr);
 
   // The last amount is COMM ACTIVITY, second-to-last is OUTSTANDING ADV BALANCE
   const commActivity = amounts.length > 0 ? amounts[amounts.length - 1] : 0;
   const outstandingBalance = amounts.length > 1 ? amounts[amounts.length - 2] : 0;
   const annualPrem = amounts.length > 2 ? amounts[0] : 0;
   const premiumPaid = amounts.length > 3 ? amounts[1] : 0;
+
+  // Percentages: typically [commissionPct, advanceRate, splitPct] but varies
+  // Common patterns: "100% $802.56 75 95% $508.28 $571.82"
+  //   100% = split/commission basis rate
+  //   75 = advance rate (bare number, no %)
+  //   95% = commission rate
+  const advanceRate = extractBareNumber(amountsStr); // bare number like "75" = advance rate
+  const commissionPct = pcts.length > 0 ? pcts[0] : 0;
+  const splitPct = pcts.length > 1 ? pcts[1] : 0;
 
   // Cancellation detection:
   // Outstanding balance = $0.00 AND commission is negative → full clawback
@@ -211,6 +220,9 @@ function parseAnnualizationLine(line) {
     premiumPaid: Math.abs(premiumPaid),
     commissionAmount: commActivity,
     outstandingBalance,
+    splitPct: commissionPct,  // first % is usually the commission basis rate
+    commissionPct: splitPct,  // second % is usually the payout rate
+    advancePct: advanceRate,  // bare number is the advance rate
     product: '', // Not available in ANNUALIZATION section
     cancellationIndicator: isCancellation,
     section: 'annualization',
@@ -235,6 +247,7 @@ function parseOverrideLine(line) {
   const [, co, policyNumber, product, insuredName, effDate, trxDate, mode, agentId, uplineId, amountsStr] = match;
 
   const amounts = extractAmounts(amountsStr);
+  const pcts = extractPercentages(amountsStr);
   const overrideComm = amounts.length > 0 ? amounts[amounts.length - 1] : 0;
   const premiumAmount = amounts.length > 1 ? amounts[0] : 0;
 
@@ -243,6 +256,7 @@ function parseOverrideLine(line) {
     insuredName: insuredName.trim(),
     agent: '',
     agentId,
+    commissionAgentId: uplineId,  // Upline agent who receives override
     effDate,
     transactionType: 'override',
     commType: 'OVERRIDE',
@@ -250,6 +264,9 @@ function parseOverrideLine(line) {
     premiumPaid: 0,
     commissionAmount: overrideComm,
     outstandingBalance: 0,
+    splitPct: pcts.length > 0 ? pcts[0] : 0,
+    commissionPct: pcts.length > 1 ? pcts[1] : 0,
+    advancePct: extractBareNumber(amountsStr),
     product: product.trim(),
     cancellationIndicator: overrideComm < 0, // Negative override = clawback on override
     section: 'override',
@@ -285,6 +302,35 @@ function extractAmounts(str) {
   }
 
   return amounts;
+}
+
+/**
+ * Extract percentage values from a string.
+ * Matches "100%", "95%", etc. Returns array of numbers.
+ */
+function extractPercentages(str) {
+  const pcts = [];
+  const parts = str.split(/\s+/);
+  for (const part of parts) {
+    const m = part.match(/^(\d+(?:\.\d+)?)%$/);
+    if (m) pcts.push(parseFloat(m[1]));
+  }
+  return pcts;
+}
+
+/**
+ * Extract a bare number (no $ or %) that represents the advance rate.
+ * AIG shows advance rate as just "75" or "9" without any symbol.
+ */
+function extractBareNumber(str) {
+  const parts = str.split(/\s+/);
+  for (const part of parts) {
+    // Bare number: not a dollar amount, not a percentage, just digits
+    if (/^\d{1,3}$/.test(part) && !part.includes('$') && !part.includes('%')) {
+      return parseFloat(part);
+    }
+  }
+  return 0;
 }
 
 /**

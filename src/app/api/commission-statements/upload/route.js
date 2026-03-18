@@ -5,12 +5,29 @@ import { parseStatement } from '@/lib/parsers/index';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 
-// Commission Ledger column headers
+// Commission Ledger column headers — 36-column normalized schema
 const LEDGER_HEADERS = [
+  // Core identity (1-6)
   'Transaction ID', 'Statement Date', 'Processing Date', 'Carrier',
-  'Policy #', 'Insured Name', 'Agent', 'Transaction Type',
-  'Premium', 'Commission Amount', 'Outstanding Balance',
+  'Policy #', 'Insured Name',
+  // Agent info (7-10)
+  'Writing Agent', 'Writing Agent ID', 'Commission Agent', 'Commission Agent ID',
+  // Transaction classification (11-13)
+  'Transaction Type', 'Description', 'Product Code',
+  // Dates (14)
+  'Issue Date',
+  // Premiums (15-16)
+  'Premium (Annual)', 'Premium (Modal)',
+  // Rates (17-20)
+  'Split %', 'Commission %', 'Advance %', 'Adjustment Rate',
+  // Amounts (21-26)
+  'Advance Amount', 'Commission Amount', 'Net Commission',
+  'Outstanding Balance', 'Chargeback Amount', 'Recovery Amount',
+  // Policy details (27-30)
+  'Payment Frequency', 'Policy Fee', 'Age', 'Gender',
+  // Matching (31-34)
   'Matched Policy #', 'Match Type', 'Match Confidence', 'Status',
+  // Metadata (35-36)
   'Statement File', 'Notes',
 ];
 
@@ -141,15 +158,38 @@ export async function POST(request) {
         transactionId,
         policyNumber: record.policyNumber,
         insuredName: record.insuredName,
+        // Agent info
         agent: record.agent,
         agentId: record.agentId,
+        commissionAgent: record.commissionAgent || '',
+        commissionAgentId: record.commissionAgentId || '',
+        // Transaction
         transactionType: record.transactionType,
         commType: record.commType,
+        product: record.product || '',
+        // Dates
+        effDate: record.effDate || '',
+        // Premiums
         premium: record.premium,
+        premiumModal: record.premiumPaid || 0,
+        // Rates
+        splitPct: record.splitPct,
+        commissionPct: record.commissionPct,
+        advancePct: record.advancePct,
+        adjRate: record.adjRate || 0,
+        // Amounts
+        advanceAmount: record.commissionAmount > 0 ? record.commissionAmount : 0,
         commissionAmount: record.commissionAmount,
+        netCommission: record.netCommission || 0,
         outstandingBalance: record.outstandingBalance,
-        product: record.product,
-        effDate: record.effDate,
+        chargebackAmount: record.chargebackAmount || 0,
+        recoveryAmount: record.recoveryAmount || 0,
+        // Policy details
+        frequency: record.frequency || '',
+        policyFee: record.policyFee || 0,
+        age: record.age || '',
+        gender: record.gender || '',
+        // Matching
         matchedPolicy,
         matchType,
         matchConfidence,
@@ -175,24 +215,53 @@ export async function POST(request) {
       const ledgerTab = process.env.COMMISSION_LEDGER_TAB || 'Commission Ledger';
       const statementsTab = process.env.COMMISSION_STATEMENTS_TAB || 'Commission Statements';
 
-      // Batch append all ledger rows
+      // Batch append all ledger rows (36 columns)
       const allRecords = [...matchedRecords, ...unmatchedRecords];
       const ledgerRows = allRecords.map(r => [
+        // Core identity (1-6)
         r.transactionId,
         parsed.statementDate || parsed.payPeriod || processingDate,
         processingDate,
         parsed.carrier,
         r.policyNumber,
         r.insuredName,
-        r.agent,
+        // Agent info (7-10)
+        r.agent || '',
+        r.agentId || '',
+        r.commissionAgent || '',
+        r.commissionAgentId || '',
+        // Transaction classification (11-13)
         r.transactionType,
+        r.commType || '',
+        r.product || '',
+        // Dates (14)
+        r.effDate || '',
+        // Premiums (15-16)
         r.premium?.toFixed(2) || '0.00',
+        r.premiumModal ? r.premiumModal.toFixed(2) : '',
+        // Rates (17-20)
+        r.splitPct != null ? r.splitPct : '',
+        r.commissionPct != null ? r.commissionPct : '',
+        r.advancePct != null ? r.advancePct : '',
+        r.adjRate || '',
+        // Amounts (21-26)
+        r.advanceAmount ? r.advanceAmount.toFixed(2) : '',
         r.commissionAmount?.toFixed(2) || '0.00',
+        r.netCommission ? r.netCommission.toFixed(2) : '',
         r.outstandingBalance?.toFixed(2) || '0.00',
+        r.chargebackAmount ? r.chargebackAmount.toFixed(2) : '',
+        r.recoveryAmount ? r.recoveryAmount.toFixed(2) : '',
+        // Policy details (27-30)
+        r.frequency || '',
+        r.policyFee ? r.policyFee.toFixed(2) : '',
+        r.age || '',
+        r.gender || '',
+        // Matching (31-34)
         r.matchedPolicy || '',
         r.matchType,
         r.matchConfidence?.toFixed(2) || '0.00',
         r.status,
+        // Metadata (35-36)
         filename,
         r.cancellationIndicator ? 'Cancellation detected - pending review' : '',
       ]);

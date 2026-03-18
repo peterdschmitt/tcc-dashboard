@@ -61,9 +61,14 @@ export async function parse(buffer, text) {
     const anzPrem = parseAmount(row[colIdx['Anz Prem']]);
     const advance = parseAmount(row[colIdx['Advance']]);
     const advBal = parseAmount(row[colIdx['Adv Bal']]);
-    const advRate = parseAmount(row[colIdx['Adv Rate']]);
+    const advRate = parseAmount(row[colIdx['Adv Rate']] ?? row[colIdx['PlnAdv Rate']]);
     const comRate = parseAmount(row[colIdx['Com Rate']]);
+    const adjRate = parseAmount(row[colIdx['Adj Rate']]);
+    const pfeePrem = parseAmount(row[colIdx['PFee Prem']]);
     const issDate = cleanVal(row[colIdx['IssDate']]);
+    const freq = cleanVal(row[colIdx['Freq']]);
+    const sex = cleanVal(row[colIdx['Sex']]);
+    const age = cleanVal(row[colIdx['Age']]);
 
     // Determine transaction type from Action
     const isCancellation = /CANCEL|LAPSE|CHARGEBACK/i.test(action);
@@ -91,6 +96,14 @@ export async function parse(buffer, text) {
       commissionAmount,
       outstandingBalance: advBal,
       product: plan,
+      splitPct: 0,
+      commissionPct: comRate,
+      advancePct: advRate,
+      adjRate,
+      frequency: freq,
+      policyFee: pfeePrem,
+      age,
+      gender: sex,
       cancellationIndicator: isCancellation,
       section: 'advance',
       rawLine: lines[i],

@@ -87,6 +87,9 @@ export async function parse(buffer, text, workbook) {
     }
 
     const commPrem = parseNum(row[colIdx['Commission Premium']]);
+    const splitPct = parseNum(row[colIdx['Split %']]);
+    const commPct = parseNum(row[colIdx['Commission %']]);
+    const advPct = parseNum(row[colIdx['Adv %']]);
     const advanceAmount = parseNum(row[colIdx['Advance Amount']]);
     const commAmount = parseNum(row[colIdx['Commission Amount']]);
     const netCommission = parseNum(row[colIdx['Net Commission Amount']]);
@@ -113,19 +116,29 @@ export async function parse(buffer, text, workbook) {
 
     const insuredName = insuredLast + (insuredFirst ? ', ' + insuredFirst : '');
     const agentName = writingLast + (writingFirst ? ', ' + writingFirst : '') || commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
+    const commAgentName = commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
+    const commAgentNumber = String(row[colIdx['Commission Agent Number']] || '').trim();
 
     records.push({
       policyNumber,
       insuredName,
       agent: agentName,
       agentId: writingNumber,
+      commissionAgent: commAgentName,
+      commissionAgentId: commAgentNumber,
       effDate: txnDate,
       transactionType,
       commType: description,
       premium: commPrem,
       premiumPaid: 0,
       commissionAmount: finalAmount,
+      netCommission: netCommission,
       outstandingBalance: endingBalance,
+      chargebackAmount: chargeback,
+      recoveryAmount: recovery,
+      splitPct,
+      commissionPct: commPct,
+      advancePct: advPct,
       product: '',
       cancellationIndicator: isCancellation,
       section: descLower.includes('ow ') || descLower.includes('override') ? 'override' : 'advance',
