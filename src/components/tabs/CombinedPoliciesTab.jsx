@@ -42,10 +42,12 @@ function Section({ title, children, rightContent }) {
     </div>
   );
 }
-function KPICard({ label, value, color, subtitle }) {
+function KPICard({ label, value, color, subtitle, tooltip }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 16px', minWidth: 120, borderTop: `3px solid ${color || C.accent}` }}>
-      <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+    <div title={tooltip || ''} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 16px', minWidth: 120, borderTop: `3px solid ${color || C.accent}`, cursor: tooltip ? 'help' : 'default' }}>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        {label}{tooltip && <span style={{ marginLeft: 4, fontSize: 8, opacity: 0.6 }}>ⓘ</span>}
+      </div>
       <div style={{ fontSize: 20, fontWeight: 800, color: color || C.text, fontFamily: C.mono, marginTop: 4 }}>{value}</div>
       {subtitle && <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{subtitle}</div>}
     </div>
@@ -64,9 +66,9 @@ function parseDate(str) {
 }
 
 const STATUS_COLORS = {
-  active: { bg: C.greenDim, text: C.green, label: 'Comm Active' },
-  clawback: { bg: C.redDim, text: C.red, label: 'Clawback' },
-  pending: { bg: '#2e2a0a', text: '#facc15', label: 'No Commission' },
+  active: { bg: C.greenDim, text: C.green, label: 'Comm Active', tooltip: 'Carrier has paid commission advances on this policy' },
+  clawback: { bg: C.redDim, text: C.red, label: 'Clawback', tooltip: 'Carrier has charged back (recovered) commission on this policy' },
+  pending: { bg: '#2e2a0a', text: '#facc15', label: 'No Commission', tooltip: 'This policy has not appeared in any carrier commission statement yet' },
 };
 
 export default function CombinedPoliciesTab() {
@@ -190,7 +192,7 @@ export default function CombinedPoliciesTab() {
         <td style={{ ...tdStyle, fontSize: 10 }}>{p._effDateParsed ? p._effDateParsed.toLocaleDateString() : '—'}</td>
         <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
         <td style={tdStyle}>
-          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text }}>{cs.label}</span>
+          <span title={cs.tooltip || ''} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text, cursor: 'help' }}>{cs.label}</span>
         </td>
         <td style={tdStyle}>
           <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: statusBg(p.status), color: statusColor(p.status) }}>{p.status || '—'}</span>
@@ -224,12 +226,18 @@ export default function CombinedPoliciesTab() {
     <div>
       {/* Sub-tab toggle */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[['combined', 'Combined Policies'], ['statements', 'Commission Statements']].map(([val, lbl]) => (
+        {[['combined', 'Combined Policies'], ['commissions', 'Agent Commissions'], ['statements', 'Commission Statements']].map(([val, lbl]) => (
           <button key={val} style={pillStyle(subTab === val)} onClick={() => setSubTab(val)}>{lbl}</button>
         ))}
       </div>
 
       {subTab === 'statements' && <CommissionStatementsTab />}
+
+      {subTab === 'commissions' && <>
+        {error ? <div style={{ color: C.red, padding: 40, textAlign: 'center' }}>Error: {error}</div>
+         : !data ? <div style={{ color: C.muted, padding: 40, textAlign: 'center' }}>Loading commission data...</div>
+         : <AgentCommissionsView policies={enriched} thStyle={thStyle} tdStyle={tdStyle} />}
+      </>}
 
       {subTab === 'combined' && <>
       {error ? <div style={{ color: C.red, padding: 40, textAlign: 'center' }}>Error: {error}</div>
@@ -244,13 +252,13 @@ export default function CombinedPoliciesTab() {
 
       {/* KPI row */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <KPICard label="Total Policies" value={summary.totalPolicies} color={C.accent} />
-        <KPICard label="With Commission" value={summary.withCommission} color={C.green} />
-        <KPICard label="No Commission Yet" value={summary.pending} color="#facc15" subtitle={fmtDollar(summary.pendingPremium) + ' premium'} />
-        <KPICard label="Clawbacks" value={summary.clawbacks} color={C.red} />
-        <KPICard label="Orphaned Carrier" value={summary.orphaned} color={C.muted} />
-        <KPICard label="Total Premium" value={fmtDollar(summary.totalPremium)} color={C.accent} />
-        <KPICard label="Total Received" value={fmtDollar(summary.totalReceived)} color={C.green} />
+        <KPICard label="Total Policies" value={summary.totalPolicies} color={C.accent} tooltip="All policies from the sales/application tracker" />
+        <KPICard label="With Commission" value={summary.withCommission} color={C.green} tooltip="Policies that have at least one carrier commission entry (advance, override, or clawback)" />
+        <KPICard label="No Commission Yet" value={summary.pending} color="#facc15" subtitle={fmtDollar(summary.pendingPremium) + ' premium'} tooltip="Policies submitted by agents but not yet appearing in any carrier commission statement. These may need follow-up with the carrier." />
+        <KPICard label="Clawbacks" value={summary.clawbacks} color={C.red} tooltip="Policies where the carrier has charged back (recovered) previously paid commission, typically due to cancellation or lapse" />
+        <KPICard label="Orphaned Carrier" value={summary.orphaned} color={C.muted} tooltip="Commission entries from carrier statements that could not be matched to any policy in the sales tracker. May indicate missing tracker entries or policy number mismatches." />
+        <KPICard label="Total Premium" value={fmtDollar(summary.totalPremium)} color={C.accent} tooltip="Sum of monthly premiums across all policies in the tracker" />
+        <KPICard label="Total Received" value={fmtDollar(summary.totalReceived)} color={C.green} tooltip="Net commission received from carriers (advances minus clawbacks) for policies with commission activity" />
       </div>
 
       {/* Status Financial Impact table */}
@@ -475,6 +483,198 @@ export default function CombinedPoliciesTab() {
       )}
       </>}
       </>}
+    </div>
+  );
+}
+
+// Agent Commissions sub-view: grouped by agent → month
+function AgentCommissionsView({ policies, thStyle, tdStyle }) {
+  const [expandedAgent, setExpandedAgent] = useState(null);
+
+  // Build agent → month structure
+  const agentMap = {};
+  policies.forEach(p => {
+    const agent = p.agent || 'Unknown';
+    if (!agentMap[agent]) agentMap[agent] = { agent, policies: [], totalPremium: 0, totalPaid: 0, totalClawback: 0, net: 0, policyCount: 0, months: {} };
+    const a = agentMap[agent];
+    a.policies.push(p);
+    a.policyCount++;
+    a.totalPremium += p.premium;
+    a.totalPaid += p.totalPaid;
+    a.totalClawback += p.totalClawback;
+    a.net += p.netReceived;
+
+    // Group by month (from effective date)
+    const d = p._effDateParsed;
+    const mk = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+    if (!a.months[mk]) a.months[mk] = { key: mk, policies: [], premium: 0, paid: 0, clawback: 0, net: 0 };
+    a.months[mk].policies.push(p);
+    a.months[mk].premium += p.premium;
+    a.months[mk].paid += p.totalPaid;
+    a.months[mk].clawback += p.totalClawback;
+    a.months[mk].net += p.netReceived;
+  });
+
+  const agents = Object.values(agentMap).sort((a, b) => b.net - a.net);
+
+  const fmtMonth = (k) => {
+    if (k === 'Unknown') return 'Unknown';
+    const [y, m] = k.split('-');
+    return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  };
+
+  // Totals
+  const grandPremium = agents.reduce((s, a) => s + a.totalPremium, 0);
+  const grandPaid = agents.reduce((s, a) => s + a.totalPaid, 0);
+  const grandClawback = agents.reduce((s, a) => s + a.totalClawback, 0);
+  const grandNet = agents.reduce((s, a) => s + a.net, 0);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: 4 }}>Agent Commissions Received</div>
+        <div style={{ fontSize: 12, color: C.muted }}>
+          Carrier commission payments grouped by agent, then by month. Click an agent to see monthly breakdown and policy detail.
+        </div>
+      </div>
+
+      {/* Summary KPIs */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <KPICard label="Agents" value={agents.length} color={C.accent} />
+        <KPICard label="Total Premium" value={fmtDollar(grandPremium)} color={C.accent} />
+        <KPICard label="Total Paid" value={fmtDollar(grandPaid)} color={C.green} />
+        <KPICard label="Total Clawback" value={fmtDollar(grandClawback)} color={grandClawback > 0 ? C.red : C.muted} />
+        <KPICard label="Net Received" value={fmtDollar(grandNet)} color={grandNet >= 0 ? C.green : C.red} />
+      </div>
+
+      {/* Agent summary table */}
+      <Section title="By Agent">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ ...thStyle, width: 28, padding: '6px 4px' }}></th>
+                <th style={thStyle}>Agent</th>
+                <th style={{ ...thStyle, textAlign: 'center' }}>Policies</th>
+                <th style={thStyle}>Premium</th>
+                <th style={thStyle}>Paid</th>
+                <th style={thStyle}>Clawback</th>
+                <th style={thStyle}>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map((a, i) => {
+                const isExp = expandedAgent === a.agent;
+                return (
+                  <tr key={i}
+                    style={{ cursor: 'pointer', background: isExp ? 'rgba(91,159,255,0.08)' : 'transparent', borderLeft: isExp ? `3px solid ${C.accent}` : '3px solid transparent' }}
+                    onClick={() => setExpandedAgent(isExp ? null : a.agent)}
+                    onMouseOver={e => { if (!isExp) e.currentTarget.style.background = 'rgba(91,159,255,0.05)'; }}
+                    onMouseOut={e => { if (!isExp) e.currentTarget.style.background = isExp ? 'rgba(91,159,255,0.08)' : 'transparent'; }}
+                  >
+                    <td style={{ ...tdStyle, width: 28, padding: '6px 4px', textAlign: 'center', fontSize: 12, color: isExp ? C.accent : C.muted }}>{isExp ? '▾' : '▸'}</td>
+                    <td style={{ ...tdStyle, fontWeight: 700 }}>{a.agent}</td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>{a.policyCount}</td>
+                    <td style={tdStyle}>{fmtDollar(a.totalPremium)}</td>
+                    <td style={{ ...tdStyle, color: a.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(a.totalPaid)}</td>
+                    <td style={{ ...tdStyle, color: a.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(a.totalClawback)}</td>
+                    <td style={{ ...tdStyle, color: a.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(a.net)}</td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: C.surface, fontWeight: 700, borderTop: `2px solid ${C.accent}` }}>
+                <td style={tdStyle}></td>
+                <td style={{ ...tdStyle, color: C.accent }}>TOTAL</td>
+                <td style={{ ...tdStyle, textAlign: 'center', color: C.accent }}>{policies.length}</td>
+                <td style={tdStyle}>{fmtDollar(grandPremium)}</td>
+                <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grandPaid)}</td>
+                <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(grandClawback)}</td>
+                <td style={{ ...tdStyle, color: grandNet >= 0 ? C.green : C.red }}>{fmtDollar(grandNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Expanded agent detail: by month → policies */}
+      {expandedAgent && agentMap[expandedAgent] && (() => {
+        const a = agentMap[expandedAgent];
+        const months = Object.values(a.months).sort((x, y) => y.key.localeCompare(x.key));
+        return (
+          <>
+            {/* Agent KPIs */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16, marginBottom: 8 }}>
+              <KPICard label="Agent" value={a.agent} color={C.text} />
+              <KPICard label="Policies" value={a.policyCount} color={C.accent} />
+              <KPICard label="Premium" value={fmtDollar(a.totalPremium)} color={C.accent} />
+              <KPICard label="Paid" value={fmtDollar(a.totalPaid)} color={C.green} />
+              <KPICard label="Clawback" value={fmtDollar(a.totalClawback)} color={a.totalClawback > 0 ? C.red : C.muted} />
+              <KPICard label="Net" value={fmtDollar(a.net)} color={a.net >= 0 ? C.green : C.red} />
+            </div>
+
+            {/* Monthly sections */}
+            {months.map((m, mi) => (
+              <Section key={mi} title={`${fmtMonth(m.key)} — ${m.policies.length} ${m.policies.length === 1 ? 'policy' : 'policies'} · Premium ${fmtDollar(m.premium)} · Net ${fmtDollar(m.net)}`}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Policy #</th>
+                        <th style={thStyle}>Insured</th>
+                        <th style={thStyle}>Carrier</th>
+                        <th style={thStyle}>Premium</th>
+                        <th style={thStyle}>Expected</th>
+                        <th style={thStyle}>Paid</th>
+                        <th style={thStyle}>Clawback</th>
+                        <th style={thStyle}>Net</th>
+                        <th style={thStyle}>Effective</th>
+                        <th style={thStyle}>Days</th>
+                        <th style={thStyle}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {m.policies.map((p, pi) => {
+                        const days = p._daysActive;
+                        const daysColor = days === null ? C.muted : days > 180 ? C.green : days > 90 ? C.accent : days > 30 ? '#facc15' : C.muted;
+                        const sc = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.green; if (v.includes('pending') || v.includes('submitted')) return '#facc15'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.red; if (v.includes('hold') || v.includes('need')) return '#fb923c'; return C.muted; };
+                        const sb = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.greenDim; if (v.includes('pending') || v.includes('submitted')) return '#2e2a0a'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.redDim; if (v.includes('hold') || v.includes('need')) return '#2e1a0a'; return '#1a2538'; };
+                        return (
+                          <tr key={pi}>
+                            <td style={tdStyle}>{p.policyNumber}</td>
+                            <td style={tdStyle}>{p.insuredName}</td>
+                            <td style={{ ...tdStyle, fontSize: 10 }}>{p.carrier}</td>
+                            <td style={tdStyle}>{fmtDollar(p.premium)}</td>
+                            <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
+                            <td style={{ ...tdStyle, color: p.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(p.totalPaid)}</td>
+                            <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(p.totalClawback)}</td>
+                            <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
+                            <td style={{ ...tdStyle, fontSize: 10 }}>{p._effDateParsed ? p._effDateParsed.toLocaleDateString() : '—'}</td>
+                            <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
+                            <td style={tdStyle}>
+                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: sb(p.status), color: sc(p.status) }}>{p.status || '—'}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {m.policies.length > 1 && (
+                        <tr style={{ background: C.surface, fontWeight: 700 }}>
+                          <td colSpan={3} style={{ ...tdStyle, fontSize: 10, color: C.muted }}>SUBTOTAL ({m.policies.length})</td>
+                          <td style={tdStyle}>{fmtDollar(m.premium)}</td>
+                          <td style={tdStyle}>{fmtDollar(m.policies.reduce((s, p) => s + p.expectedCommission, 0))}</td>
+                          <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(m.paid)}</td>
+                          <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(m.clawback)}</td>
+                          <td style={{ ...tdStyle, color: m.net >= 0 ? C.green : C.red }}>{fmtDollar(m.net)}</td>
+                          <td colSpan={3} style={tdStyle}></td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Section>
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
