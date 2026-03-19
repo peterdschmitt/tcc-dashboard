@@ -851,10 +851,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
 
 function PolicyStatusMini({ allTimePolicies, rangePolicies }) {
   const clf = p => {
-    const s = p.placed;
-    if (s === 'Advance Released' || s === 'Active - In Force') return 'active';
-    if (s === 'Submitted - Pending') return 'pending';
-    return 'left';
+    const s = (p.placed || '').toLowerCase();
+    if (s === 'advance released' || s === 'active - in force') return 'active';
+    if (s === 'cancelled' || s === 'canceled' || s === 'declined' || s === 'lapsed') return 'left';
+    return 'pending';
   };
   const breakdown = ps => {
     if (!ps) return { total: 0, active: 0, pending: 0, left: 0 };
@@ -2104,8 +2104,8 @@ function PolicyStatusTab({ policies, calls }) {
         // Count helpers per week
         const isActive = p => p.placed === 'Active - In Force' || p.placed === 'Advance Released';
         const isDeclined = p => p.placed === 'Declined';
-        const isPending = p => p.placed === 'Submitted - Pending';
-        const isCanceled = p => p.placed === 'Cancelled';
+        const isPending = p => p.placed === 'Submitted - Pending' || p.placed === 'Pending';
+        const isCanceled = p => /cancell?ed/i.test(p.placed || '');
         const isLapsed = p => p.placed === 'Lapsed';
         const isNotPaid = p => p.placed === 'Not Yet Paid';
 
