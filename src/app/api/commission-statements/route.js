@@ -41,52 +41,34 @@ export async function GET(request) {
     if (view === 'ledger') {
       const rows = await fetchSheet(salesSheetId, ledgerTab, 60);
       let entries = rows.map(r => ({
-        // Core identity
         transactionId: r['Transaction ID'],
         statementDate: r['Statement Date'],
-        processingDate: r['Processing Date'],
+        processingDate: r['Processing Date'] || '',
         carrier: r['Carrier'],
         policyNumber: r['Policy #'],
         insuredName: r['Insured Name'],
-        // Agent info
-        agent: r['Writing Agent'] || r['Agent'] || '',  // backwards compat with old column name
-        agentId: r['Writing Agent ID'] || '',
-        commissionAgent: r['Commission Agent'] || '',
-        commissionAgentId: r['Commission Agent ID'] || '',
-        // Transaction classification
+        agent: r['Agent'] || '',
+        agentId: r['Agent ID'] || '',
         transactionType: r['Transaction Type'],
         description: r['Description'] || '',
-        productCode: r['Product Code'] || '',
-        // Dates
+        product: r['Product'] || '',
         issueDate: r['Issue Date'] || '',
-        // Premiums
-        premium: parseFloat(r['Premium (Annual)'] || r['Premium']) || 0,  // backwards compat
-        premiumModal: parseFloat(r['Premium (Modal)']) || 0,
-        // Rates
-        splitPct: r['Split %'] ? parseFloat(r['Split %']) : null,
+        premium: parseFloat(r['Premium']) || 0,
         commissionPct: r['Commission %'] ? parseFloat(r['Commission %']) : null,
         advancePct: r['Advance %'] ? parseFloat(r['Advance %']) : null,
-        adjRate: r['Adjustment Rate'] ? parseFloat(r['Adjustment Rate']) : null,
-        // Amounts
         advanceAmount: parseFloat(r['Advance Amount']) || 0,
         commissionAmount: parseFloat(r['Commission Amount']) || 0,
         netCommission: parseFloat(r['Net Commission']) || 0,
         outstandingBalance: parseFloat(r['Outstanding Balance']) || 0,
         chargebackAmount: parseFloat(r['Chargeback Amount']) || 0,
         recoveryAmount: parseFloat(r['Recovery Amount']) || 0,
-        // Policy details
-        frequency: r['Payment Frequency'] || '',
-        policyFee: parseFloat(r['Policy Fee']) || 0,
-        age: r['Age'] || '',
-        gender: r['Gender'] || '',
-        // Matching
+        netImpact: parseFloat(r['Net Impact']) || 0,
         matchedPolicy: r['Matched Policy #'],
-        matchType: r['Match Type'],
+        matchType: r['Match Type'] || '',
         matchConfidence: parseFloat(r['Match Confidence']) || 0,
         status: r['Status'],
-        // Metadata
         statementFile: r['Statement File'],
-        notes: r['Notes'],
+        notes: r['Notes'] || '',
       }));
 
       // Apply filters

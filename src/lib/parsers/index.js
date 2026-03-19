@@ -15,8 +15,9 @@
 import * as aigParser from './aig.js';
 import * as amicableParser from './amicable.js';
 import * as transamericaParser from './transamerica.js';
+import * as cicaParser from './cica.js';
 
-const PARSERS = [aigParser, amicableParser, transamericaParser];
+const PARSERS = [aigParser, amicableParser, transamericaParser, cicaParser];
 
 /**
  * Files that should be skipped during Drive sync (not commission statements).

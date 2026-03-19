@@ -1,101 +1,125 @@
 /**
  * TransAmerica Life Insurance Company commission statement parser.
  *
- * Parses XLS advance reports with columns:
- *   Commission Agent Last/First Name, Commission Agent Number, Transaction Date,
- *   Policy Number, Insured Last/First Name, Description, Writing Agent Last/First Name,
+ * Handles both XLS/XLSX and CSV advance/as-earned reports.
+ * Common headers include:
+ *   Commission Agent Last/First Name, Commission Agent Business Name,
+ *   Commission Agent Number, Statutory Company Name, Transaction Date,
+ *   Policy Number, Insured Last/First Name, Description,
+ *   Writing Agent Last/First Name, Writing Agent Business Name,
  *   Writing Agent Number, Commission Premium, Split%, Commission%, Adv%,
  *   Advance Amount, Commission Amount, Net Commission Amount,
- *   Writing Agent Chargeback, Writing Agent Balance Forward,
- *   Writing Agent Less Recovery Amount, Writing Agent Ending Balance, etc.
+ *   Writing Agent Chargeback, Writing Agent Ending Balance, etc.
  *
- * Descriptions: "OW Placed Adv" = override advance, "Placed Adv" = agent advance,
- *   "Chargeback" = cancellation chargeback, "Recovery" = recovery
- *
- * File naming: TA Advance report M.D.YY.xls
+ * File naming: "TA Advance report M.D.YY.xls", "TA As Earned M.D.YY.xls",
+ *   "Advances_0007009097_DDMonYY.csv"
  */
 
 export const carrierId = 'transamerica';
 export const carrierNames = ['TransAmerica', 'Transamerica Life Insurance'];
 
-/**
- * Detect if this is a TransAmerica advance report.
- */
 export function canParse(text, filename) {
-  const hasFilename = /TA\s+Advance/i.test(filename) || /transamerica/i.test(filename);
-  const hasHeaders = /Commission Agent.*Policy Number.*Insured.*Advance Amount/i.test(text);
+  const hasFilename = /TA\s+(Advance|As\s+Earned)/i.test(filename)
+    || /transamerica/i.test(filename)
+    || /^Advances_\d+/i.test(filename);
+  const hasHeaders = /Commission Agent.*Policy Number/i.test(text);
   const hasTA = /Transamerica Life Insurance/i.test(text);
   return hasFilename || hasHeaders || hasTA;
 }
 
-/**
- * Parse TransAmerica XLS advance report.
- * @param {Buffer} buffer - File buffer (XLS format)
- * @param {string} text - Pre-extracted text (from xlsx parsing)
- * @param {object} workbook - Parsed xlsx workbook object (if available)
- * @returns {ParsedStatement}
- */
 export async function parse(buffer, text, workbook) {
-  // If no workbook provided, parse from buffer
-  let wb = workbook;
-  if (!wb) {
-    const { read } = await import('xlsx');
-    wb = read(buffer, { type: 'buffer' });
+  // Get rows — from workbook (XLS/XLSX) or parse CSV text directly
+  let rows;
+  if (workbook) {
+    const { utils } = await import('xlsx');
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    rows = utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  } else if (buffer && (buffer.length > 0)) {
+    // Try xlsx first (handles CSV too), fall back to manual CSV parse
+    try {
+      const { read, utils } = await import('xlsx');
+      const wb = read(buffer, { type: 'buffer' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      rows = utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    } catch {
+      rows = parseCSVText(text || buffer.toString('utf-8'));
+    }
+  } else {
+    rows = parseCSVText(text);
   }
 
-  const { utils } = await import('xlsx');
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (!rows || rows.length < 2) return { statementDate: '', payPeriod: '', agentSummary: [], records: [] };
 
-  if (rows.length < 2) return { statementDate: '', payPeriod: '', agentSummary: [], records: [] };
+  // Find header row — look for row containing "Policy Number"
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const rowText = rows[i].map(c => String(c)).join('|');
+    if (/Policy Number/i.test(rowText)) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) {
+    console.warn('[transamerica] Could not find header row with "Policy Number"');
+    return { statementDate: '', payPeriod: '', agentSummary: [], records: [] };
+  }
 
-  // Find header row
-  const headerRow = rows[0];
+  // Build column index (case-insensitive, trimmed)
+  const headerRow = rows[headerIdx];
   const colIdx = {};
-  headerRow.forEach((h, i) => { if (h) colIdx[String(h).trim()] = i; });
+  headerRow.forEach((h, i) => {
+    const key = String(h).trim();
+    if (key) colIdx[key] = i;
+  });
+
+  // Helper to get column by name
+  const col = (row, name) => {
+    const idx = colIdx[name];
+    return idx != null ? String(row[idx] ?? '').trim() : '';
+  };
+  const colNum = (row, name) => {
+    const idx = colIdx[name];
+    return idx != null ? parseNum(row[idx]) : 0;
+  };
 
   const records = [];
   const agentTotals = {};
   let statementDate = '';
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 5) continue;
 
-    const policyNumber = String(row[colIdx['Policy Number']] || '').trim();
+    const policyNumber = col(row, 'Policy Number');
     if (!policyNumber) continue;
 
-    const insuredLast = String(row[colIdx['Insured Last Name']] || '').trim();
-    const insuredFirst = String(row[colIdx['Insured First Name']] || '').trim();
-    const description = String(row[colIdx['Description']] || '').trim();
-    const writingLast = String(row[colIdx['Writing Agent Last Name']] || '').trim();
-    const writingFirst = String(row[colIdx['Writing Agent First Name']] || '').trim();
-    const writingNumber = String(row[colIdx['Writing Agent Number']] || '').trim();
-    const commAgentLast = String(row[colIdx['Commission Agent Last Name']] || '').trim();
-    const commAgentFirst = String(row[colIdx['Commission Agent First Name']] || '').trim();
+    const insuredLast = col(row, 'Insured Last Name');
+    const insuredFirst = col(row, 'Insured First Name');
+    const description = col(row, 'Description');
+    const writingLast = col(row, 'Writing Agent Last Name');
+    const writingFirst = col(row, 'Writing Agent First Name');
+    const writingNumber = col(row, 'Writing Agent Number');
+    const commAgentLast = col(row, 'Commission Agent Last Name');
+    const commAgentFirst = col(row, 'Commission Agent First Name');
+    const commAgentNumber = col(row, 'Commission Agent Number');
 
-    // Parse transaction date (may be Excel serial number)
+    // Parse transaction date
     let txnDate = row[colIdx['Transaction Date']];
     if (typeof txnDate === 'number') {
-      // Excel serial date → JS date
       const d = new Date((txnDate - 25569) * 86400000);
       txnDate = d.toLocaleDateString('en-US');
-      if (!statementDate) statementDate = txnDate;
     } else {
-      txnDate = String(txnDate || '');
-      if (!statementDate && txnDate) statementDate = txnDate;
+      txnDate = String(txnDate || '').trim();
     }
+    if (!statementDate && txnDate) statementDate = txnDate;
 
-    const commPrem = parseNum(row[colIdx['Commission Premium']]);
-    const splitPct = parseNum(row[colIdx['Split %']]);
-    const commPct = parseNum(row[colIdx['Commission %']]);
-    const advPct = parseNum(row[colIdx['Adv %']]);
-    const advanceAmount = parseNum(row[colIdx['Advance Amount']]);
-    const commAmount = parseNum(row[colIdx['Commission Amount']]);
-    const netCommission = parseNum(row[colIdx['Net Commission Amount']]);
-    const chargeback = parseNum(row[colIdx['Writing Agent Chargeback']]);
-    const recovery = parseNum(row[colIdx['Writing Agent Less Recovery Amount']]);
-    const endingBalance = parseNum(row[colIdx['Writing Agent Ending Balance']]);
+    const commPrem = colNum(row, 'Commission Premium');
+    const splitPct = colNum(row, 'Split %');
+    const commPct = colNum(row, 'Commission %');
+    const advPct = colNum(row, 'Adv %');
+    const advanceAmount = colNum(row, 'Advance Amount');
+    const commAmount = colNum(row, 'Commission Amount');
+    const netCommission = colNum(row, 'Net Commission Amount');
+    const chargeback = colNum(row, 'Writing Agent Chargeback');
+    const recovery = colNum(row, 'Writing Agent Less Recovery Amount');
+    const endingBalance = colNum(row, 'Writing Agent Ending Balance');
 
     // Determine transaction type from Description
     let transactionType = 'advance';
@@ -106,18 +130,19 @@ export async function parse(buffer, text, workbook) {
       isCancellation = true;
     } else if (descLower.includes('recovery') || descLower.includes('recov')) {
       transactionType = 'recovery';
+    } else if (descLower.includes('as earned') || descLower.includes('earned')) {
+      transactionType = 'as_earned';
     } else if (descLower.includes('ow ') || descLower.includes('override') || descLower.includes('overwrite')) {
       transactionType = 'override';
     }
 
-    // Use the main commission amount — advance for advances, negative for chargebacks
     const amount = advanceAmount || commAmount || netCommission || 0;
     const finalAmount = isCancellation ? -Math.abs(amount) : amount;
 
     const insuredName = insuredLast + (insuredFirst ? ', ' + insuredFirst : '');
-    const agentName = writingLast + (writingFirst ? ', ' + writingFirst : '') || commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
+    const agentName = (writingLast ? writingLast + (writingFirst ? ', ' + writingFirst : '') : '')
+      || (commAgentLast ? commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '') : '');
     const commAgentName = commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
-    const commAgentNumber = String(row[colIdx['Commission Agent Number']] || '').trim();
 
     records.push({
       policyNumber,
@@ -132,13 +157,14 @@ export async function parse(buffer, text, workbook) {
       premium: commPrem,
       premiumPaid: 0,
       commissionAmount: finalAmount,
-      netCommission: netCommission,
+      netCommission,
       outstandingBalance: endingBalance,
       chargebackAmount: chargeback,
       recoveryAmount: recovery,
       splitPct,
       commissionPct: commPct,
       advancePct: advPct,
+      advanceAmount: advanceAmount,
       product: '',
       cancellationIndicator: isCancellation,
       section: descLower.includes('ow ') || descLower.includes('override') ? 'override' : 'advance',
@@ -168,6 +194,24 @@ export async function parse(buffer, text, workbook) {
     agentSummary,
     records,
   };
+}
+
+/** Manual CSV parser for when xlsx can't handle the file */
+function parseCSVText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  return lines.map(line => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { result.push(current); current = ''; continue; }
+      current += ch;
+    }
+    result.push(current);
+    return result;
+  });
 }
 
 function parseNum(val) {

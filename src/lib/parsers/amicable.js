@@ -17,10 +17,14 @@ export const carrierNames = ['American Amicable', 'Occidental Life'];
  * Detect if this is an American Amicable advance report CSV.
  */
 export function canParse(text, filename) {
+  // Transamerica also uses Advances_*.csv filenames — check content to distinguish
+  const isTransamerica = /Transamerica Life Insurance/i.test(text) || /Commission Agent Last Name/i.test(text);
+  if (isTransamerica) return false;
+
   const hasAdvancesFilename = /Advances_\d+_\d+\w+\d+\.csv/i.test(filename);
   const hasHeaders = /RptDate.*WritingAgent.*Policy.*Insured.*Plan/i.test(text);
   const hasAmicableAction = /DELIVR|PAIDFR|CANCEL/i.test(text);
-  return hasAdvancesFilename || (hasHeaders && hasAmicableAction);
+  return (hasAdvancesFilename && !isTransamerica) || (hasHeaders && hasAmicableAction);
 }
 
 /**

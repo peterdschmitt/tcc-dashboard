@@ -43,12 +43,17 @@ export async function GET() {
         status: sr['Policy Status']?.trim() || sr['Placed?']?.trim() || '',
         submitDate: sr['Application Submitted Date']?.trim() || '',
         effectiveDate: sr['Effective Date']?.trim() || '',
+        faceAmount: sr['Face Amount'] || '',
+        leadSource: sr['Lead Source'] || '',
+        paymentType: sr['Payment Type'] || '',
+        state: sr['State'] || '',
+        phone: sr['Phone Number'] || '',
         expectedCommission: Math.round(expectedComm * 100) / 100,
         totalPaid: 0,
         totalClawback: 0,
         netReceived: 0,
         entries: 0,
-        source: 'tracker', // originated from sales tracker
+        source: 'tracker',
       };
     }
 

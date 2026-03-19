@@ -810,6 +810,17 @@ export default function CommissionStatementsTab() {
                 const policies = sortData(reconciliation.policies, reconSort.sortKey, reconSort.sortDir);
                 const statusColor = (s) => (s || '').includes('Active') || (s || '').includes('In Force') ? C.green : (s || '').includes('Pending') ? C.yellow : (s || '').includes('Cancel') || (s || '').includes('Declined') || (s || '').includes('Lapsed') ? C.red : C.muted;
 
+                // Parse dates that may be MM-DD-YYYY or YYYY-MM-DD
+                const parseDate = (str) => {
+                  if (!str) return null;
+                  const mdy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+                  if (mdy) return new Date(parseInt(mdy[3]), parseInt(mdy[1]) - 1, parseInt(mdy[2]));
+                  const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+                  if (ymd) return new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
+                  const d = new Date(str);
+                  return isNaN(d.getTime()) ? null : d;
+                };
+
                 let groups;
                 if (reconGroupBy === 'status') {
                   const map = {};
@@ -834,19 +845,6 @@ export default function CommissionStatementsTab() {
                 } else {
                   groups = [{ label: 'All Policies', color: C.accent, policies }];
                 }
-
-                // Parse dates that may be MM-DD-YYYY or YYYY-MM-DD
-                const parseDate = (str) => {
-                  if (!str) return null;
-                  // MM-DD-YYYY or MM/DD/YYYY
-                  const mdy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-                  if (mdy) return new Date(parseInt(mdy[3]), parseInt(mdy[1]) - 1, parseInt(mdy[2]));
-                  // YYYY-MM-DD
-                  const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-                  if (ymd) return new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
-                  const d = new Date(str);
-                  return isNaN(d.getTime()) ? null : d;
-                };
 
                 // Pre-compute _daysActive and _effDateParsed for sorting/display
                 policies.forEach(p => {

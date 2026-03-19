@@ -71,6 +71,189 @@ const STATUS_COLORS = {
   pending: { bg: '#2e2a0a', text: '#facc15', label: 'No Commission', tooltip: 'This policy has not appeared in any carrier commission statement yet' },
 };
 
+// ─── PolicyCRMDetail — Sale vs Carrier comparison + transaction history ───
+function PolicyCRMDetail({ policy, cashFlow, loading, thStyle, tdStyle }) {
+  if (loading) return <div style={{ color: C.muted, fontSize: 12 }}>Loading policy detail...</div>;
+
+  const noActivity = !policy || policy.entries === 0;
+  const cf = cashFlow || {};
+  const cd = cf.carrierData || {};
+  const mismatches = cf.mismatches || [];
+  const hasMismatch = (field) => mismatches.find(m => m.field === field);
+
+  // KPI Cards
+  const kpis = (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+      <KPICard label="Sale Premium" value={fmtDollar(policy.premium)} color={C.accent} tooltip="Monthly premium from sales tracker" />
+      <KPICard label="Carrier Premium" value={cd.carrierPremium != null ? fmtDollar(cd.carrierPremium) : 'N/A'}
+        color={hasMismatch('premium') ? C.red : cd.carrierPremium != null ? C.accent : C.muted}
+        tooltip={hasMismatch('premium') ? hasMismatch('premium').note : 'Annualized premium from carrier commission statement'} />
+      {hasMismatch('premium') && (
+        <KPICard label="Δ Premium" value={fmtDollar(Math.abs(policy.premium - (cd.carrierPremium || 0)))} color={C.red} tooltip="Difference between sale and carrier premium" />
+      )}
+      <KPICard label="Expected Comm" value={fmtDollar(policy.expectedCommission)} color={C.muted} tooltip="Premium × rate × 9 months" />
+      <KPICard label="Total Paid" value={fmtDollar(cf.totalPaid || 0)} color={C.green} tooltip="Total advances from carrier" />
+      <KPICard label="Total Clawback" value={fmtDollar(cf.totalClawback || 0)} color={(cf.totalClawback || 0) > 0 ? C.red : C.muted} tooltip="Total chargebacks + recovery clawbacks" />
+      <KPICard label="Net Received" value={fmtDollar(cf.netCommission || 0)} color={(cf.netCommission || 0) >= 0 ? C.green : C.red} tooltip="Total Paid - Total Clawback" />
+      <KPICard label="Balance" value={fmtDollar(policy.balance || 0)} color={Math.abs(policy.balance || 0) < 1 ? C.green : '#facc15'} tooltip="Expected - Paid + Clawback" />
+    </div>
+  );
+
+  // Side-by-side comparison
+  const compRowStyle = (mismatch) => ({
+    display: 'grid', gridTemplateColumns: '140px 1fr 1fr', gap: 1, padding: '4px 0',
+    borderBottom: `1px solid ${C.border}`,
+    background: mismatch ? 'rgba(248,113,113,0.06)' : 'transparent',
+  });
+  const compLabel = { fontSize: 9, color: C.muted, textTransform: 'uppercase', fontWeight: 700, padding: '4px 8px', letterSpacing: 0.5 };
+  const compVal = (mismatch) => ({ fontSize: 11, color: mismatch ? C.red : C.text, fontFamily: C.mono, padding: '4px 8px', fontWeight: mismatch ? 700 : 400 });
+
+  const pi = cf.policyInfo || {};
+  const comparison = (
+    <div style={{ marginBottom: 16, border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr', background: C.surface, padding: '6px 0' }}>
+        <div style={{ ...compLabel, color: C.muted }}>Field</div>
+        <div style={{ ...compLabel, color: C.accent }}>Sale Data</div>
+        <div style={{ ...compLabel, color: C.accent }}>Carrier Data</div>
+      </div>
+      <div style={compRowStyle(hasMismatch('premium'))}>
+        <div style={compLabel}>Premium</div>
+        <div style={compVal(false)}>{fmtDollar(policy.premium)}/mo</div>
+        <div style={compVal(hasMismatch('premium'))}>{cd.carrierPremium != null ? `${fmtDollar(cd.carrierPremium)} (ann)` : '—'}</div>
+      </div>
+      <div style={compRowStyle(false)}>
+        <div style={compLabel}>Status</div>
+        <div style={compVal(false)}>{policy.status || '—'}</div>
+        <div style={compVal(false)}>{cd.entryCount > 0 ? (cf.totalClawback > 0 ? 'Clawback' : 'Active') : '—'}</div>
+      </div>
+      <div style={compRowStyle(false)}>
+        <div style={compLabel}>Date</div>
+        <div style={compVal(false)}>{policy.effectiveDate || policy.submitDate || '—'}</div>
+        <div style={compVal(false)}>{cd.issueDate || '—'}</div>
+      </div>
+      <div style={compRowStyle(hasMismatch('agent'))}>
+        <div style={compLabel}>Agent</div>
+        <div style={compVal(false)}>{policy.agent || '—'}</div>
+        <div style={compVal(hasMismatch('agent'))}>{cd.carrierAgent || '—'}{cd.carrierAgentId ? ` (${cd.carrierAgentId})` : ''}</div>
+      </div>
+      <div style={compRowStyle(false)}>
+        <div style={compLabel}>Product</div>
+        <div style={compVal(false)}>{policy.product || '—'}</div>
+        <div style={compVal(false)}>{cd.carrierProduct || '—'}</div>
+      </div>
+      <div style={compRowStyle(false)}>
+        <div style={compLabel}>Face Amount</div>
+        <div style={compVal(false)}>{policy.faceAmount || '—'}</div>
+        <div style={compVal(false)}>—</div>
+      </div>
+      <div style={compRowStyle(false)}>
+        <div style={compLabel}>Lead Source</div>
+        <div style={compVal(false)}>{policy.leadSource || '—'}</div>
+        <div style={compVal(false)}>—</div>
+      </div>
+    </div>
+  );
+
+  // No activity message
+  if (noActivity) {
+    return (
+      <div>
+        {kpis}
+        {comparison}
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: '#facc15', fontWeight: 700, marginBottom: 6 }}>No Commission Activity</div>
+          <div style={{ fontSize: 11, color: C.muted }}>
+            This policy ({policy.policyNumber}) was submitted on {policy.submitDate || '—'} but has not appeared in any carrier commission statement yet.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!cashFlow) return <div style={{ color: C.red, fontSize: 12 }}>Failed to load policy data.</div>;
+
+  // Transaction history table
+  const entries = (cf.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
+  let running = 0;
+  const withRunning = entries.map(e => { running += e.commissionAmount || 0; return { ...e, runningBalance: running }; });
+
+  const typeBadge = (type) => {
+    const isPositive = type === 'advance' || type === 'as_earned';
+    const isOverride = type?.includes('override');
+    const bg = isPositive ? C.greenDim : isOverride ? '#1a2538' : C.redDim;
+    const color = isPositive ? C.green : isOverride ? C.accent : C.red;
+    return <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: bg, color, whiteSpace: 'nowrap' }}>{type}</span>;
+  };
+
+  // Totals
+  const totAdv = entries.reduce((s, e) => s + (e.advanceAmount || 0), 0);
+  const totComm = entries.reduce((s, e) => s + (e.commissionAmount || 0), 0);
+  const totCB = entries.reduce((s, e) => s + (e.chargebackAmount || 0), 0);
+  const totRec = entries.reduce((s, e) => s + (e.recoveryAmount || 0), 0);
+  const totNI = entries.reduce((s, e) => s + (e.netImpact || 0), 0);
+
+  const txnTable = (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={thStyle}>Date</th>
+            <th style={thStyle}>Statement</th>
+            <th style={thStyle}>Type</th>
+            <th style={thStyle}>Description</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Premium</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Advance</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Commission</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Chargeback</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Recovery</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Net Impact</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Running</th>
+          </tr>
+        </thead>
+        <tbody>
+          {withRunning.map((e, i) => (
+            <tr key={i}>
+              <td style={tdStyle}>{e.statementDate || '—'}</td>
+              <td style={{ ...tdStyle, fontSize: 9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
+              <td style={tdStyle}>{typeBadge(e.transactionType)}</td>
+              <td style={{ ...tdStyle, fontSize: 9, color: C.muted, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.description || '—'}</td>
+              <td style={{ ...tdStyle, textAlign: 'right' }}>{e.premium ? fmtDollar(e.premium) : '—'}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.advanceAmount > 0 ? C.green : C.muted }}>{e.advanceAmount ? fmtDollar(e.advanceAmount) : '—'}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.chargebackAmount > 0 ? C.red : C.muted }}>{e.chargebackAmount ? fmtDollar(e.chargebackAmount) : '—'}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.recoveryAmount > 0 ? '#facc15' : C.muted }}>{e.recoveryAmount ? fmtDollar(e.recoveryAmount) : '—'}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.netImpact >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.netImpact)}</td>
+              <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtDollar(e.outstandingBalance)}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
+            </tr>
+          ))}
+          {/* Totals row */}
+          <tr style={{ borderTop: `2px solid ${C.accent}`, background: 'rgba(91,159,255,0.04)' }}>
+            <td style={{ ...tdStyle, fontWeight: 700 }} colSpan={5}>TOTALS</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.green }}>{fmtDollar(totAdv)}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: totComm >= 0 ? C.green : C.red }}>{fmtDollar(totComm)}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: totCB > 0 ? C.red : C.muted }}>{totCB > 0 ? fmtDollar(totCB) : '—'}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: totRec > 0 ? '#facc15' : C.muted }}>{totRec > 0 ? fmtDollar(totRec) : '—'}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: totNI >= 0 ? C.green : C.red }}>{fmtDollar(totNI)}</td>
+            <td style={tdStyle}></td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: running >= 0 ? C.green : C.red }}>{fmtDollar(running)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div>
+      {kpis}
+      {comparison}
+      <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8 }}>Transaction History</div>
+      {txnTable}
+    </div>
+  );
+}
+
 export default function CombinedPoliciesTab() {
   const [subTab, setSubTab] = useState('combined');
   const [data, setData] = useState(null);
@@ -174,8 +357,11 @@ export default function CombinedPoliciesTab() {
     const cs = STATUS_COLORS[p.commissionStatus] || STATUS_COLORS.pending;
     const days = p._daysActive;
     const daysColor = days === null ? C.muted : days > 180 ? C.green : days > 90 ? C.accent : days > 30 ? '#facc15' : C.muted;
-    return (
-      <tr key={i}
+    const subBg = 'rgba(91,159,255,0.03)';
+    const subTd = { ...tdStyle, fontSize: 10, borderBottom: `1px solid rgba(26,37,56,0.5)`, background: subBg };
+
+    const mainRow = (
+      <tr key={`main-${i}`}
         style={{ cursor: 'pointer', background: isSelP ? 'rgba(91,159,255,0.08)' : 'transparent', borderLeft: isSelP ? `3px solid ${C.accent}` : '3px solid transparent', transition: 'background 0.15s ease' }}
         onClick={() => setSelectedPolicy(isSelP ? null : p)}
         onMouseOver={e => { if (!isSelP) e.currentTarget.style.background = 'rgba(91,159,255,0.05)'; }}
@@ -191,6 +377,7 @@ export default function CombinedPoliciesTab() {
         <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{fmtDollar(p.totalClawback)}</td>
         <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
         <td style={{ ...tdStyle, color: Math.abs(p.balance) < 1 ? C.green : '#facc15' }}>{fmtDollar(p.balance)}</td>
+        <td style={tdStyle} colSpan={2}></td>
         <td style={{ ...tdStyle, fontSize: 10 }}>{p._effDateParsed ? p._effDateParsed.toLocaleDateString() : '—'}</td>
         <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
         <td style={tdStyle}>
@@ -201,6 +388,99 @@ export default function CombinedPoliciesTab() {
         </td>
       </tr>
     );
+
+    if (!isSelP) return mainRow;
+
+    // Build inline sub-rows: SALE row + carrier entries + TOTAL row
+    const cf = cashFlow || {};
+    const entries = (cf.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
+    let ourRunning = 0;
+
+    // Sale row
+    const saleRow = (
+      <tr key={`sale-${i}`} style={{ background: subBg }}>
+        <td style={{ ...subTd, paddingLeft: 20, color: C.muted }}>└</td>
+        <td style={subTd}>{p.policyNumber}</td>
+        <td style={subTd}>{p.insuredName}</td>
+        <td style={{ ...subTd, fontSize: 9 }}>{p.carrier}</td>
+        <td style={subTd}>{p.effectiveDate || p.submitDate || '—'}</td>
+        <td style={{ ...subTd }}><span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: '#1a2538', color: C.accent }}>SALE</span></td>
+        <td style={subTd}>{fmtDollar(p.premium)}/mo</td>
+        <td style={subTd}></td>
+        <td style={subTd}></td>
+        <td style={subTd}></td>
+        <td style={subTd}></td>
+        <td style={subTd}></td>
+        <td style={{ ...subTd, fontSize: 9 }}>{p.product || '—'}</td>
+        <td style={subTd}>{p.faceAmount || '—'}</td>
+        <td style={subTd}>{p.agent || '—'}</td>
+        <td style={{ ...subTd }}>
+          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: statusBg(p.status), color: statusColor(p.status) }}>{p.status || '—'}</span>
+        </td>
+      </tr>
+    );
+
+    // Carrier entry rows
+    const entryRows = entries.map((e, ei) => {
+      ourRunning += e.commissionAmount || 0;
+      const carrierBal = e.outstandingBalance || 0;
+      const delta = Math.round((ourRunning - carrierBal) * 100) / 100;
+      const typeBg = (e.transactionType === 'advance' || e.transactionType === 'as_earned') ? C.greenDim : e.transactionType?.includes('override') ? '#1a2538' : C.redDim;
+      const typeColor = (e.transactionType === 'advance' || e.transactionType === 'as_earned') ? C.green : e.transactionType?.includes('override') ? C.accent : C.red;
+
+      return (
+        <tr key={`entry-${i}-${ei}`} style={{ background: subBg }}>
+          <td style={{ ...subTd, paddingLeft: 20, color: C.muted }}>{ei === entries.length - 1 ? '└' : '├'}</td>
+          <td style={{ ...subTd, fontSize: 9, color: C.muted }}>{e.policyNumber}</td>
+          <td style={{ ...subTd, fontSize: 9, color: C.muted }}>{e.insuredName}</td>
+          <td style={{ ...subTd, fontSize: 9, color: C.muted }}>{e.carrier}</td>
+          <td style={subTd}>{e.statementDate || '—'}</td>
+          <td style={subTd}><span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: typeBg, color: typeColor, whiteSpace: 'nowrap' }}>{e.transactionType}</span></td>
+          <td style={subTd}>{e.premium ? fmtDollar(e.premium) : ''}</td>
+          <td style={{ ...subTd, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+          <td style={{ ...subTd, color: e.chargebackAmount > 0 ? C.red : C.muted }}>{e.chargebackAmount ? fmtDollar(e.chargebackAmount) : ''}</td>
+          <td style={{ ...subTd, color: e.netImpact >= 0 ? C.green : C.red, fontWeight: 600 }}>{fmtDollar(e.netImpact)}</td>
+          <td style={subTd}>{carrierBal ? fmtDollar(carrierBal) : '$0'}</td>
+          <td style={{ ...subTd, color: ourRunning >= 0 ? C.green : C.red }}>{fmtDollar(ourRunning)}</td>
+          <td style={{ ...subTd, color: Math.abs(delta) < 0.01 ? C.green : C.red, fontWeight: Math.abs(delta) >= 0.01 ? 700 : 400 }}>{Math.abs(delta) < 0.01 ? '$0' : fmtDollar(delta)}</td>
+          <td style={subTd}></td>
+          <td style={{ ...subTd, fontSize: 8, color: C.muted, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || ''}</td>
+          <td style={subTd}></td>
+        </tr>
+      );
+    });
+
+    // Total row
+    const totComm = entries.reduce((s, e) => s + (e.commissionAmount || 0), 0);
+    const totCB = entries.reduce((s, e) => s + (e.chargebackAmount || 0), 0);
+    const totNI = entries.reduce((s, e) => s + (e.netImpact || 0), 0);
+    const lastCarrierBal = entries.length > 0 ? (entries[entries.length - 1].outstandingBalance || 0) : 0;
+    const finalDelta = Math.round((ourRunning - lastCarrierBal) * 100) / 100;
+
+    const totalRow = entries.length > 0 ? (
+      <tr key={`total-${i}`} style={{ background: 'rgba(91,159,255,0.06)', borderTop: `1px solid ${C.accent}` }}>
+        <td style={subTd}></td>
+        <td style={subTd} colSpan={4}></td>
+        <td style={{ ...subTd, fontWeight: 700, color: C.accent, fontSize: 9 }}>TOTAL</td>
+        <td style={subTd}></td>
+        <td style={{ ...subTd, fontWeight: 700, color: totComm >= 0 ? C.green : C.red }}>{fmtDollar(totComm)}</td>
+        <td style={{ ...subTd, fontWeight: 700, color: totCB > 0 ? C.red : C.muted }}>{totCB > 0 ? fmtDollar(totCB) : ''}</td>
+        <td style={{ ...subTd, fontWeight: 700, color: totNI >= 0 ? C.green : C.red }}>{fmtDollar(totNI)}</td>
+        <td style={{ ...subTd, fontWeight: 700 }}>{fmtDollar(lastCarrierBal)}</td>
+        <td style={{ ...subTd, fontWeight: 700, color: ourRunning >= 0 ? C.green : C.red }}>{fmtDollar(ourRunning)}</td>
+        <td style={{ ...subTd, fontWeight: 700, color: Math.abs(finalDelta) < 0.01 ? C.green : C.red }}>{Math.abs(finalDelta) < 0.01 ? '$0' : fmtDollar(finalDelta)}</td>
+        <td style={subTd} colSpan={3}></td>
+      </tr>
+    ) : (
+      <tr key={`nodata-${i}`} style={{ background: subBg }}>
+        <td style={subTd}></td>
+        <td colSpan={15} style={{ ...subTd, color: '#facc15', fontStyle: 'italic', textAlign: 'center', padding: '10px' }}>No carrier commission activity yet</td>
+      </tr>
+    );
+
+    return <>{mainRow}{cashFlowLoading ? (
+      <tr key={`loading-${i}`} style={{ background: subBg }}><td colSpan={16} style={{ ...subTd, color: C.muted, textAlign: 'center', padding: 10 }}>Loading carrier data...</td></tr>
+    ) : <>{saleRow}{entryRows}{totalRow}</>}</>;
   };
 
   const tableHeader = (
@@ -210,15 +490,17 @@ export default function CombinedPoliciesTab() {
         <SortTh label="Policy #" field="policyNumber" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Insured" field="insuredName" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Carrier" field="carrier" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Date" field="effectiveDate" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Type" field="commissionStatus" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Premium" field="premium" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Expected" field="expectedCommission" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Paid" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Clawback" field="totalClawback" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Net" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Balance" field="balance" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Effective" field="effectiveDate" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Commission" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Chargeback" field="totalClawback" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Net Impact" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <th style={thStyle}>Carrier Bal</th>
+        <th style={thStyle}>Our Bal</th>
+        <th style={thStyle}>Δ</th>
         <SortTh label="Days" field="_daysActive" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Comm Status" field="commissionStatus" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <th style={thStyle}>Source</th>
         <SortTh label="Status" field="status" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
       </tr>
     </thead>
@@ -408,20 +690,16 @@ export default function CombinedPoliciesTab() {
                   {groupBy !== 'none' && g.policies.length > 1 && (
                     <tr style={{ background: C.surface, fontWeight: 700 }}>
                       <td style={tdStyle}></td>
-                      <td colSpan={2} style={{ ...tdStyle, fontSize: 10, color: C.muted }}>SUBTOTAL ({g.policies.length})</td>
-                      <td style={tdStyle}></td>
+                      <td colSpan={5} style={{ ...tdStyle, fontSize: 10, color: C.muted }}>SUBTOTAL ({g.policies.length})</td>
                       <td style={tdStyle}>{fmtDollar(grpPremium)}</td>
-                      <td style={tdStyle}>{fmtDollar(g.policies.reduce((s, p) => s + p.expectedCommission, 0))}</td>
                       <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grpPaid)}</td>
                       <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(g.policies.reduce((s, p) => s + p.totalClawback, 0))}</td>
                       <td style={{ ...tdStyle, color: grpNet >= 0 ? C.green : C.red }}>{fmtDollar(grpNet)}</td>
-                      <td style={{ ...tdStyle, color: '#facc15' }}>{fmtDollar(g.policies.reduce((s, p) => s + p.balance, 0))}</td>
-                      <td style={tdStyle}></td>
+                      <td style={tdStyle} colSpan={3}></td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted, fontSize: 10 }}>
                         {Math.round(g.policies.filter(p => p._daysActive != null).reduce((s, p) => s + (p._daysActive || 0), 0) / Math.max(1, g.policies.filter(p => p._daysActive != null).length))}d avg
                       </td>
-                      <td style={tdStyle}></td>
-                      <td style={tdStyle}></td>
+                      <td style={tdStyle} colSpan={2}></td>
                     </tr>
                   )}
                 </tbody>
@@ -431,70 +709,7 @@ export default function CombinedPoliciesTab() {
         );
       })}
 
-      {/* Cash Flow drill-down for selected policy */}
-      {selectedPolicy && (
-        <Section title={`Cash Flow — ${selectedPolicy.insuredName} (${selectedPolicy.policyNumber})`}>
-          {cashFlowLoading ? (
-            <div style={{ color: C.muted, fontSize: 12 }}>Loading cash flow...</div>
-          ) : selectedPolicy.entries === 0 ? (
-            <div style={{ padding: 20, textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: '#facc15', fontWeight: 700, marginBottom: 6 }}>No Commission Activity</div>
-              <div style={{ fontSize: 11, color: C.muted }}>
-                This policy ({selectedPolicy.policyNumber}) was submitted on {selectedPolicy.submitDate || '—'} but has not appeared in any carrier commission statement yet.
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-                Premium: {fmtDollar(selectedPolicy.premium)} · Expected Commission: {fmtDollar(selectedPolicy.expectedCommission)} · Status: {selectedPolicy.status}
-              </div>
-            </div>
-          ) : cashFlow ? (() => {
-            const entries = (cashFlow.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
-            let running = 0;
-            const withRunning = entries.map(e => { running += e.commissionAmount || 0; return { ...e, runningBalance: running }; });
-            return (
-              <div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                  <KPICard label="Premium" value={fmtDollar(selectedPolicy.premium)} color={C.accent} />
-                  <KPICard label="Total Paid" value={fmtDollar(cashFlow.totalPaid || 0)} color={C.green} />
-                  <KPICard label="Clawbacks" value={fmtDollar(cashFlow.totalClawback || 0)} color={(cashFlow.totalClawback || 0) > 0 ? C.red : C.muted} />
-                  <KPICard label="Net Commission" value={fmtDollar(cashFlow.netCommission || 0)} color={(cashFlow.netCommission || 0) >= 0 ? C.green : C.red} />
-                </div>
-                {withRunning.length > 0 && (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>Date</th>
-                          <th style={thStyle}>Type</th>
-                          <th style={thStyle}>Amount</th>
-                          <th style={thStyle}>Running Balance</th>
-                          <th style={thStyle}>Statement File</th>
-                          <th style={thStyle}>Notes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {withRunning.map((e, i) => (
-                          <tr key={i}>
-                            <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
-                            <td style={tdStyle}>
-                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim, color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red }}>{e.transactionType}</span>
-                            </td>
-                            <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
-                            <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
-                            <td style={{ ...tdStyle, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
-                            <td style={{ ...tdStyle, fontSize: 10, color: C.muted }}>{e.notes || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })() : (
-            <div style={{ color: C.red, fontSize: 12 }}>Failed to load cash flow data.</div>
-          )}
-        </Section>
-      )}
+      {/* Detail is now inline sub-rows in the table above */}
 
       {/* Unmatched carrier records */}
       {unmatchedLedger.length > 0 && (
@@ -747,23 +962,12 @@ function PolicyDetailModal({ policy, onClose }) {
 
   const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
   const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
-  const cs = STATUS_COLORS[policy.commissionStatus] || STATUS_COLORS.pending;
-  const d = parseDate(policy.effectiveDate) || parseDate(policy.submitDate);
-  const days = d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null;
-
-  const sc = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.green; if (v.includes('pending') || v.includes('submitted')) return '#facc15'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.red; if (v.includes('hold') || v.includes('need')) return '#fb923c'; return C.muted; };
-  const sb = (s) => { const v = (s||'').toLowerCase(); if (v.includes('active') || v.includes('in force')) return C.greenDim; if (v.includes('pending') || v.includes('submitted')) return '#2e2a0a'; if (v.includes('cancel') || v.includes('declined') || v.includes('lapsed')) return C.redDim; if (v.includes('hold') || v.includes('need')) return '#2e1a0a'; return '#1a2538'; };
-
-  // Cash flow running balance
-  const entries = cashData ? (cashData.entries || []).slice().sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || '')) : [];
-  let running = 0;
-  const withRunning = entries.map(e => { running += e.commissionAmount || 0; return { ...e, runningBalance: running }; });
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 40, overflowY: 'auto' }}
       onClick={onClose}
     >
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, width: '90%', maxWidth: 1100, maxHeight: 'calc(100vh - 80px)', overflowY: 'auto', padding: 24 }}
+      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, width: '90%', maxWidth: 1200, maxHeight: 'calc(100vh - 80px)', overflowY: 'auto', padding: 24 }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -777,81 +981,7 @@ function PolicyDetailModal({ policy, onClose }) {
           <button onClick={onClose} style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 14, padding: '4px 12px', cursor: 'pointer' }}>✕ Close</button>
         </div>
 
-        {/* KPI cards */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-          <KPICard label="Premium" value={fmtDollar(policy.premium)} color={C.accent} />
-          <KPICard label="Expected" value={fmtDollar(policy.expectedCommission)} color={C.muted} />
-          <KPICard label="Paid" value={fmtDollar(policy.totalPaid)} color={policy.totalPaid > 0 ? C.green : C.muted} />
-          <KPICard label="Clawback" value={fmtDollar(policy.totalClawback)} color={policy.totalClawback > 0 ? C.red : C.muted} />
-          <KPICard label="Net" value={fmtDollar(policy.netReceived)} color={policy.netReceived >= 0 ? C.green : C.red} />
-          <KPICard label="Balance" value={fmtDollar(policy.balance)} color={Math.abs(policy.balance) < 1 ? C.green : '#facc15'} />
-          <KPICard label="Days Active" value={days !== null ? days : '—'} color={C.accent} />
-        </div>
-
-        {/* Policy details grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 1, padding: 1, background: C.border, borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
-          {[
-            ['Policy #', policy.policyNumber],
-            ['Insured', policy.insuredName],
-            ['Agent', policy.agent],
-            ['Carrier', policy.carrier],
-            ['Product', policy.product || '—'],
-            ['Monthly Premium', fmtDollar(policy.premium)],
-            ['Effective Date', d ? d.toLocaleDateString() : '—'],
-            ['Submit Date', policy.submitDate || '—'],
-            ['Policy Status', policy.status || '—'],
-            ['Comm Status', cs.label],
-            ['Expected Commission', fmtDollar(policy.expectedCommission)],
-            ['Ledger Entries', policy.entries],
-          ].map(([label, val], i) => (
-            <div key={i} style={{ background: C.card, padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>{label}</span>
-              <span style={{ fontSize: 12, color: label === 'Policy Status' ? sc(String(val)) : label === 'Comm Status' ? cs.text : C.text, fontFamily: C.mono, fontWeight: 600 }}>{val}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Commission Cash Flow */}
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Commission Cash Flow</div>
-        {loading ? (
-          <div style={{ color: C.muted, fontSize: 12 }}>Loading...</div>
-        ) : policy.entries === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', background: C.card, borderRadius: 8, border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 13, color: '#facc15', fontWeight: 700, marginBottom: 4 }}>No Commission Activity</div>
-            <div style={{ fontSize: 11, color: C.muted }}>This policy has not appeared in any carrier commission statement yet.</div>
-          </div>
-        ) : withRunning.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Date</th>
-                  <th style={thStyle}>Type</th>
-                  <th style={thStyle}>Amount</th>
-                  <th style={thStyle}>Running Balance</th>
-                  <th style={thStyle}>Statement File</th>
-                  <th style={thStyle}>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withRunning.map((e, i) => (
-                  <tr key={i}>
-                    <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
-                    <td style={tdStyle}>
-                      <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim, color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red }}>{e.transactionType}</span>
-                    </td>
-                    <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
-                    <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
-                    <td style={{ ...tdStyle, fontSize: 10 }}>{e.statementFile || '—'}</td>
-                    <td style={{ ...tdStyle, fontSize: 10, color: C.muted }}>{e.notes || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{ color: C.muted, fontSize: 12 }}>No ledger entries found.</div>
-        )}
+        <PolicyCRMDetail policy={policy} cashFlow={cashData} loading={loading} thStyle={thStyle} tdStyle={tdStyle} />
       </div>
     </div>
   );

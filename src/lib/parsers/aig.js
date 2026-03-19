@@ -204,9 +204,36 @@ function parseAnnualizationLine(line) {
   const commissionPct = pcts.length > 0 ? pcts[0] : 0;
   const splitPct = pcts.length > 1 ? pcts[1] : 0;
 
-  // Cancellation detection:
-  // Outstanding balance = $0.00 AND commission is negative → full clawback
-  const isCancellation = Math.abs(outstandingBalance) < 0.01 && commActivity < 0;
+  // Classify transaction and populate chargeback/recovery amounts:
+  //   GENERICATTAD + negative comm = chargeback (full clawback of advance)
+  //   GENERICATTAE + negative comm = recovery clawback (earned commission clawed back)
+  //   GENERICATTAE + positive comm = earned back (money recovered/earned)
+  //   GENERICATTAD + positive comm = normal advance
+  const isNegative = commActivity < 0;
+  const isCancellation = isNegative && !isRecovery; // AD with negative = chargeback
+
+  let finalType;
+  let chargebackAmount = 0;
+  let recoveryAmount = 0;
+  let advanceAmount = 0;
+
+  if (!isRecovery && isNegative) {
+    // GENERICATTAD negative → chargeback
+    finalType = 'chargeback';
+    chargebackAmount = Math.abs(commActivity);
+  } else if (!isRecovery && !isNegative) {
+    // GENERICATTAD positive → normal advance
+    finalType = 'advance';
+    advanceAmount = commActivity;
+  } else if (isRecovery && isNegative) {
+    // GENERICATTAE negative → recovery clawback (earned commission taken back)
+    finalType = 'recovery';
+    recoveryAmount = Math.abs(commActivity);
+  } else {
+    // GENERICATTAE positive → earned back
+    finalType = 'as_earned';
+    recoveryAmount = commActivity;
+  }
 
   return {
     policyNumber,
@@ -214,12 +241,16 @@ function parseAnnualizationLine(line) {
     agent: '', // Will be enriched from agent summary
     agentId,
     effDate,
-    transactionType: isCancellation && transactionType === 'advance' ? 'chargeback' : transactionType,
+    transactionType: finalType,
     commType,
     premium: Math.abs(annualPrem),
     premiumPaid: Math.abs(premiumPaid),
     commissionAmount: commActivity,
+    advanceAmount,
+    netCommission: commActivity,
     outstandingBalance,
+    chargebackAmount,
+    recoveryAmount,
     splitPct: commissionPct,  // first % is usually the commission basis rate
     commissionPct: splitPct,  // second % is usually the payout rate
     advancePct: advanceRate,  // bare number is the advance rate
@@ -251,24 +282,30 @@ function parseOverrideLine(line) {
   const overrideComm = amounts.length > 0 ? amounts[amounts.length - 1] : 0;
   const premiumAmount = amounts.length > 1 ? amounts[0] : 0;
 
+  const isNegativeOverride = overrideComm < 0;
+
   return {
     policyNumber,
     insuredName: insuredName.trim(),
     agent: '',
     agentId,
-    commissionAgentId: uplineId,  // Upline agent who receives override
+    commissionAgentId: uplineId,
     effDate,
-    transactionType: 'override',
+    transactionType: isNegativeOverride ? 'override_chargeback' : 'override',
     commType: 'OVERRIDE',
     premium: Math.abs(premiumAmount),
     premiumPaid: 0,
     commissionAmount: overrideComm,
+    advanceAmount: 0,
+    netCommission: overrideComm,
     outstandingBalance: 0,
+    chargebackAmount: isNegativeOverride ? Math.abs(overrideComm) : 0,
+    recoveryAmount: 0,
     splitPct: pcts.length > 0 ? pcts[0] : 0,
     commissionPct: pcts.length > 1 ? pcts[1] : 0,
     advancePct: extractBareNumber(amountsStr),
     product: product.trim(),
-    cancellationIndicator: overrideComm < 0, // Negative override = clawback on override
+    cancellationIndicator: isNegativeOverride,
     section: 'override',
     rawLine: line,
   };
