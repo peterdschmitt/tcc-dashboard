@@ -1070,7 +1070,7 @@ export default function CombinedPoliciesTab() {
                 const grandTotals = primaryKeys.reduce((t, k) => {
                   const g = primaryMap[k].totals;
                   return { count: t.count + g.count, premium: t.premium + g.premium, expected: t.expected + g.expected, paid: t.paid + g.paid, clawback: t.clawback + g.clawback, net: t.net + g.net, carrierBal: t.carrierBal + g.carrierBal, rtc: t.rtc + g.rtc, daysSum: t.daysSum + g.daysSum, daysCount: t.daysCount + g.daysCount };
-                }, { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, liability: 0, daysSum: 0, daysCount: 0 });
+                }, { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, carrierBal: 0, rtc: 0, daysSum: 0, daysCount: 0 });
 
                 const renderFinRow = (r, isPrimary, isSubRow, idx) => {
                   const label = isPrimary ? r.primary || r.status : r.secondary;
