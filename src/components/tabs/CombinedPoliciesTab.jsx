@@ -109,7 +109,8 @@ function PolicyCRMDetail({ policy, cashFlow, loading, thStyle, tdStyle }) {
       <KPICard label="Total Paid" value={fmtDollar(cf.totalPaid || 0)} color={C.green} tooltip="Total advances from carrier" />
       <KPICard label="Total Clawback" value={fmtDollar(cf.totalClawback || 0)} color={(cf.totalClawback || 0) > 0 ? C.red : C.muted} tooltip="Total chargebacks + recovery clawbacks" />
       <KPICard label="Net Received" value={fmtDollar(cf.netCommission || 0)} color={(cf.netCommission || 0) >= 0 ? C.green : C.red} tooltip="Total Paid - Total Clawback" />
-      <KPICard label="Balance" value={fmtDollar(policy.balance || 0)} color={Math.abs(policy.balance || 0) < 1 ? C.green : '#facc15'} tooltip="Expected - Paid + Clawback" />
+      <KPICard label="Liability Bal" value={fmtDollar(policy.balance || 0)} color={Math.abs(policy.balance || 0) < 1 ? C.green : '#facc15'} tooltip="Outstanding advance balance from carrier — what you owe back if the policy cancels" />
+      <KPICard label="RTC" value={fmtDollar((policy.expectedCommission || 0) - (policy.totalPaid || 0))} color={(policy.expectedCommission - policy.totalPaid) > 0 ? C.yellow : C.green} tooltip="Remaining to Collect: Expected minus Paid" />
     </div>
   );
 
@@ -761,8 +762,8 @@ export default function CombinedPoliciesTab() {
         <td style={{ ...tdStyle, color: p.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(p.totalPaid)}</td>
         <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{p.totalClawback > 0 ? fmtDollar(p.totalClawback) : '—'}</td>
         <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
-        <td style={{ ...tdStyle, color: p.balance > 0 ? C.green : p.balance < 0 ? C.red : C.muted, fontWeight: p.balance !== 0 ? 600 : 400 }}>{fmtDollar(p.balance)}</td>
-        <td style={{ ...tdStyle, color: p.liability != null && p.liability < 0 ? C.red : C.muted, fontWeight: p.liability != null && p.liability < 0 ? 700 : 400 }}>{p.liability != null && p.liability < 0 ? fmtDollar(p.liability) : '—'}</td>
+        <td style={{ ...tdStyle, color: p.balance > 0 ? '#facc15' : p.balance < 0 ? C.red : C.muted, fontWeight: p.balance !== 0 ? 600 : 400 }}>{fmtDollar(p.balance)}</td>
+        <td style={{ ...tdStyle, color: (p.expectedCommission - p.totalPaid) > 0 ? C.yellow : (p.expectedCommission - p.totalPaid) < 0 ? C.red : C.muted }}>{fmtDollar(p.expectedCommission - p.totalPaid)}</td>
         <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
         <td style={tdStyle}>
           <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text }}>{cs.label}</span>
@@ -880,8 +881,8 @@ export default function CombinedPoliciesTab() {
         <SortTh label="Commission" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Chargeback" field="totalClawback" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Net Impact" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Balance" field="balance" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Liability" field="liability" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Liability Bal" field="balance" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="RTC" field="rtc" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Days" field="_daysActive" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <th style={thStyle}>Source</th>
         <SortTh label="Status" field="status" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
@@ -1004,8 +1005,8 @@ export default function CombinedPoliciesTab() {
                 <th style={thStyle}><Tip text="Total commission advances actually paid by the carrier (from commission statements)">Paid</Tip></th>
                 <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Clawback</Tip></th>
                 <th style={thStyle}><Tip text="Net received: Paid minus Clawback — what you actually kept">Net</Tip></th>
-                <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels. If no carrier data, uses Expected minus Paid.">Balance</Tip></th>
-                <th style={thStyle}><Tip text="Net loss on terminated/clawback policies — unrecovered chargebacks that reduce future advances">Liability</Tip></th>
+                <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels.">Liability Bal</Tip></th>
+                <th style={thStyle}><Tip text="Remaining to Collect: Expected commission minus what has been Paid. What the carrier still owes you.">RTC</Tip></th>
                 <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Average days since policy effective date">Avg Days</Tip></th>
               </tr>
             </thead>
@@ -1024,7 +1025,7 @@ export default function CombinedPoliciesTab() {
                   const primary = impactView === 'carrier' ? comm : sales;
                   const secondary = impactView === 'carrier' ? sales : comm;
                   const key = `${primary}|||${secondary}`;
-                  if (!groupMap[key]) groupMap[key] = { primary, secondary, count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, liability: 0, daysSum: 0, daysCount: 0 };
+                  if (!groupMap[key]) groupMap[key] = { primary, secondary, count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, rtc: 0, daysSum: 0, daysCount: 0 };
                   const row = groupMap[key];
                   row.count++;
                   row.premium += p.premium;
@@ -1033,19 +1034,19 @@ export default function CombinedPoliciesTab() {
                   row.clawback += p.totalClawback;
                   row.net += p.netReceived;
                   row.balance += p.balance || 0;
-                  row.liability += (p.liability != null && p.liability < 0) ? p.liability : 0;
+                  row.rtc += (p.expectedCommission || 0) - (p.totalPaid || 0);
                   if (p._daysActive != null) { row.daysSum += p._daysActive; row.daysCount++; }
                 });
 
                 // Group by primary, then sort
                 const primaryMap = {};
                 Object.values(groupMap).forEach(r => {
-                  if (!primaryMap[r.primary]) primaryMap[r.primary] = { rows: [], totals: { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, liability: 0, daysSum: 0, daysCount: 0 } };
+                  if (!primaryMap[r.primary]) primaryMap[r.primary] = { rows: [], totals: { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, rtc: 0, daysSum: 0, daysCount: 0 } };
                   primaryMap[r.primary].rows.push(r);
                   const t = primaryMap[r.primary].totals;
                   t.count += r.count; t.premium += r.premium; t.expected += r.expected;
                   t.paid += r.paid; t.clawback += r.clawback; t.net += r.net;
-                  t.balance += r.balance; t.liability += r.liability;
+                  t.balance += r.balance; t.rtc += r.rtc;
                   t.daysSum += r.daysSum; t.daysCount += r.daysCount;
                 });
 
@@ -1058,7 +1059,7 @@ export default function CombinedPoliciesTab() {
 
                 const grandTotals = primaryKeys.reduce((t, k) => {
                   const g = primaryMap[k].totals;
-                  return { count: t.count + g.count, premium: t.premium + g.premium, expected: t.expected + g.expected, paid: t.paid + g.paid, clawback: t.clawback + g.clawback, net: t.net + g.net, balance: t.balance + g.balance, liability: t.liability + g.liability, daysSum: t.daysSum + g.daysSum, daysCount: t.daysCount + g.daysCount };
+                  return { count: t.count + g.count, premium: t.premium + g.premium, expected: t.expected + g.expected, paid: t.paid + g.paid, clawback: t.clawback + g.clawback, net: t.net + g.net, balance: t.balance + g.balance, rtc: t.rtc + g.rtc, daysSum: t.daysSum + g.daysSum, daysCount: t.daysCount + g.daysCount };
                 }, { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, liability: 0, daysSum: 0, daysCount: 0 });
 
                 const renderFinRow = (r, isPrimary, isSubRow, idx) => {
@@ -1108,7 +1109,7 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: d.clawback > 0 ? C.red : C.muted }}>{fmtDollar(d.clawback)}</td>
                       <td style={{ ...tdStyle, color: d.net >= 0 ? C.green : C.red, fontWeight: isPrimary ? 700 : 400 }}>{fmtDollar(d.net)}</td>
                       <td style={{ ...tdStyle, color: d.balance > 0 ? '#facc15' : d.balance < 0 ? C.red : C.muted, fontWeight: d.balance !== 0 ? 600 : 400 }}>{fmtDollar(d.balance)}</td>
-                      <td style={{ ...tdStyle, color: d.liability < 0 ? C.red : C.muted, fontWeight: d.liability < 0 ? 700 : 400 }}>{d.liability < 0 ? fmtDollar(d.liability) : '—'}</td>
+                      <td style={{ ...tdStyle, color: d.rtc > 0 ? C.yellow : d.rtc < 0 ? C.red : C.muted }}>{fmtDollar(d.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{d.daysCount > 0 ? Math.round(d.daysSum / d.daysCount) + 'd' : '—'}</td>
                     </tr>
                   );
@@ -1163,7 +1164,7 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: t.clawback > 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.clawback)}</td>
                       <td style={{ ...tdStyle, color: t.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(t.net)}</td>
                       <td style={{ ...tdStyle, color: t.balance > 0 ? '#facc15' : t.balance < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.balance)}</td>
-                      <td style={{ ...tdStyle, color: t.liability < 0 ? C.red : C.muted, fontWeight: 600 }}>{t.liability < 0 ? fmtDollar(t.liability) : '—'}</td>
+                      <td style={{ ...tdStyle, color: t.rtc > 0 ? C.yellow : t.rtc < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{t.daysCount > 0 ? Math.round(t.daysSum / t.daysCount) + 'd' : '—'}</td>
                     </tr>
                   );
@@ -1182,7 +1183,7 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(grandTotals.clawback)}</td>
                       <td style={{ ...tdStyle, color: grandTotals.net >= 0 ? C.green : C.red }}>{fmtDollar(grandTotals.net)}</td>
                       <td style={{ ...tdStyle, color: grandTotals.balance > 0 ? '#facc15' : grandTotals.balance < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.balance)}</td>
-                      <td style={{ ...tdStyle, color: grandTotals.liability < 0 ? C.red : C.muted, fontWeight: 700 }}>{grandTotals.liability < 0 ? fmtDollar(grandTotals.liability) : '—'}</td>
+                      <td style={{ ...tdStyle, color: grandTotals.rtc > 0 ? C.yellow : grandTotals.rtc < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{grandTotals.daysCount > 0 ? Math.round(grandTotals.daysSum / grandTotals.daysCount) + 'd' : '—'}</td>
                     </tr>
                   </>
