@@ -1012,9 +1012,9 @@ export default function CombinedPoliciesTab() {
                 <th style={thStyle}><Tip text="Total commission advances actually paid by the carrier (from commission statements)">Paid</Tip></th>
                 <th style={thStyle}><Tip text="Expected Payment: Expected commission minus Paid — what the carrier still owes you">Exp Payment</Tip></th>
                 <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Chargeback</Tip></th>
-                <th style={thStyle}><Tip text="Net received: Paid minus Chargeback — what you actually kept">Net</Tip></th>
-                <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels.">Liability Bal</Tip></th>
+                <th style={thStyle}><Tip text="Outstanding advance balance from carrier commission statements. What you owe back if the policy cancels. Only populated when carrier statement data exists.">Liability Bal</Tip></th>
                 <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Average days since policy effective date">Avg Days</Tip></th>
+                <th style={thStyle}><Tip text="Net Banked Cash: Paid minus Chargebacks — what you actually have in your bank account today">Net Banked Cash</Tip></th>
               </tr>
             </thead>
             <tbody>
@@ -1032,7 +1032,7 @@ export default function CombinedPoliciesTab() {
                   const primary = impactView === 'carrier' ? comm : sales;
                   const secondary = impactView === 'carrier' ? sales : comm;
                   const key = `${primary}|||${secondary}`;
-                  if (!groupMap[key]) groupMap[key] = { primary, secondary, count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, rtc: 0, daysSum: 0, daysCount: 0 };
+                  if (!groupMap[key]) groupMap[key] = { primary, secondary, count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, carrierBal: 0, rtc: 0, daysSum: 0, daysCount: 0 };
                   const row = groupMap[key];
                   row.count++;
                   row.premium += p.premium;
@@ -1040,7 +1040,7 @@ export default function CombinedPoliciesTab() {
                   row.paid += p.totalPaid;
                   row.clawback += p.totalClawback;
                   row.net += p.netReceived;
-                  row.balance += p.balance || 0;
+                  row.carrierBal += p.balanceSource === 'carrier' ? (p.balance || 0) : 0;
                   row.rtc += (p.expectedCommission || 0) - (p.totalPaid || 0);
                   if (p._daysActive != null) { row.daysSum += p._daysActive; row.daysCount++; }
                 });
@@ -1048,12 +1048,12 @@ export default function CombinedPoliciesTab() {
                 // Group by primary, then sort
                 const primaryMap = {};
                 Object.values(groupMap).forEach(r => {
-                  if (!primaryMap[r.primary]) primaryMap[r.primary] = { rows: [], totals: { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, rtc: 0, daysSum: 0, daysCount: 0 } };
+                  if (!primaryMap[r.primary]) primaryMap[r.primary] = { rows: [], totals: { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, carrierBal: 0, rtc: 0, daysSum: 0, daysCount: 0 } };
                   primaryMap[r.primary].rows.push(r);
                   const t = primaryMap[r.primary].totals;
                   t.count += r.count; t.premium += r.premium; t.expected += r.expected;
                   t.paid += r.paid; t.clawback += r.clawback; t.net += r.net;
-                  t.balance += r.balance; t.rtc += r.rtc;
+                  t.carrierBal += r.carrierBal; t.rtc += r.rtc;
                   t.daysSum += r.daysSum; t.daysCount += r.daysCount;
                 });
 
@@ -1066,7 +1066,7 @@ export default function CombinedPoliciesTab() {
 
                 const grandTotals = primaryKeys.reduce((t, k) => {
                   const g = primaryMap[k].totals;
-                  return { count: t.count + g.count, premium: t.premium + g.premium, expected: t.expected + g.expected, paid: t.paid + g.paid, clawback: t.clawback + g.clawback, net: t.net + g.net, balance: t.balance + g.balance, rtc: t.rtc + g.rtc, daysSum: t.daysSum + g.daysSum, daysCount: t.daysCount + g.daysCount };
+                  return { count: t.count + g.count, premium: t.premium + g.premium, expected: t.expected + g.expected, paid: t.paid + g.paid, clawback: t.clawback + g.clawback, net: t.net + g.net, carrierBal: t.carrierBal + g.carrierBal, rtc: t.rtc + g.rtc, daysSum: t.daysSum + g.daysSum, daysCount: t.daysCount + g.daysCount };
                 }, { count: 0, premium: 0, expected: 0, paid: 0, clawback: 0, net: 0, balance: 0, liability: 0, daysSum: 0, daysCount: 0 });
 
                 const renderFinRow = (r, isPrimary, isSubRow, idx) => {
@@ -1116,9 +1116,9 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: d.paid > 0 ? C.green : C.muted }}>{fmtDollar(d.paid)}</td>
                       <td style={{ ...tdStyle, color: d.rtc > 0 ? C.yellow : d.rtc < 0 ? C.red : C.muted }}>{fmtDollar(d.rtc)}</td>
                       <td style={{ ...tdStyle, color: d.clawback > 0 ? C.red : C.muted }}>{fmtDollar(d.clawback)}</td>
-                      <td style={{ ...tdStyle, color: d.net >= 0 ? C.green : C.red, fontWeight: isPrimary ? 700 : 400 }}>{fmtDollar(d.net)}</td>
-                      <td style={{ ...tdStyle, color: d.balance > 0 ? '#facc15' : d.balance < 0 ? C.red : C.muted, fontWeight: d.balance !== 0 ? 600 : 400 }}>{fmtDollar(d.balance)}</td>
+                      <td style={{ ...tdStyle, color: d.carrierBal > 0 ? '#facc15' : C.muted }}>{d.carrierBal > 0 ? fmtDollar(d.carrierBal) : '—'}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{d.daysCount > 0 ? Math.round(d.daysSum / d.daysCount) + 'd' : '—'}</td>
+                      <td style={{ ...tdStyle, color: d.net >= 0 ? C.green : C.red, fontWeight: isPrimary ? 700 : 400 }}>{fmtDollar(d.net)}</td>
                     </tr>
                   );
                 };
@@ -1172,9 +1172,9 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: t.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{fmtDollar(t.paid)}</td>
                       <td style={{ ...tdStyle, color: t.rtc > 0 ? C.yellow : t.rtc < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.rtc)}</td>
                       <td style={{ ...tdStyle, color: t.clawback > 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.clawback)}</td>
-                      <td style={{ ...tdStyle, color: t.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(t.net)}</td>
-                      <td style={{ ...tdStyle, color: t.balance > 0 ? '#facc15' : t.balance < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.balance)}</td>
+                      <td style={{ ...tdStyle, color: t.carrierBal > 0 ? '#facc15' : C.muted, fontWeight: 600 }}>{t.carrierBal > 0 ? fmtDollar(t.carrierBal) : '—'}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{t.daysCount > 0 ? Math.round(t.daysSum / t.daysCount) + 'd' : '—'}</td>
+                      <td style={{ ...tdStyle, color: t.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(t.net)}</td>
                     </tr>
                   );
                 });
@@ -1192,9 +1192,9 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grandTotals.paid)}</td>
                       <td style={{ ...tdStyle, color: grandTotals.rtc > 0 ? C.yellow : grandTotals.rtc < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.rtc)}</td>
                       <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(grandTotals.clawback)}</td>
-                      <td style={{ ...tdStyle, color: grandTotals.net >= 0 ? C.green : C.red }}>{fmtDollar(grandTotals.net)}</td>
-                      <td style={{ ...tdStyle, color: grandTotals.balance > 0 ? '#facc15' : grandTotals.balance < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.balance)}</td>
+                      <td style={{ ...tdStyle, color: grandTotals.carrierBal > 0 ? '#facc15' : C.muted, fontWeight: 700 }}>{grandTotals.carrierBal > 0 ? fmtDollar(grandTotals.carrierBal) : '—'}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{grandTotals.daysCount > 0 ? Math.round(grandTotals.daysSum / grandTotals.daysCount) + 'd' : '—'}</td>
+                      <td style={{ ...tdStyle, color: grandTotals.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(grandTotals.net)}</td>
                     </tr>
                   </>
                 );
