@@ -1010,10 +1010,10 @@ export default function CombinedPoliciesTab() {
                 <th style={thStyle}><Tip text="Total annualized premium (monthly × 12) from the sales tracker">Anl Premium</Tip></th>
                 <th style={thStyle}><Tip text="Expected total commission: Premium × commission rate × 9 advance months (6 for CICA)">Expected</Tip></th>
                 <th style={thStyle}><Tip text="Total commission advances actually paid by the carrier (from commission statements)">Paid</Tip></th>
+                <th style={thStyle}><Tip text="Expected Payment: Expected commission minus Paid — what the carrier still owes you">Exp Payment</Tip></th>
                 <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Chargeback</Tip></th>
-                <th style={thStyle}><Tip text="Net received: Paid minus Clawback — what you actually kept">Net</Tip></th>
+                <th style={thStyle}><Tip text="Net received: Paid minus Chargeback — what you actually kept">Net</Tip></th>
                 <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels.">Liability Bal</Tip></th>
-                <th style={thStyle}><Tip text="Remaining to Collect: Expected commission minus what has been Paid. What the carrier still owes you.">RTC</Tip></th>
                 <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Average days since policy effective date">Avg Days</Tip></th>
               </tr>
             </thead>
@@ -1114,10 +1114,10 @@ export default function CombinedPoliciesTab() {
                       <td style={tdStyle}>{fmtDollar(d.premium * 12)}</td>
                       <td style={tdStyle}>{fmtDollar(d.expected)}</td>
                       <td style={{ ...tdStyle, color: d.paid > 0 ? C.green : C.muted }}>{fmtDollar(d.paid)}</td>
+                      <td style={{ ...tdStyle, color: d.rtc > 0 ? C.yellow : d.rtc < 0 ? C.red : C.muted }}>{fmtDollar(d.rtc)}</td>
                       <td style={{ ...tdStyle, color: d.clawback > 0 ? C.red : C.muted }}>{fmtDollar(d.clawback)}</td>
                       <td style={{ ...tdStyle, color: d.net >= 0 ? C.green : C.red, fontWeight: isPrimary ? 700 : 400 }}>{fmtDollar(d.net)}</td>
                       <td style={{ ...tdStyle, color: d.balance > 0 ? '#facc15' : d.balance < 0 ? C.red : C.muted, fontWeight: d.balance !== 0 ? 600 : 400 }}>{fmtDollar(d.balance)}</td>
-                      <td style={{ ...tdStyle, color: d.rtc > 0 ? C.yellow : d.rtc < 0 ? C.red : C.muted }}>{fmtDollar(d.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{d.daysCount > 0 ? Math.round(d.daysSum / d.daysCount) + 'd' : '—'}</td>
                     </tr>
                   );
@@ -1170,10 +1170,10 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtDollar(t.premium * 12)}</td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtDollar(t.expected)}</td>
                       <td style={{ ...tdStyle, color: t.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{fmtDollar(t.paid)}</td>
+                      <td style={{ ...tdStyle, color: t.rtc > 0 ? C.yellow : t.rtc < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.rtc)}</td>
                       <td style={{ ...tdStyle, color: t.clawback > 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.clawback)}</td>
                       <td style={{ ...tdStyle, color: t.net >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(t.net)}</td>
                       <td style={{ ...tdStyle, color: t.balance > 0 ? '#facc15' : t.balance < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.balance)}</td>
-                      <td style={{ ...tdStyle, color: t.rtc > 0 ? C.yellow : t.rtc < 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{t.daysCount > 0 ? Math.round(t.daysSum / t.daysCount) + 'd' : '—'}</td>
                     </tr>
                   );
@@ -1190,10 +1190,10 @@ export default function CombinedPoliciesTab() {
                       <td style={tdStyle}>{fmtDollar(grandTotals.premium * 12)}</td>
                       <td style={tdStyle}>{fmtDollar(grandTotals.expected)}</td>
                       <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grandTotals.paid)}</td>
+                      <td style={{ ...tdStyle, color: grandTotals.rtc > 0 ? C.yellow : grandTotals.rtc < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.rtc)}</td>
                       <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(grandTotals.clawback)}</td>
                       <td style={{ ...tdStyle, color: grandTotals.net >= 0 ? C.green : C.red }}>{fmtDollar(grandTotals.net)}</td>
                       <td style={{ ...tdStyle, color: grandTotals.balance > 0 ? '#facc15' : grandTotals.balance < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.balance)}</td>
-                      <td style={{ ...tdStyle, color: grandTotals.rtc > 0 ? C.yellow : grandTotals.rtc < 0 ? C.red : C.muted, fontWeight: 700 }}>{fmtDollar(grandTotals.rtc)}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.muted }}>{grandTotals.daysCount > 0 ? Math.round(grandTotals.daysSum / grandTotals.daysCount) + 'd' : '—'}</td>
                     </tr>
                   </>
