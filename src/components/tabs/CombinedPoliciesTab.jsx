@@ -1041,9 +1041,10 @@ export default function CombinedPoliciesTab() {
                   row.clawback += p.totalClawback;
                   row.net += p.netReceived;
                   row.carrierBal += p.balanceSource === 'carrier' ? (p.balance || 0) : 0;
-                  // Exp Payment = $0 for terminal statuses (Declined, Canceled, Lapsed, NeedReqmt, Initial Premium Not Paid)
+                  // Exp Payment = $0 for terminal statuses or clawbacks
                   const terminalSales = /declined|cancell?ed|lapsed|needreq|initial premium not paid/i.test(sales);
-                  row.rtc += terminalSales ? 0 : ((p.expectedCommission || 0) - (p.totalPaid || 0));
+                  const isClawback = comm === 'clawback';
+                  row.rtc += (terminalSales || isClawback) ? 0 : ((p.expectedCommission || 0) - (p.totalPaid || 0));
                   if (p._daysActive != null) { row.daysSum += p._daysActive; row.daysCount++; }
                 });
 
