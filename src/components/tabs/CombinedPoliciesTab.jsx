@@ -996,17 +996,17 @@ export default function CombinedPoliciesTab() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle}>{impactView === 'carrier' ? 'Commission Status' : 'Sales Status'}</th>
-                <th style={thStyle}>{impactView === 'carrier' ? 'Sales Status' : 'Commission Status'}</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Count</th>
-                <th style={thStyle}>Premium</th>
-                <th style={thStyle}>Expected</th>
-                <th style={thStyle}>Paid</th>
-                <th style={thStyle}>Clawback</th>
-                <th style={thStyle}>Net</th>
-                <th style={thStyle}>Balance</th>
-                <th style={thStyle}>Liability</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Avg Days</th>
+                <th style={thStyle}><Tip text={impactView === 'carrier' ? 'Status based on carrier commission activity: Comm Active, No Commission, Carrier Inferred, or Clawback' : 'Policy status from the sales tracker (e.g., Active - In Force, Pending, Canceled)'}>{impactView === 'carrier' ? 'Commission Status' : 'Sales Status'}</Tip></th>
+                <th style={thStyle}><Tip text={impactView === 'carrier' ? 'Policy status from the sales tracker' : 'Status based on carrier commission activity'}>{impactView === 'carrier' ? 'Sales Status' : 'Commission Status'}</Tip></th>
+                <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Number of policies in this group">Count</Tip></th>
+                <th style={thStyle}><Tip text="Total monthly premium from the sales tracker">Premium</Tip></th>
+                <th style={thStyle}><Tip text="Expected total commission: Premium × commission rate × 9 advance months (6 for CICA)">Expected</Tip></th>
+                <th style={thStyle}><Tip text="Total commission advances actually paid by the carrier (from commission statements)">Paid</Tip></th>
+                <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Clawback</Tip></th>
+                <th style={thStyle}><Tip text="Net received: Paid minus Clawback — what you actually kept">Net</Tip></th>
+                <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels. If no carrier data, uses Expected minus Paid.">Balance</Tip></th>
+                <th style={thStyle}><Tip text="Net loss on terminated/clawback policies — unrecovered chargebacks that reduce future advances">Liability</Tip></th>
+                <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Average days since policy effective date">Avg Days</Tip></th>
               </tr>
             </thead>
             <tbody>
