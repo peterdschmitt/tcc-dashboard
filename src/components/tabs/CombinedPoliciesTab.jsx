@@ -764,7 +764,7 @@ export default function CombinedPoliciesTab() {
         <td style={tdStyle}>{fmtDollar(p.premium * 12)}</td>
         <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
         <td style={{ ...tdStyle, color: p.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(p.totalPaid)}</td>
-        <td style={{ ...tdStyle, color: (p.expectedCommission - p.totalPaid) > 0 ? C.yellow : (p.expectedCommission - p.totalPaid) < 0 ? C.red : C.muted }}>{fmtDollar(p.expectedCommission - p.totalPaid)}</td>
+        <td style={{ ...tdStyle, color: (() => { const isTerminal = /declined|cancell?ed|lapsed|needreq|initial premium not paid/i.test(p.status) || p.commissionStatus === 'clawback'; const ep = isTerminal ? 0 : (p.expectedCommission - p.totalPaid); return ep > 0 ? C.yellow : ep < 0 ? C.red : C.muted; })() }}>{(() => { const isTerminal = /declined|cancell?ed|lapsed|needreq|initial premium not paid/i.test(p.status) || p.commissionStatus === 'clawback'; return fmtDollar(isTerminal ? 0 : (p.expectedCommission - p.totalPaid)); })()}</td>
         <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{p.totalClawback > 0 ? fmtDollar(p.totalClawback) : '—'}</td>
         <td style={{ ...tdStyle, color: p.balance > 0 ? '#facc15' : p.balance < 0 ? C.red : C.muted, fontWeight: p.balance !== 0 ? 600 : 400 }}>{p.balanceSource === 'carrier' ? fmtDollar(p.balance) : '—'}</td>
         <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
