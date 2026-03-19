@@ -1006,10 +1006,11 @@ export default function CombinedPoliciesTab() {
                 <th style={thStyle}><Tip text={impactView === 'carrier' ? 'Status based on carrier commission activity: Comm Active, No Commission, Carrier Inferred, or Clawback' : 'Policy status from the sales tracker (e.g., Active - In Force, Pending, Canceled)'}>{impactView === 'carrier' ? 'Commission Status' : 'Sales Status'}</Tip></th>
                 <th style={thStyle}><Tip text={impactView === 'carrier' ? 'Policy status from the sales tracker' : 'Status based on carrier commission activity'}>{impactView === 'carrier' ? 'Sales Status' : 'Commission Status'}</Tip></th>
                 <th style={{ ...thStyle, textAlign: 'center' }}><Tip text="Number of policies in this group">Count</Tip></th>
-                <th style={thStyle}><Tip text="Total monthly premium from the sales tracker">Premium</Tip></th>
+                <th style={thStyle}><Tip text="Average monthly premium per policy in this group">Avg Mo Prem</Tip></th>
+                <th style={thStyle}><Tip text="Total annualized premium (monthly × 12) from the sales tracker">Anl Premium</Tip></th>
                 <th style={thStyle}><Tip text="Expected total commission: Premium × commission rate × 9 advance months (6 for CICA)">Expected</Tip></th>
                 <th style={thStyle}><Tip text="Total commission advances actually paid by the carrier (from commission statements)">Paid</Tip></th>
-                <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Clawback</Tip></th>
+                <th style={thStyle}><Tip text="Total chargebacks — commission clawed back by the carrier due to policy cancellations">Chargeback</Tip></th>
                 <th style={thStyle}><Tip text="Net received: Paid minus Clawback — what you actually kept">Net</Tip></th>
                 <th style={thStyle}><Tip text="Outstanding advance balance from carrier statements. This is what you owe back if the policy cancels.">Liability Bal</Tip></th>
                 <th style={thStyle}><Tip text="Remaining to Collect: Expected commission minus what has been Paid. What the carrier still owes you.">RTC</Tip></th>
@@ -1109,7 +1110,8 @@ export default function CombinedPoliciesTab() {
                         {!isSubRow && impactView === 'sales' && ''}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'center', fontWeight: isPrimary ? 700 : 400 }}>{d.count}</td>
-                      <td style={tdStyle}>{fmtDollar(d.premium)}</td>
+                      <td style={tdStyle}>{d.count > 0 ? fmtDollar(d.premium / d.count) : '—'}</td>
+                      <td style={tdStyle}>{fmtDollar(d.premium * 12)}</td>
                       <td style={tdStyle}>{fmtDollar(d.expected)}</td>
                       <td style={{ ...tdStyle, color: d.paid > 0 ? C.green : C.muted }}>{fmtDollar(d.paid)}</td>
                       <td style={{ ...tdStyle, color: d.clawback > 0 ? C.red : C.muted }}>{fmtDollar(d.clawback)}</td>
@@ -1164,7 +1166,8 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, paddingLeft: 28, fontSize: 9, color: lc }}>Subtotal</td>
                       <td style={tdStyle}></td>
                       <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: lc }}>{t.count}</td>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtDollar(t.premium)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{t.count > 0 ? fmtDollar(t.premium / t.count) : '—'}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtDollar(t.premium * 12)}</td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtDollar(t.expected)}</td>
                       <td style={{ ...tdStyle, color: t.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{fmtDollar(t.paid)}</td>
                       <td style={{ ...tdStyle, color: t.clawback > 0 ? C.red : C.muted, fontWeight: 600 }}>{fmtDollar(t.clawback)}</td>
@@ -1183,7 +1186,8 @@ export default function CombinedPoliciesTab() {
                       <td style={{ ...tdStyle, color: C.accent }}>TOTAL</td>
                       <td style={tdStyle}></td>
                       <td style={{ ...tdStyle, textAlign: 'center', color: C.accent }}>{grandTotals.count}</td>
-                      <td style={tdStyle}>{fmtDollar(grandTotals.premium)}</td>
+                      <td style={tdStyle}>{grandTotals.count > 0 ? fmtDollar(grandTotals.premium / grandTotals.count) : '—'}</td>
+                      <td style={tdStyle}>{fmtDollar(grandTotals.premium * 12)}</td>
                       <td style={tdStyle}>{fmtDollar(grandTotals.expected)}</td>
                       <td style={{ ...tdStyle, color: C.green }}>{fmtDollar(grandTotals.paid)}</td>
                       <td style={{ ...tdStyle, color: C.red }}>{fmtDollar(grandTotals.clawback)}</td>
