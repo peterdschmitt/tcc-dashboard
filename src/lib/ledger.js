@@ -179,7 +179,8 @@ export function buildLedgerRow(record, meta) {
   dict['Match Type']       = meta.matchType || '';
   dict['Match Confidence'] = meta.matchConfidence != null ? Number(meta.matchConfidence).toFixed(2) : '0';
   dict['Status']           = meta.status || '';
-  dict['Notes']            = meta.notes || '';
+  const driveUrl = meta.driveFileId ? `https://drive.google.com/file/d/${meta.driveFileId}/view` : '';
+  dict['Notes']            = [meta.notes, driveUrl].filter(Boolean).join(' | ');
 
   // Map carrier fields using the mapping table
   const map = CARRIER_MAPS[meta.carrierId] || CARRIER_MAPS.aig; // fallback

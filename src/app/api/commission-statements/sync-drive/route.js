@@ -44,7 +44,7 @@ async function downloadDriveFile(fileId) {
 /**
  * Process one file — shared logic used by both sync and upload.
  */
-async function processOneFile(buffer, filename, salesRows) {
+async function processOneFile(buffer, filename, salesRows, driveFileId) {
   const fileType = filename.toLowerCase().endsWith('.pdf') ? 'PDF'
     : filename.toLowerCase().match(/\.xlsx?$/) ? 'XLSX'
     : filename.toLowerCase().endsWith('.csv') ? 'CSV' : 'Unknown';
@@ -97,6 +97,7 @@ async function processOneFile(buffer, filename, salesRows) {
       processingDate, filename,
       matchedPolicy, matchType, matchConfidence, status,
       notes: record.cancellationIndicator ? 'Cancellation detected' : '',
+      driveFileId: driveFileId || '',
     });
     ledgerRows.push(row);
   }
@@ -178,7 +179,7 @@ export async function POST() {
       try {
         console.log(`[sync] Downloading ${file.name}...`);
         const buffer = await downloadDriveFile(file.id);
-        const result = await processOneFile(buffer, file.name, salesRows);
+        const result = await processOneFile(buffer, file.name, salesRows, file.id);
         results.push(result);
         console.log(`[sync] ✓ ${file.name}: ${result.summary.totalRecords} records`);
       } catch (err) {

@@ -230,7 +230,10 @@ function PolicyCRMDetail({ policy, cashFlow, loading, thStyle, tdStyle }) {
           {withRunning.map((e, i) => (
             <tr key={i}>
               <td style={tdStyle}>{e.statementDate || '—'}</td>
-              <td style={{ ...tdStyle, fontSize: 9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
+              <td style={{ ...tdStyle, fontSize: 9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
+                const driveUrl = (e.notes || '').match(/https:\/\/drive\.google\.com\/file\/d\/[^|\s]+/);
+                return driveUrl ? <a href={driveUrl[0]} target="_blank" rel="noopener noreferrer" style={{ color: C.accent, textDecoration: 'underline' }}>{e.statementFile}</a> : (e.statementFile || '—');
+              })()}</td>
               <td style={tdStyle}>{typeBadge(e.transactionType)}</td>
               <td style={{ ...tdStyle, fontSize: 9, color: C.muted, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.description || '—'}</td>
               <td style={{ ...tdStyle, textAlign: 'right' }}>{e.premium ? fmtDollar(e.premium) : '—'}</td>
@@ -828,7 +831,10 @@ export default function CombinedPoliciesTab() {
           <td style={{ ...subTd, color: e.netImpact >= 0 ? C.green : C.red, fontWeight: 600 }}>{fmtDollar(e.netImpact)}</td>
           <td style={subTd}>{carrierBal ? fmtDollar(carrierBal) : '$0'}</td>
           <td style={subTd}></td>
-          <td style={{ ...subTd, fontSize: 8, color: C.muted, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || ''}</td>
+          <td style={{ ...subTd, fontSize: 8, color: C.muted, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
+            const driveUrl = (e.notes || '').match(/https:\/\/drive\.google\.com\/file\/d\/[^|\s]+/);
+            return driveUrl ? <a href={driveUrl[0]} target="_blank" rel="noopener noreferrer" style={{ color: C.accent, textDecoration: 'underline' }} onClick={ev => ev.stopPropagation()}>{e.statementFile}</a> : (e.statementFile || '');
+          })()}</td>
           <td style={subTd}></td>
         </tr>
       );
