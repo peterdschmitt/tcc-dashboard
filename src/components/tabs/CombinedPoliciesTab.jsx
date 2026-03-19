@@ -762,12 +762,13 @@ export default function CombinedPoliciesTab() {
         </td>
         <td style={tdStyle}>{fmtDollar(p.premium)}</td>
         <td style={tdStyle}>{fmtDollar(p.premium * 12)}</td>
+        <td style={tdStyle}>{fmtDollar(p.expectedCommission)}</td>
         <td style={{ ...tdStyle, color: p.totalPaid > 0 ? C.green : C.muted }}>{fmtDollar(p.totalPaid)}</td>
-        <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{p.totalClawback > 0 ? fmtDollar(p.totalClawback) : '—'}</td>
-        <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
-        <td style={{ ...tdStyle, color: p.balance > 0 ? '#facc15' : p.balance < 0 ? C.red : C.muted, fontWeight: p.balance !== 0 ? 600 : 400 }}>{fmtDollar(p.balance)}</td>
         <td style={{ ...tdStyle, color: (p.expectedCommission - p.totalPaid) > 0 ? C.yellow : (p.expectedCommission - p.totalPaid) < 0 ? C.red : C.muted }}>{fmtDollar(p.expectedCommission - p.totalPaid)}</td>
+        <td style={{ ...tdStyle, color: p.totalClawback > 0 ? C.red : C.muted }}>{p.totalClawback > 0 ? fmtDollar(p.totalClawback) : '—'}</td>
+        <td style={{ ...tdStyle, color: p.balance > 0 ? '#facc15' : p.balance < 0 ? C.red : C.muted, fontWeight: p.balance !== 0 ? 600 : 400 }}>{p.balanceSource === 'carrier' ? fmtDollar(p.balance) : '—'}</td>
         <td style={{ ...tdStyle, textAlign: 'center', color: daysColor, fontWeight: 600 }}>{days !== null ? days : '—'}</td>
+        <td style={{ ...tdStyle, color: p.netReceived >= 0 ? C.green : C.red, fontWeight: 700 }}>{p.entries > 0 ? fmtDollar(p.netReceived) : '—'}</td>
         <td style={tdStyle}>
           <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: cs.bg, color: cs.text }}>{cs.label}</span>
         </td>
@@ -883,13 +884,14 @@ export default function CombinedPoliciesTab() {
         <SortTh label="Date" field="effectiveDate" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Type" field="commissionStatus" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Mo Prem" field="premium" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Anl Prem" field="expectedCommission" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Commission" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Anl Prem" field="_anlPrem" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Expected" field="expectedCommission" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Paid" field="totalPaid" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Exp Payment" field="_expPayment" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Chargeback" field="totalClawback" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="Net Impact" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Liability Bal" field="balance" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
-        <SortTh label="RTC" field="rtc" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <SortTh label="Days" field="_daysActive" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <SortTh label="Net Banked Cash" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <th style={thStyle}>Source</th>
         <SortTh label="Status" field="status" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
       </tr>
