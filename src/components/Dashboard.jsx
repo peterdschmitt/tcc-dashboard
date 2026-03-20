@@ -554,37 +554,37 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     })(),
     cpa: (() => {
       const cpaRows = [...pnl].filter(r => r.leadSpend > 0).sort((a, b) => {
-        const cpaA = a.placedCount > 0 ? a.leadSpend / a.placedCount : Infinity;
-        const cpaB = b.placedCount > 0 ? b.leadSpend / b.placedCount : Infinity;
+        const cpaA = a.appCount > 0 ? a.leadSpend / a.appCount : Infinity;
+        const cpaB = b.appCount > 0 ? b.leadSpend / b.appCount : Infinity;
         return cpaA - cpaB; // best CPA first
       });
-      const totalSpend   = cpaRows.reduce((s, r) => s + r.leadSpend, 0);
-      const totalPlaced  = pnl.reduce((s, r) => s + (r.placedCount||0), 0); // all publishers, not just paid
-      const overallCpa   = totalPlaced > 0 ? totalSpend / totalPlaced : 0;
+      const totalSpend  = cpaRows.reduce((s, r) => s + r.leadSpend, 0);
+      const totalApps   = pnl.reduce((s, r) => s + (r.appCount||0), 0); // all publishers
+      const overallCpa  = totalApps > 0 ? totalSpend / totalApps : 0;
       return {
-        title: 'CPA — Cost Per Acquisition by Publisher',
-        summary: `${totalPlaced} placed · ${fmtDollar(totalSpend)} spend · overall CPA ${fmtDollar(overallCpa)}`,
+        title: 'CPA — Cost Per App Submitted by Publisher',
+        summary: `${totalApps} apps · ${fmtDollar(totalSpend)} spend · overall CPA ${fmtDollar(overallCpa)}`,
         financials: [
           { label: 'Overall CPA',   value: fmtDollar(overallCpa),   color: overallCpa <= 250 ? C.green : overallCpa <= 312 ? C.yellow : C.red },
           { label: 'Total Spend',   value: fmtDollar(totalSpend),   color: C.yellow },
-          { label: 'Placed',        value: fmt(totalPlaced),         color: C.green },
+          { label: 'Apps',          value: fmt(totalApps),           color: C.green },
         ],
         rows: cpaRows,
         columns: [
-          { label: 'Publisher',     render: r => r.campaign,                                                                                          color: C.text },
-          { label: 'Vendor',        render: r => r.vendor || '—',                                                                                     color: C.muted },
-          { label: 'Total Calls',   render: r => fmt(r.totalCalls||0),                                                                                color: C.muted },
-          { label: 'Billable',      render: r => fmt(r.billableCalls||0),                                                                             color: C.muted },
-          { label: 'Placed',        render: r => fmt(r.placedCount||0),                                                                               color: C.green },
-          { label: 'Lead Spend',    render: r => fmtDollar(r.leadSpend, 2),                                                                           color: C.yellow },
-          { label: 'CPA',           render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend / r.placedCount) : '—',                                   color: r => { const c = r.placedCount > 0 ? r.leadSpend/r.placedCount : null; return !c ? C.muted : c <= 250 ? C.green : c <= 312 ? C.yellow : C.red; } },
-          { label: 'Close Rate',    render: r => r.billableCalls > 0 ? fmtPct(r.placedCount / r.billableCalls * 100) : '—',                          color: C.muted },
+          { label: 'Publisher',     render: r => r.campaign,                                                                                        color: C.text },
+          { label: 'Vendor',        render: r => r.vendor || '—',                                                                                   color: C.muted },
+          { label: 'Total Calls',   render: r => fmt(r.totalCalls||0),                                                                              color: C.muted },
+          { label: 'Billable',      render: r => fmt(r.billableCalls||0),                                                                           color: C.muted },
+          { label: 'Apps',          render: r => fmt(r.appCount||0),                                                                                color: C.green },
+          { label: 'Lead Spend',    render: r => fmtDollar(r.leadSpend, 2),                                                                         color: C.yellow },
+          { label: 'CPA',           render: r => r.appCount > 0 ? fmtDollar(r.leadSpend / r.appCount) : '—',                                       color: r => { const c = r.appCount > 0 ? r.leadSpend/r.appCount : null; return !c ? C.muted : c <= 250 ? C.green : c <= 312 ? C.yellow : C.red; } },
+          { label: 'Close Rate',    render: r => r.billableCalls > 0 ? fmtPct(r.placedCount / r.billableCalls * 100) : '—',                        color: C.muted },
         ],
         totals: [
           'TOTAL', '',
           fmt(cpaRows.reduce((s,r)=>s+(r.totalCalls||0),0)),
           fmt(cpaRows.reduce((s,r)=>s+(r.billableCalls||0),0)),
-          fmt(totalPlaced),
+          fmt(totalApps),
           fmtDollar(totalSpend, 2),
           fmtDollar(overallCpa),
           '',
@@ -926,7 +926,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
   const billable = calls.filter(c => c.isBillable).length;
   const totalCalls = calls.length;
-  const cpa = placed.length > 0 ? totalLeadSpend / placed.length : 0;
+  const cpa = policies.length > 0 ? totalLeadSpend / policies.length : 0;
   const closeRate = billable > 0 ? placed.length / billable * 100 : 0;
   const placementRate = policies.length > 0 ? placed.length / policies.length * 100 : 0;
   const avgPremium = placed.length > 0 ? totalPremium / placed.length : 0;
@@ -1057,7 +1057,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
   const totalCalls = calls.length;
   const billable = calls.filter(c => c.isBillable).length;
   const leadSpend = calls.reduce((s, c) => s + c.cost, 0);
-  const cpa = placed.length > 0 ? leadSpend / placed.length : 0;
+  const cpa = policies.length > 0 ? leadSpend / policies.length : 0;
   const rpc = totalCalls > 0 ? leadSpend / totalCalls : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const avgPrem = placed.length > 0 ? totalPremium / placed.length : 0;
@@ -1484,7 +1484,7 @@ function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange }) {
   const totalCalls = calls.length;
   const billable = calls.filter(c => c.isBillable).length;
   const cg = goals?.company || {};
-  const cpa = placed.length > 0 ? totalSpend / placed.length : 0;
+  const cpa = policies.length > 0 ? totalSpend / policies.length : 0;
   const rpc = totalCalls > 0 ? totalSpend / totalCalls : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const netRev = totalGAR - totalSpend - totalComm;

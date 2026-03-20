@@ -100,6 +100,7 @@ export default function TrendsPage() {
   const [view, setView] = useState('daily');
   const [compareMode, setCompareMode] = useState('campaign');
   const [selectedItems, setSelectedItems] = useState([]);
+  const [activeSources, setActiveSources] = useState(null); // null = all selected
   const [dateRange, setDateRange] = useState(getPresetRange('all'));
 
   const applyPreset = id => setDateRange(getPresetRange(id));
@@ -221,13 +222,89 @@ export default function TrendsPage() {
     }).sort((a, b) => a.date.localeCompare(b.date));
   }, [data, selectedItems, compareMode]);
 
+  // ─── Net Revenue by Source ──────────────────────
+  const netRevenueBySource = useMemo(() => {
+    if (!data) return { rows: [], sources: [] };
+    const byDay = {};
+    const sourceSet = new Set();
+
+    data.policies.forEach(p => {
+      const src = p.leadSource || 'Unknown';
+      sourceSet.add(src);
+      if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, label: p.submitDate.slice(5) };
+      if (!byDay[p.submitDate][src + '_gar']) byDay[p.submitDate][src + '_gar'] = 0;
+      if (!byDay[p.submitDate][src + '_comm']) byDay[p.submitDate][src + '_comm'] = 0;
+      byDay[p.submitDate][src + '_gar'] += p.grossAdvancedRevenue;
+      if (isPlaced(p)) byDay[p.submitDate][src + '_comm'] += p.commission;
+    });
+
+    data.calls.forEach(c => {
+      const src = c.campaignCode || 'Unknown';
+      sourceSet.add(src);
+      if (!byDay[c.date]) byDay[c.date] = { date: c.date, label: c.date.slice(5) };
+      if (!byDay[c.date][src + '_spend']) byDay[c.date][src + '_spend'] = 0;
+      if (c.isBillable) byDay[c.date][src + '_spend'] += c.cost;
+    });
+
+    const sources = [...sourceSet].sort();
+    const rows = Object.values(byDay).map(day => {
+      let totalNet = 0;
+      sources.forEach(src => {
+        const gar = day[src + '_gar'] || 0;
+        const comm = day[src + '_comm'] || 0;
+        const spend = day[src + '_spend'] || 0;
+        const net = gar - comm - spend;
+        day[src] = net;
+        totalNet += net;
+      });
+      day.totalNet = totalNet;
+      return day;
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    return { rows, sources };
+  }, [data]);
+
+  // ─── Net Revenue by Source — outlier-aware chart data ───────────────
+  const netRevChartData = useMemo(() => {
+    const { rows, sources } = netRevenueBySource;
+    if (!rows.length) return { rows, sources, domain: ['auto', 'auto'] };
+    const activeSrcs = activeSources === null ? sources : (activeSources || []);
+    const vals = [];
+    rows.forEach(row => activeSrcs.forEach(src => {
+      const v = row[src];
+      if (v != null && isFinite(v)) vals.push(v);
+    }));
+    if (vals.length < 4) return { rows, sources, domain: ['auto', 'auto'] };
+    const sorted = [...vals].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    const lower = q1 - 1.5 * iqr;
+    const upper = q3 + 1.5 * iqr;
+    const pad = Math.max((upper - lower) * 0.15, 50);
+    const dMin = Math.floor(lower - pad);
+    const dMax = Math.ceil(upper + pad);
+    const chartRows = rows.map(row => {
+      const r = { ...row };
+      sources.forEach(src => {
+        const v = row[src];
+        if (v != null) {
+          r[src + '_c'] = Math.max(dMin, Math.min(dMax, v));
+          r[src + '_ov'] = (v < lower || v > upper) ? v : null;
+        }
+      });
+      return r;
+    });
+    return { rows: chartRows, sources, domain: [dMin, dMax] };
+  }, [netRevenueBySource, activeSources]);
+
   // ─── Summary stats ──────────────────────────────
   const summary = useMemo(() => {
     if (!data) return {};
     const placed = data.policies.filter(isPlaced);
     const prem = placed.reduce((s, p) => s + p.premium, 0);
     const comm = placed.reduce((s, p) => s + p.commission, 0);
-    const gar = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
+    const gar = data.policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
     const spend = data.calls.reduce((s, c) => s + c.cost, 0);
     const bill = data.calls.filter(c => c.isBillable).length;
     return {
@@ -345,6 +422,88 @@ export default function TrendsPage() {
         {/* Charts */}
         {(view === 'daily' || (isCompare && selectedItems.length > 0)) && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+
+            {/* 0. Net Revenue by Campaign — full width, daily only */}
+            {view === 'daily' && (
+              <div style={{ gridColumn: '1 / -1', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: 0 }}>Net Revenue by Campaign</h3>
+                    <p style={{ fontSize: 10, color: C.muted, margin: '2px 0 0' }}>Daily net revenue per campaign (GAR − commission − spend)</p>
+                  </div>
+                  <button onClick={() => setActiveSources(null)} style={{ fontSize: 10, color: C.accent, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Select All</button>
+                </div>
+                <div style={{ display: 'flex', gap: 0 }}>
+                  <div style={{ flex: 1, padding: '12px 8px 8px', height: 320 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={netRevChartData.rows}>
+                        <CartesianGrid {...gridStyle} />
+                        <XAxis dataKey="label" tick={axisStyle} />
+                        <YAxis domain={netRevChartData.domain} tick={axisStyle} tickFormatter={v => '$' + v.toLocaleString()} />
+                        <Tooltip content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          return (
+                            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', maxWidth: 260 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: C.text, marginBottom: 6, fontFamily: C.mono }}>{label}</div>
+                              {payload.filter(p => p.value != null).map((p, i) => {
+                                const src = p.dataKey.replace('_c', '');
+                                const realVal = p.payload[src + '_ov'] ?? p.value;
+                                const isOut = p.payload[src + '_ov'] != null;
+                                return (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                    <div style={{ width: 8, height: 8, borderRadius: isOut ? 0 : '50%', background: p.color, flexShrink: 0, transform: isOut ? 'rotate(45deg)' : 'none' }} />
+                                    <span style={{ fontSize: 11, color: C.muted }}>{p.name}:</span>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: p.color, fontFamily: C.mono }}>{fmtD(realVal)}{isOut ? ' ⚠' : ''}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }} />
+                        <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 4" />
+                        {netRevChartData.sources.map((src, i) => {
+                          const active = activeSources === null || activeSources.includes(src);
+                          if (!active) return null;
+                          const color = COLORS[i % COLORS.length];
+                          return (
+                            <Line key={src} dataKey={src + '_c'} name={src} stroke={color} strokeWidth={2} connectNulls
+                              dot={(props) => {
+                                const { cx, cy, payload } = props;
+                                if (!cx || !cy) return null;
+                                const isOut = payload[src + '_ov'] != null;
+                                if (isOut) return (
+                                  <g key={`${src}-${cx}-${cy}`}>
+                                    <polygon points={`${cx},${cy - 7} ${cx + 6},${cy + 4} ${cx - 6},${cy + 4}`} fill={color} stroke="#fff" strokeWidth={1.5} opacity={0.95} />
+                                  </g>
+                                );
+                                return <circle key={`${src}-${cx}-${cy}`} cx={cx} cy={cy} r={2} fill={color} />;
+                              }}
+                            />
+                          );
+                        })}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div style={{ width: 160, borderLeft: `1px solid ${C.border}`, padding: '12px 14px', overflowY: 'auto', maxHeight: 344 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Campaigns</div>
+                    {netRevChartData.sources.map((src, i) => {
+                      const color = COLORS[i % COLORS.length];
+                      const checked = activeSources === null || activeSources.includes(src);
+                      return (
+                        <label key={src} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={checked} onChange={() => {
+                            const current = activeSources === null ? netRevChartData.sources : activeSources;
+                            const next = checked ? current.filter(s => s !== src) : [...current, src];
+                            setActiveSources(next.length === netRevChartData.sources.length ? null : next);
+                          }} style={{ accentColor: color, width: 13, height: 13, cursor: 'pointer' }} />
+                          <span style={{ fontSize: 11, color: checked ? color : C.muted, fontWeight: checked ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{src}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 1. Gross & Net Revenue */}
             <ChartCard title="Gross Advanced Revenue & Net Revenue" subtitle={isCompare ? 'Net revenue by selection' : '9-month advance (6mo CICA) minus costs'}>
