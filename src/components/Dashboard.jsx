@@ -559,7 +559,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
         return cpaA - cpaB; // best CPA first
       });
       const totalSpend  = cpaRows.reduce((s, r) => s + r.leadSpend, 0);
-      const totalApps   = pnl.reduce((s, r) => s + (r.appCount||0), 0); // all publishers
+      const totalApps   = policies.length; // all apps submitted
       const overallCpa  = totalApps > 0 ? totalSpend / totalApps : 0;
       return {
         title: 'CPA — Cost Per App Submitted by Publisher',
@@ -1163,7 +1163,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
           { key: 'billableRate', label: 'Bill %', render: r => r.totalCalls > 0 ? fmtPct(r.billableCalls / r.totalCalls * 100) : '—' },
           { key: 'leadSpend', label: 'Spend', render: r => fmtDollar(r.leadSpend || 0), color: r => (r.leadSpend || 0) > 0 ? C.yellow : C.muted },
           { key: 'rpc', label: 'RPC', render: r => r.totalCalls > 0 ? fmtDollar(r.leadSpend / r.totalCalls, 2) : '—' },
-          { key: 'cpa', label: 'CPA', render: r => r.placed > 0 && r.leadSpend ? fmtDollar(r.leadSpend / r.placed) : '—' },
+          { key: 'cpa', label: 'CPA', render: r => r.apps > 0 && r.leadSpend ? fmtDollar(r.leadSpend / r.apps) : '—' },
           { key: 'commission', label: 'Comm', render: r => fmtDollar(r.commission), color: () => C.accent },
           { key: 'net', label: 'Net Rev', render: r => fmtDollar(r.gar - (r.leadSpend || 0) - r.commission), color: r => (r.gar - (r.leadSpend || 0) - r.commission) > 0 ? C.green : C.red },
         ]} rows={dailyRows} />
@@ -1184,7 +1184,8 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
     t.billableRate = t.totalCalls > 0 ? t.billableCalls / t.totalCalls * 100 : 0;
     t.rpc = t.totalCalls > 0 ? t.leadSpend / t.totalCalls : 0;
     t.closeRate = t.billableCalls > 0 ? t.placedCount / t.billableCalls * 100 : 0;
-    t.cpa = t.placedCount > 0 ? t.leadSpend / t.placedCount : 0;
+    t.appCount = pnl.reduce((s, p) => s + (p.appCount||0), 0);
+    t.cpa = t.appCount > 0 ? t.leadSpend / t.appCount : 0;
     t.avgPremium = t.placedCount > 0 ? t.totalPremium / t.placedCount : 0;
     t.netRevenue = t.grossAdvancedRevenue - t.leadSpend - t.totalCommission;
     return t;
@@ -1236,7 +1237,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
             { key: 'billRate', label: 'Bill %', render: r => (r.totalCalls || 0) > 0 ? fmtPct(r.billableCalls / r.totalCalls * 100) : '—' },
             { key: 'leadSpend', label: 'Spend', render: r => fmtDollar(r.leadSpend || 0), color: () => C.yellow },
             { key: 'rpc', label: 'RPC', render: r => (r.totalCalls || 0) > 0 ? fmtDollar(r.leadSpend / r.totalCalls, 2) : '—' },
-            { key: 'cpa', label: 'CPA', render: r => r.placed > 0 && r.leadSpend ? fmtDollar(r.leadSpend / r.placed) : '—' },
+            { key: 'cpa', label: 'CPA', render: r => r.apps > 0 && r.leadSpend ? fmtDollar(r.leadSpend / r.apps) : '—' },
           ]} rows={Object.values(agentMap)} />
         </Section>
         <Section title="Carrier Breakdown">

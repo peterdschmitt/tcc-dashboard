@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ReferenceLine,
+  ReferenceLine, Cell,
 } from 'recharts';
 
 const C = {
@@ -22,6 +22,16 @@ function fmtP(n) { if (n==null||isNaN(n)) return '—'; return n.toFixed(1)+'%';
 function fmt(n) { if (n==null||isNaN(n)) return '—'; return n.toLocaleString('en-US'); }
 
 const isPlaced = p => ['Advance Released','Active - In Force','Submitted - Pending'].includes(p.placed);
+
+// IQR outlier bounds for an array of values
+function iqrBounds(vals) {
+  if (vals.length < 4) return null;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const q1 = sorted[Math.floor(sorted.length * 0.25)];
+  const q3 = sorted[Math.floor(sorted.length * 0.75)];
+  const iqr = q3 - q1;
+  return { lower: q1 - 1.5 * iqr, upper: q3 + 1.5 * iqr };
+}
 
 const CustomTooltip = ({ active, payload, label, formatter }) => {
   if (!active || !payload?.length) return null;
@@ -93,6 +103,125 @@ function getPresetRange(id) {
   }
 }
 
+// ─── Campaign combo chart (Net Revenue bar + Billable Calls line, dual Y) ───
+function CampaignComboChart({ camp, avgNetRevenue, avgBillableCalls, axisStyle, gridStyle, y1Domain, y2Domain, allDates, netRevenueGoal }) {
+  const synced = !!y1Domain;
+
+  // When synced, pad rows to cover all dates in the global range
+  const baseRows = synced && allDates
+    ? allDates.map(({ date, label }) => {
+        const existing = camp.rows.find(r => r.date === date);
+        return existing || { date, label, gar: 0, commission: 0, leadSpend: 0, billableCalls: 0, totalCalls: 0, netRevenue: 0 };
+      })
+    : camp.rows;
+
+  const netVals = baseRows.map(d => d.netRevenue).filter(v => isFinite(v));
+  const billVals = baseRows.map(d => d.billableCalls).filter(v => isFinite(v));
+  const netBounds = synced ? null : iqrBounds(netVals);
+  const billBounds = synced ? null : iqrBounds(billVals);
+
+  const rows = baseRows.map(d => {
+    const netOut = netBounds && (d.netRevenue < netBounds.lower || d.netRevenue > netBounds.upper);
+    const billOut = billBounds && (d.billableCalls < billBounds.lower || d.billableCalls > billBounds.upper);
+    return {
+      ...d,
+      netRev_c: netBounds ? Math.max(netBounds.lower - Math.abs(netBounds.lower * 0.1), Math.min(netBounds.upper + Math.abs(netBounds.upper * 0.1), d.netRevenue)) : d.netRevenue,
+      netRev_out: netOut ? d.netRevenue : null,
+      bill_c: billBounds ? Math.max(0, Math.min(billBounds.upper * 1.1, d.billableCalls)) : d.billableCalls,
+      bill_out: billOut ? d.billableCalls : null,
+    };
+  });
+
+  const totalNet = camp.rows.reduce((s, d) => s + d.netRevenue, 0);
+  const totalBill = camp.rows.reduce((s, d) => s + d.billableCalls, 0);
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{camp.name}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+            <span style={{ color: totalNet >= 0 ? C.green : C.red, marginRight: 12 }}>Net Rev: {fmtD(totalNet)}</span>
+            <span style={{ color: C.accent }}>{fmt(totalBill)} billable calls</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 10, height: 10, background: C.green, opacity: 0.7, borderRadius: 2 }} />
+            <span style={{ fontSize: 9, color: C.muted }}>Net Rev</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 18, height: 2, background: C.accent }} />
+            <span style={{ fontSize: 9, color: C.muted }}>Billable</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 18, height: 2, background: C.muted, borderTop: `2px dashed ${C.muted}` }} />
+            <span style={{ fontSize: 9, color: C.muted }}>Total Calls</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: '8px 4px 4px', height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={rows} margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+            <CartesianGrid {...gridStyle} />
+            <XAxis dataKey="label" tick={axisStyle} interval={rows.length > 20 ? Math.ceil(rows.length / 20) - 1 : 0} />
+            <YAxis yAxisId="left" tick={axisStyle} tickFormatter={v => '$' + (Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'k' : v)} width={52} domain={y1Domain ?? ['auto', 'auto']} />
+            <YAxis yAxisId="right" orientation="right" tick={axisStyle} width={28} domain={y2Domain ?? ['auto', 'auto']} />
+            <Tooltip content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              return (
+                <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.text, marginBottom: 4, fontFamily: C.mono }}>{label}</div>
+                  {payload.map((p, i) => {
+                    const isBar = p.dataKey === 'netRev_c';
+                    const isTotal = p.dataKey === 'totalCalls';
+                    const realVal = isBar ? (p.payload.netRev_out ?? p.value) : isTotal ? p.value : (p.payload.bill_out ?? p.value);
+                    const isOut = isBar ? p.payload.netRev_out != null : isTotal ? false : p.payload.bill_out != null;
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: isOut ? 0 : '50%', background: p.color, transform: isOut ? 'rotate(45deg)' : 'none', flexShrink: 0 }} />
+                        <span style={{ fontSize: 10, color: C.muted }}>{isBar ? 'Net Rev' : isTotal ? 'Total' : 'Billable'}:</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: p.color, fontFamily: C.mono }}>
+                          {isBar ? fmtD(realVal) : fmt(realVal)}{isOut ? ' ⚠' : ''}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }} />
+            {/* Group avg reference lines */}
+            <ReferenceLine yAxisId="left" y={avgNetRevenue} stroke={C.green} strokeDasharray="5 3" strokeOpacity={0.6}
+              label={{ value: 'Avg', fill: C.green, fontSize: 8, position: 'insideTopLeft', opacity: 0.7 }} />
+            <ReferenceLine yAxisId="right" y={avgBillableCalls} stroke={C.accent} strokeDasharray="5 3" strokeOpacity={0.6}
+              label={{ value: 'Avg', fill: C.accent, fontSize: 8, position: 'insideTopRight', opacity: 0.7 }} />
+            <ReferenceLine yAxisId="left" y={0} stroke={C.muted} strokeDasharray="3 3" strokeOpacity={0.4} />
+            <Bar yAxisId="left" dataKey="netRev_c" name="Net Rev" radius={[2,2,0,0]}>
+              {rows.map((r, i) => {
+                const color = r.netRevenue < 0 ? C.red : netRevenueGoal && r.netRevenue < netRevenueGoal ? C.yellow : C.green;
+                return <Cell key={i} fill={color} opacity={0.65} />;
+              })}
+            </Bar>
+            <Line yAxisId="right" dataKey="bill_c" name="Billable" stroke={C.accent} strokeWidth={2} connectNulls
+              dot={(props) => {
+                const { cx, cy, payload } = props;
+                if (!cx || !cy) return null;
+                if (payload.bill_out != null) return (
+                  <g key={`${cx}-${cy}`}>
+                    <polygon points={`${cx},${cy-6} ${cx+5},${cy+4} ${cx-5},${cy+4}`} fill={C.accent} stroke="#fff" strokeWidth={1} opacity={0.9} />
+                  </g>
+                );
+                return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={2.5} fill={C.accent} />;
+              }}
+            />
+            <Line yAxisId="right" dataKey="totalCalls" name="Total" stroke={C.muted} strokeWidth={1.5} strokeDasharray="4 3" connectNulls dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 export default function TrendsPage() {
   const [data, setData] = useState(null);
   const [goals, setGoals] = useState(null);
@@ -100,7 +229,8 @@ export default function TrendsPage() {
   const [view, setView] = useState('daily');
   const [compareMode, setCompareMode] = useState('campaign');
   const [selectedItems, setSelectedItems] = useState([]);
-  const [activeSources, setActiveSources] = useState(null); // null = all selected
+  const [syncAxes, setSyncAxes] = useState(false);
+  const [campaignGroupBy, setCampaignGroupBy] = useState('agent'); // 'campaign' | 'agent'
   const [dateRange, setDateRange] = useState(getPresetRange('all'));
 
   const applyPreset = id => setDateRange(getPresetRange(id));
@@ -222,81 +352,123 @@ export default function TrendsPage() {
     }).sort((a, b) => a.date.localeCompare(b.date));
   }, [data, selectedItems, compareMode]);
 
-  // ─── Net Revenue by Source ──────────────────────
-  const netRevenueBySource = useMemo(() => {
-    if (!data) return { rows: [], sources: [] };
-    const byDay = {};
-    const sourceSet = new Set();
+  // ─── Synced axis domains ─────────────────────────
+  // One global Y1 domain across all non-rate charts, one Y2 domain for counts
+  const syncDomains = useMemo(() => {
+    if (!syncAxes) return null;
+    const comparing = view === 'compare';
+    const src = comparing ? comparisonData : dailyData;
+    const allVals = [], countVals = [];
 
-    data.policies.forEach(p => {
-      const src = p.leadSource || 'Unknown';
-      sourceSet.add(src);
-      if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, label: p.submitDate.slice(5) };
-      if (!byDay[p.submitDate][src + '_gar']) byDay[p.submitDate][src + '_gar'] = 0;
-      if (!byDay[p.submitDate][src + '_comm']) byDay[p.submitDate][src + '_comm'] = 0;
-      byDay[p.submitDate][src + '_gar'] += p.grossAdvancedRevenue;
-      if (isPlaced(p)) byDay[p.submitDate][src + '_comm'] += p.commission;
+    const Y1_KEYS = ['gar', 'netRevenue', 'leadSpend', 'commission', 'cpa', 'rpc', 'avgPremium'];
+    const Y2_KEYS = ['totalCalls', 'billableCalls'];
+
+    src.forEach(d => {
+      const collect = (prefix) => {
+        const get = k => d[prefix ? prefix + '_' + k : k];
+        Y1_KEYS.forEach(k => { const v = get(k); if (v != null && isFinite(v)) allVals.push(v); });
+        Y2_KEYS.forEach(k => { const v = get(k); if (v != null && isFinite(v)) countVals.push(v); });
+      };
+      if (comparing) selectedItems.forEach(item => collect(item));
+      else collect('');
     });
+
+    const dom = (vals) => {
+      if (!vals.length) return ['auto', 'auto'];
+      const mn = vals.reduce((a, b) => Math.min(a, b));
+      const mx = vals.reduce((a, b) => Math.max(a, b));
+      return [Math.min(0, mn), mx * 1.08];
+    };
+
+    return { y1: dom(allVals), y2: dom(countVals) };
+  }, [syncAxes, view, dailyData, comparisonData, selectedItems]);
+
+  const syncY1 = syncDomains?.y1 ?? ['auto', 'auto'];
+  const syncY2 = syncDomains?.y2 ?? ['auto', 'auto'];
+
+  // ─── Campaign code → canonical lead source mapping ──────────────────
+  // Call logs use different codes than policy lead sources for the same publisher.
+  // This map merges them so charts show complete data.
+  const CAMPAIGN_ALIAS = {
+    'Inulti': 'INU',
+    'BrokerCalls': 'BCL',
+  };
+
+  function canonicalCampaign(code) { return CAMPAIGN_ALIAS[code] || code; }
+
+  // ─── Per-campaign combo chart data ──────────────
+  const campaignChartData = useMemo(() => {
+    if (!data) return { campaigns: [], avgNetRevenue: 0, avgBillableCalls: 0 };
+
+    const camps = {};
 
     data.calls.forEach(c => {
-      const src = c.campaignCode || 'Unknown';
-      sourceSet.add(src);
-      if (!byDay[c.date]) byDay[c.date] = { date: c.date, label: c.date.slice(5) };
-      if (!byDay[c.date][src + '_spend']) byDay[c.date][src + '_spend'] = 0;
-      if (c.isBillable) byDay[c.date][src + '_spend'] += c.cost;
+      const key = canonicalCampaign(c.campaignCode || 'Unknown');
+      if (!camps[key]) camps[key] = { name: key, days: {}, totalBillable: 0 };
+      if (!camps[key].days[c.date]) camps[key].days[c.date] = { date: c.date, label: c.date.slice(5), gar: 0, commission: 0, leadSpend: 0, billableCalls: 0, totalCalls: 0 };
+      camps[key].days[c.date].totalCalls++;
+      if (c.isBillable) { camps[key].days[c.date].billableCalls++; camps[key].days[c.date].leadSpend += c.cost; camps[key].totalBillable++; }
     });
 
-    const sources = [...sourceSet].sort();
-    const rows = Object.values(byDay).map(day => {
-      let totalNet = 0;
-      sources.forEach(src => {
-        const gar = day[src + '_gar'] || 0;
-        const comm = day[src + '_comm'] || 0;
-        const spend = day[src + '_spend'] || 0;
-        const net = gar - comm - spend;
-        day[src] = net;
-        totalNet += net;
-      });
-      day.totalNet = totalNet;
-      return day;
-    }).sort((a, b) => a.date.localeCompare(b.date));
+    data.policies.forEach(p => {
+      const key = p.leadSource || 'Unknown';
+      if (!camps[key]) camps[key] = { name: key, days: {}, totalBillable: 0 };
+      if (!camps[key].days[p.submitDate]) camps[key].days[p.submitDate] = { date: p.submitDate, label: p.submitDate.slice(5), gar: 0, commission: 0, leadSpend: 0, billableCalls: 0 };
+      camps[key].days[p.submitDate].gar += p.grossAdvancedRevenue;
+      if (isPlaced(p)) camps[key].days[p.submitDate].commission += p.commission;
+    });
 
-    return { rows, sources };
+    const campaigns = Object.values(camps).map(camp => {
+      const rows = Object.values(camp.days).map(d => ({
+        ...d,
+        netRevenue: d.gar - d.leadSpend - d.commission,
+      })).sort((a, b) => a.date.localeCompare(b.date));
+      return { name: camp.name, rows, totalBillable: camp.totalBillable };
+    }).sort((a, b) => b.totalBillable - a.totalBillable);
+
+    let netSum = 0, billSum = 0, dayCount = 0;
+    campaigns.forEach(camp => {
+      camp.rows.forEach(d => { netSum += d.netRevenue; billSum += d.billableCalls; dayCount++; });
+    });
+    return { campaigns, avgNetRevenue: dayCount > 0 ? netSum / dayCount : 0, avgBillableCalls: dayCount > 0 ? billSum / dayCount : 0 };
   }, [data]);
 
-  // ─── Net Revenue by Source — outlier-aware chart data ───────────────
-  const netRevChartData = useMemo(() => {
-    const { rows, sources } = netRevenueBySource;
-    if (!rows.length) return { rows, sources, domain: ['auto', 'auto'] };
-    const activeSrcs = activeSources === null ? sources : (activeSources || []);
-    const vals = [];
-    rows.forEach(row => activeSrcs.forEach(src => {
-      const v = row[src];
-      if (v != null && isFinite(v)) vals.push(v);
-    }));
-    if (vals.length < 4) return { rows, sources, domain: ['auto', 'auto'] };
-    const sorted = [...vals].sort((a, b) => a - b);
-    const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const iqr = q3 - q1;
-    const lower = q1 - 1.5 * iqr;
-    const upper = q3 + 1.5 * iqr;
-    const pad = Math.max((upper - lower) * 0.15, 50);
-    const dMin = Math.floor(lower - pad);
-    const dMax = Math.ceil(upper + pad);
-    const chartRows = rows.map(row => {
-      const r = { ...row };
-      sources.forEach(src => {
-        const v = row[src];
-        if (v != null) {
-          r[src + '_c'] = Math.max(dMin, Math.min(dMax, v));
-          r[src + '_ov'] = (v < lower || v > upper) ? v : null;
-        }
-      });
-      return r;
+  // ─── Per-agent combo chart data ─────────────────
+  const agentChartData = useMemo(() => {
+    if (!data) return { agents: [], avgNetRevenue: 0, avgBillableCalls: 0 };
+
+    const agts = {};
+
+    data.calls.forEach(c => {
+      if (!c.rep) return;
+      if (!agts[c.rep]) agts[c.rep] = { name: c.rep, days: {}, totalBillable: 0 };
+      if (!agts[c.rep].days[c.date]) agts[c.rep].days[c.date] = { date: c.date, label: c.date.slice(5), gar: 0, commission: 0, leadSpend: 0, billableCalls: 0, totalCalls: 0 };
+      agts[c.rep].days[c.date].totalCalls++;
+      if (c.isBillable) { agts[c.rep].days[c.date].billableCalls++; agts[c.rep].days[c.date].leadSpend += c.cost; agts[c.rep].totalBillable++; }
     });
-    return { rows: chartRows, sources, domain: [dMin, dMax] };
-  }, [netRevenueBySource, activeSources]);
+
+    data.policies.forEach(p => {
+      if (!p.agent) return;
+      if (!agts[p.agent]) agts[p.agent] = { name: p.agent, days: {}, totalBillable: 0 };
+      if (!agts[p.agent].days[p.submitDate]) agts[p.agent].days[p.submitDate] = { date: p.submitDate, label: p.submitDate.slice(5), gar: 0, commission: 0, leadSpend: 0, billableCalls: 0 };
+      agts[p.agent].days[p.submitDate].gar += p.grossAdvancedRevenue;
+      if (isPlaced(p)) agts[p.agent].days[p.submitDate].commission += p.commission;
+    });
+
+    const agents = Object.values(agts).map(agt => {
+      const rows = Object.values(agt.days).map(d => ({
+        ...d,
+        netRevenue: d.gar - d.leadSpend - d.commission,
+      })).sort((a, b) => a.date.localeCompare(b.date));
+      return { name: agt.name, rows, totalBillable: agt.totalBillable };
+    }).sort((a, b) => b.totalBillable - a.totalBillable);
+
+    let netSum = 0, billSum = 0, dayCount = 0;
+    agents.forEach(agt => {
+      agt.rows.forEach(d => { netSum += d.netRevenue; billSum += d.billableCalls; dayCount++; });
+    });
+    return { agents, avgNetRevenue: dayCount > 0 ? netSum / dayCount : 0, avgBillableCalls: dayCount > 0 ? billSum / dayCount : 0 };
+  }, [data]);
 
   // ─── Summary stats ──────────────────────────────
   const summary = useMemo(() => {
@@ -318,9 +490,40 @@ export default function TrendsPage() {
     };
   }, [data]);
 
+  // ─── Campaign/Agent sync domains ────────────────
+  const campSyncDomains = useMemo(() => {
+    if (!syncAxes) return null;
+    const isAgent = campaignGroupBy === 'agent';
+    const items = isAgent ? agentChartData.agents : campaignChartData.campaigns;
+    const netVals = [], billVals = [];
+    const dateMap = {};
+    items.forEach(item => item.rows.forEach(d => {
+      if (isFinite(d.netRevenue)) netVals.push(d.netRevenue);
+      if (isFinite(d.billableCalls)) billVals.push(d.billableCalls);
+      if (isFinite(d.totalCalls)) billVals.push(d.totalCalls);
+      if (!dateMap[d.date]) dateMap[d.date] = d.label;
+    }));
+    const allDates = Object.entries(dateMap).sort((a, b) => a[0].localeCompare(b[0])).map(([date, label]) => ({ date, label }));
+    const dom = vals => {
+      if (!vals.length) return ['auto', 'auto'];
+      const mn = vals.reduce((a, b) => Math.min(a, b));
+      const mx = vals.reduce((a, b) => Math.max(a, b));
+      return [Math.min(0, mn), mx * 1.08];
+    };
+    return { y1: dom(netVals), y2: dom(billVals), allDates };
+  }, [syncAxes, campaignGroupBy, campaignChartData, agentChartData]);
+
   const cg = goals?.company || {};
   const axisStyle = { fontSize: 10, fontFamily: C.mono, fill: C.muted };
   const gridStyle = { stroke: C.border, strokeDasharray: '3 3' };
+
+  // Compute tick interval so we never show more than ~20 labels
+  const xInterval = useMemo(() => {
+    const n = dailyData.length;
+    if (n <= 20) return 0;
+    return Math.ceil(n / 20) - 1;
+  }, [dailyData]);
+  const xAxisProps = { dataKey: 'label', tick: axisStyle, interval: xInterval };
 
   if (loading) {
     return (
@@ -358,7 +561,7 @@ export default function TrendsPage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
-            {[{ id: 'daily', label: 'Daily Trends' }, { id: 'compare', label: 'Compare' }].map(v => (
+            {[{ id: 'daily', label: 'Daily Trends' }, { id: 'campaigns', label: 'Campaigns' }, { id: 'compare', label: 'Compare' }].map(v => (
               <button key={v.id} onClick={() => setView(v.id)} style={{
                 padding: '5px 14px', borderRadius: 4, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 background: view === v.id ? C.accent : 'transparent', color: view === v.id ? '#fff' : C.muted,
@@ -380,6 +583,7 @@ export default function TrendsPage() {
           <input type="date" value={dateRange.start} onChange={e => setCustomRange('start', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', fontSize: 10, outline: 'none', width: 110 }} />
           <span style={{ color: C.muted, fontSize: 10 }}>–</span>
           <input type="date" value={dateRange.end} onChange={e => setCustomRange('end', e.target.value)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', fontSize: 10, outline: 'none', width: 110 }} />
+          <button onClick={() => setSyncAxes(v => !v)} style={{ padding: '5px 10px', borderRadius: 4, border: `1px solid ${syncAxes ? C.accent : C.border}`, background: syncAxes ? C.accentDim : 'transparent', color: syncAxes ? C.accent : C.muted, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Sync Axes</button>
         </div>
       </div>
 
@@ -395,6 +599,65 @@ export default function TrendsPage() {
           <StatCard label="Avg Premium" value={fmtD(summary.avgPremium, 2)} color={C.accent} />
           <StatCard label="Bill %" value={fmtP(summary.billableRate)} color={C.purple} />
         </div>
+
+        {/* ─── CAMPAIGNS TAB ─── */}
+        {view === 'campaigns' && (() => {
+          const isAgent = campaignGroupBy === 'agent';
+          const chartData = isAgent ? agentChartData : campaignChartData;
+          const items = isAgent ? chartData.agents : chartData.campaigns;
+          const label = isAgent ? 'agents' : 'campaigns';
+          return (
+            <>
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}`, marginBottom: 6 }}>
+                    {[{ id: 'agent', label: 'By Agent' }, { id: 'campaign', label: 'By Campaign' }].map(v => (
+                      <button key={v.id} onClick={() => setCampaignGroupBy(v.id)} style={{
+                        padding: '4px 14px', borderRadius: 4, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        background: campaignGroupBy === v.id ? C.accent : 'transparent', color: campaignGroupBy === v.id ? '#fff' : C.muted,
+                      }}>{v.label}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted }}>
+                    {items.length} {label} · sorted by billable call volume &nbsp;·&nbsp;
+                    dashed lines = group averages &nbsp;·&nbsp; <span style={{ color: C.accent }}>▲ outlier</span>
+                    {!isAgent && <span style={{ color: C.yellow }}> · Note: some campaign codes may not match call log names</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 14px' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 1 }}>Avg Daily Net Rev</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: chartData.avgNetRevenue >= 0 ? C.green : C.red, fontFamily: C.mono }}>{fmtD(chartData.avgNetRevenue)}</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 1 }}>Avg Daily Billable</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.accent, fontFamily: C.mono }}>{chartData.avgBillableCalls.toFixed(1)}</div>
+                  </div>
+                </div>
+              </div>
+              {items.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 60, color: C.muted }}>No data for this date range</div>
+              ) : (
+                <div key={String(syncAxes)} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {items.map(item => (
+                    <CampaignComboChart
+                      key={item.name}
+                      camp={item}
+                      avgNetRevenue={chartData.avgNetRevenue}
+                      avgBillableCalls={chartData.avgBillableCalls}
+                      axisStyle={axisStyle}
+                      gridStyle={gridStyle}
+                      y1Domain={campSyncDomains?.y1}
+                      y2Domain={campSyncDomains?.y2}
+                      allDates={campSyncDomains?.allDates}
+                      netRevenueGoal={cg.net_revenue}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Comparison Controls */}
         {isCompare && (
@@ -419,104 +682,22 @@ export default function TrendsPage() {
           </div>
         )}
 
-        {/* Charts */}
+        {/* Charts — Daily & Compare views */}
         {(view === 'daily' || (isCompare && selectedItems.length > 0)) && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
-            {/* 0. Net Revenue by Campaign — full width, daily only */}
-            {view === 'daily' && (
-              <div style={{ gridColumn: '1 / -1', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h3 style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: 0 }}>Net Revenue by Campaign</h3>
-                    <p style={{ fontSize: 10, color: C.muted, margin: '2px 0 0' }}>Daily net revenue per campaign (GAR − commission − spend)</p>
-                  </div>
-                  <button onClick={() => setActiveSources(null)} style={{ fontSize: 10, color: C.accent, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Select All</button>
-                </div>
-                <div style={{ display: 'flex', gap: 0 }}>
-                  <div style={{ flex: 1, padding: '12px 8px 8px', height: 320 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={netRevChartData.rows}>
-                        <CartesianGrid {...gridStyle} />
-                        <XAxis dataKey="label" tick={axisStyle} />
-                        <YAxis domain={netRevChartData.domain} tick={axisStyle} tickFormatter={v => '$' + v.toLocaleString()} />
-                        <Tooltip content={({ active, payload, label }) => {
-                          if (!active || !payload?.length) return null;
-                          return (
-                            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', maxWidth: 260 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: C.text, marginBottom: 6, fontFamily: C.mono }}>{label}</div>
-                              {payload.filter(p => p.value != null).map((p, i) => {
-                                const src = p.dataKey.replace('_c', '');
-                                const realVal = p.payload[src + '_ov'] ?? p.value;
-                                const isOut = p.payload[src + '_ov'] != null;
-                                return (
-                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                                    <div style={{ width: 8, height: 8, borderRadius: isOut ? 0 : '50%', background: p.color, flexShrink: 0, transform: isOut ? 'rotate(45deg)' : 'none' }} />
-                                    <span style={{ fontSize: 11, color: C.muted }}>{p.name}:</span>
-                                    <span style={{ fontSize: 11, fontWeight: 600, color: p.color, fontFamily: C.mono }}>{fmtD(realVal)}{isOut ? ' ⚠' : ''}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        }} />
-                        <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 4" />
-                        {netRevChartData.sources.map((src, i) => {
-                          const active = activeSources === null || activeSources.includes(src);
-                          if (!active) return null;
-                          const color = COLORS[i % COLORS.length];
-                          return (
-                            <Line key={src} dataKey={src + '_c'} name={src} stroke={color} strokeWidth={2} connectNulls
-                              dot={(props) => {
-                                const { cx, cy, payload } = props;
-                                if (!cx || !cy) return null;
-                                const isOut = payload[src + '_ov'] != null;
-                                if (isOut) return (
-                                  <g key={`${src}-${cx}-${cy}`}>
-                                    <polygon points={`${cx},${cy - 7} ${cx + 6},${cy + 4} ${cx - 6},${cy + 4}`} fill={color} stroke="#fff" strokeWidth={1.5} opacity={0.95} />
-                                  </g>
-                                );
-                                return <circle key={`${src}-${cx}-${cy}`} cx={cx} cy={cy} r={2} fill={color} />;
-                              }}
-                            />
-                          );
-                        })}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div style={{ width: 160, borderLeft: `1px solid ${C.border}`, padding: '12px 14px', overflowY: 'auto', maxHeight: 344 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Campaigns</div>
-                    {netRevChartData.sources.map((src, i) => {
-                      const color = COLORS[i % COLORS.length];
-                      const checked = activeSources === null || activeSources.includes(src);
-                      return (
-                        <label key={src} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7, cursor: 'pointer' }}>
-                          <input type="checkbox" checked={checked} onChange={() => {
-                            const current = activeSources === null ? netRevChartData.sources : activeSources;
-                            const next = checked ? current.filter(s => s !== src) : [...current, src];
-                            setActiveSources(next.length === netRevChartData.sources.length ? null : next);
-                          }} style={{ accentColor: color, width: 13, height: 13, cursor: 'pointer' }} />
-                          <span style={{ fontSize: 11, color: checked ? color : C.muted, fontWeight: checked ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{src}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
+          <div key={String(syncAxes)} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
             {/* 1. Gross & Net Revenue */}
             <ChartCard title="Gross Advanced Revenue & Net Revenue" subtitle={isCompare ? 'Net revenue by selection' : '9-month advance (6mo CICA) minus costs'}>
               <ResponsiveContainer width="100%" height="100%">
                 {isCompare ? (
                   <LineChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     {compLines('netRevenue')}
                   </LineChart>
                 ) : (
                   <ComposedChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     <Bar dataKey="gar" name="Gross Adv Rev" fill={C.green} opacity={0.5} radius={[2,2,0,0]} />
                     <Line dataKey="netRevenue" name="Net Revenue" stroke={C.accent} strokeWidth={2.5} dot={{ r: 3, fill: C.accent }} />
@@ -530,7 +711,7 @@ export default function TrendsPage() {
             <ChartCard title="CPA Trend" subtitle={isCompare ? 'Cost per acquisition by selection' : 'Lower is better'}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartSrc}>
-                  <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                  <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                   <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   {isCompare ? compLines('cpa') : <Line dataKey="cpa" name="CPA" stroke={C.red} strokeWidth={2.5} dot={{ r: 3, fill: C.red }} connectNulls />}
                   {cg.cpa && <ReferenceLine y={cg.cpa} stroke={C.green} strokeDasharray="6 4" strokeOpacity={0.5} label={{ value: 'Goal', fill: C.muted, fontSize: 9, position: 'right' }} />}
@@ -543,13 +724,13 @@ export default function TrendsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 {isCompare ? (
                   <LineChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     {compLines('leadSpend')}
                   </LineChart>
                 ) : (
                   <BarChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} />
                     <Bar dataKey="leadSpend" name="Lead Spend" fill={C.yellow} opacity={0.8} radius={[2,2,0,0]} />
                   </BarChart>
@@ -561,7 +742,7 @@ export default function TrendsPage() {
             <ChartCard title="RPC (Revenue Per Call)" subtitle={isCompare ? 'RPC by selection' : 'Lead spend ÷ total calls'}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartSrc}>
-                  <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                  <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                   <Tooltip content={<CustomTooltip formatter={v => fmtD(v, 2)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   {isCompare ? compLines('rpc') : <Line dataKey="rpc" name="RPC" stroke={C.cyan} strokeWidth={2.5} dot={{ r: 3, fill: C.cyan }} connectNulls />}
                 </LineChart>
@@ -572,7 +753,7 @@ export default function TrendsPage() {
             <ChartCard title="Billable Rate" subtitle={isCompare ? 'Billable % by selection' : 'Percentage of calls that are billable'}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartSrc}>
-                  <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => v + '%'} domain={[0, 100]} />
+                  <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => v + '%'} domain={[0, 100]} />
                   <Tooltip content={<CustomTooltip formatter={v => fmtP(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   {isCompare ? compLines('billableRate') : <Line dataKey="billableRate" name="Billable %" stroke={C.purple} strokeWidth={2.5} dot={{ r: 3, fill: C.purple }} connectNulls />}
                 </LineChart>
@@ -584,13 +765,13 @@ export default function TrendsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 {isCompare ? (
                   <LineChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} domain={syncY2} />
                     <Tooltip content={<CustomTooltip />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     {compLines('totalCalls')}
                   </LineChart>
                 ) : (
                   <BarChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} domain={syncY2} />
                     <Tooltip content={<CustomTooltip />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     <Bar dataKey="totalCalls" name="Total Calls" fill={C.accent} opacity={0.4} radius={[2,2,0,0]} />
                     <Bar dataKey="billableCalls" name="Billable" fill={C.accent} radius={[2,2,0,0]} />
@@ -603,7 +784,7 @@ export default function TrendsPage() {
             <ChartCard title="Average Premium" subtitle={isCompare ? 'Avg premium per placed policy by selection' : 'Average monthly premium per placed policy'}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartSrc}>
-                  <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                  <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                   <Tooltip content={<CustomTooltip formatter={v => fmtD(v, 2)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   {isCompare ? compLines('avgPremium') : <Line dataKey="avgPremium" name="Avg Premium" stroke={C.orange} strokeWidth={2.5} dot={{ r: 3, fill: C.orange }} connectNulls />}
                 </LineChart>
@@ -615,13 +796,13 @@ export default function TrendsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 {isCompare ? (
                   <LineChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                     {compLines('commission')}
                   </LineChart>
                 ) : (
                   <BarChart data={chartSrc}>
-                    <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} />
+                    <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => '$' + v} domain={syncY1} />
                     <Tooltip content={<CustomTooltip formatter={v => fmtD(v)} />} />
                     <Bar dataKey="commission" name="Commission" fill={C.accent} opacity={0.8} radius={[2,2,0,0]} />
                   </BarChart>
@@ -633,7 +814,7 @@ export default function TrendsPage() {
             <ChartCard title="Conversion Rates" subtitle={isCompare ? 'Close rate by selection' : 'Close rate & placement rate'} height={320}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartSrc}>
-                  <CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} /><YAxis tick={axisStyle} tickFormatter={v => v + '%'} domain={[0, 100]} />
+                  <CartesianGrid {...gridStyle} /><XAxis {...xAxisProps} /><YAxis tick={axisStyle} tickFormatter={v => v + '%'} domain={[0, 100]} />
                   <Tooltip content={<CustomTooltip formatter={v => fmtP(v)} />} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   {isCompare ? compLines('closeRate') : (
                     <>
