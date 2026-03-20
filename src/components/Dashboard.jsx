@@ -559,7 +559,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
         return cpaA - cpaB; // best CPA first
       });
       const totalSpend   = cpaRows.reduce((s, r) => s + r.leadSpend, 0);
-      const totalPlaced  = cpaRows.reduce((s, r) => s + (r.placedCount||0), 0);
+      const totalPlaced  = pnl.reduce((s, r) => s + (r.placedCount||0), 0); // all publishers, not just paid
       const overallCpa   = totalPlaced > 0 ? totalSpend / totalPlaced : 0;
       return {
         title: 'CPA — Cost Per Acquisition by Publisher',
