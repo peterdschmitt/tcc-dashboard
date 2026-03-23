@@ -201,7 +201,8 @@ export async function GET(request) {
         const callTypeRaw = (r['Call Type'] || '').trim().toLowerCase();
         const overrideRaw = (r['Billable Override'] || '').trim().toUpperCase();
         const hasCost = (priceInfo.pricePerCall || 0) > 0;
-        const computedBillable = hasCost && callTypeRaw === 'inbound' && callDuration > (priceInfo.buffer || 0);
+        const billableCallTypes = ['inbound', 'transferred inbound', 'transferred manual'];
+        const computedBillable = hasCost && billableCallTypes.includes(callTypeRaw) && callDuration > (priceInfo.buffer || 0);
         const isBillable = overrideRaw === 'N' ? false : overrideRaw === 'Y' ? true : computedBillable;
         return {
           date, callTime, rep, campaign: rawCampaign, campaignCode: normalized,
@@ -236,6 +237,22 @@ export async function GET(request) {
 
     if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
     if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }
+
+    // Dedupe billable calls by phone number per campaign: only the longest billable call
+    // per phone per campaign counts. Prevents double-counting repeat calls to the same prospect.
+    const seenBillablePhones = {};
+    calls
+      .filter(c => c.isBillable && c.phone)
+      .sort((a, b) => b.duration - a.duration)
+      .forEach(c => {
+        const key = c.campaignCode + '::' + c.phone;
+        if (seenBillablePhones[key]) {
+          c.isBillable = false;
+          c.cost = 0;
+        } else {
+          seenBillablePhones[key] = true;
+        }
+      });
 
     const pnlByPublisher = {};
     calls.forEach(c => {
