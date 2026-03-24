@@ -238,12 +238,13 @@ export async function GET(request) {
     if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
     if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }
 
-    // Dedupe billable calls by phone number per campaign: only the longest billable call
+    // Dedupe billable calls by phone number per campaign: only the first billable call
     // per phone per campaign counts. Prevents double-counting repeat calls to the same prospect.
+    const to24h = t => { if (!t) return ''; const m = t.match(/(\d+):(\d+):(\d+)\s*(AM|PM)/i); if (!m) return t; let h = parseInt(m[1]); if (m[4].toUpperCase() === 'PM' && h !== 12) h += 12; if (m[4].toUpperCase() === 'AM' && h === 12) h = 0; return `${String(h).padStart(2,'0')}:${m[2]}:${m[3]}`; };
     const seenBillablePhones = {};
     calls
       .filter(c => c.isBillable && c.phone)
-      .sort((a, b) => b.duration - a.duration)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '') || to24h(a.callTime).localeCompare(to24h(b.callTime)))
       .forEach(c => {
         const key = c.campaignCode + '::' + c.phone;
         if (seenBillablePhones[key]) {
