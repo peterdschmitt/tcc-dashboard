@@ -163,7 +163,65 @@ function Breadcrumb({ items }) {
 const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'total_calls', 'billable_calls', 'billable_rate', 'monthly_premium', 'lead_spend', 'agent_commission', 'net_revenue', 'cpa', 'rpc', 'close_rate', 'placement_rate', 'premium_cost_ratio', 'avg_premium'];
 
 // ─── TILE DETAIL MODAL ─────────────────────────────
+function SortableModalTable({ columns, rows, totals, thStyle, tdStyle, onRowClick, sortable = false }) {
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
+  const sorted = useMemo(() => {
+    if (!sortable || sortCol == null) return rows;
+    return [...rows].sort((a, b) => {
+      const col = columns[sortCol];
+      if (!col) return 0;
+      let av = col.sortValue ? col.sortValue(a) : col.render(a);
+      let bv = col.sortValue ? col.sortValue(b) : col.render(b);
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [rows, columns, sortCol, sortDir, sortable]);
+  const toggleSort = idx => { if (sortCol === idx) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortCol(idx); setSortDir('desc'); } };
+  return (
+    <div style={{ overflowX: 'auto', maxHeight: '60vh', overflowY: 'auto' }}>
+      <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead style={{ position: 'sticky', top: 0, background: C.card }}>
+          <tr>{columns.map((c, i) => (
+            <th key={c.label} onClick={() => sortable && toggleSort(i)} style={{
+              ...thStyle,
+              cursor: sortable ? 'pointer' : 'default',
+              color: sortCol === i ? C.accent : thStyle.color,
+            }}>{c.label} {sortCol === i ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {sorted.map((row, i) => (
+            <tr key={i} onClick={() => onRowClick && onRowClick(row)} style={{ background: i % 2 === 0 ? 'transparent' : `${C.surface}88`, cursor: onRowClick ? 'pointer' : 'default' }}
+              onMouseEnter={e => { if (onRowClick) e.currentTarget.style.background = `${C.accent}15`; }}
+              onMouseLeave={e => { e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : `${C.surface}88`; }}>
+              {columns.map(c => {
+                const color = typeof c.color === 'function' ? c.color(row) : c.color;
+                return <td key={c.label} style={tdStyle(color)}>{c.render(row)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+        {totals && (
+          <tfoot>
+            <tr style={{ background: C.surface, borderTop: `2px solid ${C.border}` }}>
+              {totals.map((val, i) => (
+                <td key={i} style={{ padding: '8px 10px', fontSize: 11, fontFamily: C.mono, fontWeight: 700, color: i === 0 ? C.muted : C.text, whiteSpace: 'nowrap' }}>{val}</td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
 function TileModal({ tileKey, policies, calls, pnl, onClose }) {
+  const [billableTab, setBillableTab] = useState('campaign');
+  const [drillCampaign, setDrillCampaign] = useState(null);
   if (!tileKey) return null;
 
   const placed = policies.filter(isPlaced);
@@ -314,28 +372,62 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const totalDur = billableRows.reduce((s, c) => s + (c.duration || 0), 0);
       const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
       const bCount = billableRows.length;
+      // Build campaign summary
+      const bycamp = {};
+      billableRows.forEach(c => {
+        const key = c.campaignCode || c.campaign || 'Unknown';
+        if (!bycamp[key]) bycamp[key] = { campaign: key, vendor: c.vendor || '', calls: 0, spend: 0, totalDur: 0, buffer: c.buffer || 0, pricePerCall: c.pricePerCall || 0, agents: new Set() };
+        bycamp[key].calls++;
+        bycamp[key].spend += c.cost || 0;
+        bycamp[key].totalDur += c.duration || 0;
+        if (c.rep) bycamp[key].agents.add(c.rep);
+      });
+      const campRows = Object.values(bycamp).map(r => ({ ...r, agentCount: r.agents.size })).sort((a, b) => b.spend - a.spend);
       return {
         title: 'Billable Calls — Detail',
         summary: `${bCount} billable calls · ${fmtDollar(totalSpend)} total spend`,
+        tabbed: true,
         financials: [
           { label: 'Billable Calls', value: fmt(bCount),                                                       color: C.green },
           { label: 'Total Spend',    value: fmtDollar(totalSpend),                                            color: C.yellow },
           { label: 'Avg Cost/Call',  value: fmtDollar(bCount > 0 ? totalSpend / bCount : 0, 2),              color: C.text },
         ],
+        campaignRows: campRows,
+        campaignColumns: [
+          { label: 'Campaign',    render: r => r.campaign,                                                   color: C.accent, sortValue: r => r.campaign },
+          { label: 'Vendor',      render: r => r.vendor || '—',                                              color: C.muted, sortValue: r => r.vendor || '' },
+          { label: 'Calls',       render: r => fmt(r.calls),                                                  color: C.green, sortValue: r => r.calls },
+          { label: 'Spend',       render: r => fmtDollar(r.spend, 2),                                       color: C.yellow, sortValue: r => r.spend },
+          { label: 'Avg Cost',    render: r => fmtDollar(r.calls > 0 ? r.spend / r.calls : 0, 2),           color: C.text, sortValue: r => r.calls > 0 ? r.spend / r.calls : 0 },
+          { label: '$/Call',      render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall, 2) : '—',     color: C.muted, sortValue: r => r.pricePerCall },
+          { label: 'Buffer',      render: r => r.buffer ? r.buffer + 's' : '—',                              color: C.muted, sortValue: r => r.buffer },
+          { label: 'Avg Duration', render: r => fmtDur(r.calls > 0 ? Math.round(r.totalDur / r.calls) : 0), color: C.green, sortValue: r => r.calls > 0 ? r.totalDur / r.calls : 0 },
+          { label: 'Agents',      render: r => fmt(r.agentCount),                                            color: C.muted, sortValue: r => r.agentCount },
+        ],
+        campaignTotals: [
+          'TOTAL', '',
+          fmt(bCount),
+          fmtDollar(totalSpend, 2),
+          fmtDollar(bCount > 0 ? totalSpend / bCount : 0, 2),
+          '', '',
+          fmtDur(bCount > 0 ? Math.round(totalDur / bCount) : 0),
+          '',
+        ],
+        allRows: billableRows,
         rows: billableRows,
         columns: [
-          { label: 'Date',      render: r => r.date,                                    color: C.muted },
-          { label: 'Time',      render: r => r.callTime || '—',                         color: C.muted },
-          { label: 'Agent',     render: r => r.rep || '—',                              color: C.text },
-          { label: 'Campaign',  render: r => r.campaign || '—',                         color: C.text },
-          { label: 'Status',    render: r => r.callStatus || '—',                       color: C.muted },
-          { label: 'Type',      render: r => r.callType || '—',                         color: C.muted },
-          { label: 'Duration',  render: r => fmtDur(r.duration),                        color: () => C.green },
-          { label: 'Buffer',    render: r => fmtDur(r.buffer),                          color: () => C.muted },
-          { label: 'Cost',      render: r => fmtDollar(r.cost, 2),                      color: () => C.yellow },
-          { label: 'State',     render: r => r.state || '—',                            color: C.muted },
-          { label: 'Phone',     render: r => r.phone || '—',                            color: C.muted },
-          { label: 'Lead ID',   render: r => r.leadId || '—',                           color: C.muted },
+          { label: 'Date',      render: r => r.date,                                    color: C.muted, sortValue: r => r.date || '' },
+          { label: 'Time',      render: r => r.callTime || '—',                         color: C.muted, sortValue: r => r.callTime || '' },
+          { label: 'Agent',     render: r => r.rep || '—',                              color: C.text, sortValue: r => r.rep || '' },
+          { label: 'Campaign',  render: r => r.campaign || '—',                         color: C.text, sortValue: r => r.campaign || '' },
+          { label: 'Status',    render: r => r.callStatus || '—',                       color: C.muted, sortValue: r => r.callStatus || '' },
+          { label: 'Type',      render: r => r.callType || '—',                         color: C.muted, sortValue: r => r.callType || '' },
+          { label: 'Duration',  render: r => fmtDur(r.duration),                        color: () => C.green, sortValue: r => r.duration || 0 },
+          { label: 'Buffer',    render: r => fmtDur(r.buffer),                          color: () => C.muted, sortValue: r => r.buffer || 0 },
+          { label: 'Cost',      render: r => fmtDollar(r.cost, 2),                      color: () => C.yellow, sortValue: r => r.cost || 0 },
+          { label: 'State',     render: r => r.state || '—',                            color: C.muted, sortValue: r => r.state || '' },
+          { label: 'Phone',     render: r => r.phone || '—',                            color: C.muted, sortValue: r => r.phone || '' },
+          { label: 'Lead ID',   render: r => r.leadId || '—',                           color: C.muted, sortValue: r => r.leadId || '' },
         ],
         totals: [
           'TOTAL', '', '', '', '', '',
@@ -800,6 +892,91 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
   const cfg = MODAL_CONFIGS[tileKey];
   if (!cfg) return null;
 
+  const tabBtnStyle = (active) => ({
+    padding: '6px 16px', fontSize: 10, fontWeight: 700, color: active ? C.text : C.muted,
+    background: active ? C.surface : 'transparent', border: `1px solid ${active ? C.border : 'transparent'}`,
+    borderBottom: active ? 'none' : `1px solid ${C.border}`, borderRadius: '6px 6px 0 0',
+    cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: -1,
+  });
+
+  // Billable calls tabbed view
+  if (cfg.tabbed && tileKey === 'billable_calls') {
+    const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
+    // Drill-down: show calls for a specific campaign
+    if (drillCampaign) {
+      const campCalls = cfg.allRows.filter(c => (c.campaignCode || c.campaign || 'Unknown') === drillCampaign);
+      const campSpend = campCalls.reduce((s, c) => s + (c.cost || 0), 0);
+      const campDur = campCalls.reduce((s, c) => s + (c.duration || 0), 0);
+      return (
+        <div style={overlayStyle} onClick={onClose}>
+          <div style={modalStyle} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => setDrillCampaign(null)} style={{ background: 'transparent', border: 'none', color: C.accent, fontSize: 12, cursor: 'pointer', padding: 0 }}>← Back</button>
+                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{drillCampaign} — Billable Calls</h2>
+              </div>
+              <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{campCalls.length} billable calls · {fmtDollar(campSpend)} spend</div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Calls</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.green }}>{fmt(campCalls.length)}</div>
+              </div>
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Spend</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.yellow }}>{fmtDollar(campSpend, 2)}</div>
+              </div>
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Avg Duration</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.text }}>{fmtDur(campCalls.length > 0 ? Math.round(campDur / campCalls.length) : 0)}</div>
+              </div>
+            </div>
+            <SortableModalTable columns={cfg.columns} rows={campCalls} totals={[
+              'TOTAL', '', '', '', '', '',
+              fmtDur(campDur) + ` (avg ${fmtDur(campCalls.length > 0 ? Math.round(campDur/campCalls.length) : 0)})`,
+              '',
+              fmtDollar(campSpend, 2) + ` (avg ${fmtDollar(campCalls.length > 0 ? campSpend/campCalls.length : 0, 2)})`,
+              '', '', '',
+            ]} thStyle={thStyle} tdStyle={tdStyle} sortable />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={overlayStyle} onClick={onClose}>
+        <div style={modalStyle} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{cfg.title}</h2>
+            <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{cfg.summary}</div>
+          {cfg.financials && (
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              {cfg.financials.map(f => (
+                <div key={f.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{f.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: f.color }}>{f.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 0, borderBottom: `1px solid ${C.border}` }}>
+            <button style={tabBtnStyle(billableTab === 'campaign')} onClick={() => setBillableTab('campaign')}>By Campaign</button>
+            <button style={tabBtnStyle(billableTab === 'all')} onClick={() => setBillableTab('all')}>All</button>
+          </div>
+          <div style={{ paddingTop: 12 }}>
+            {billableTab === 'campaign' ? (
+              <SortableModalTable columns={cfg.campaignColumns} rows={cfg.campaignRows} totals={cfg.campaignTotals} thStyle={thStyle} tdStyle={tdStyle} onRowClick={row => setDrillCampaign(row.campaign)} sortable />
+            ) : (
+              <SortableModalTable columns={cfg.columns} rows={cfg.allRows} totals={cfg.totals} thStyle={thStyle} tdStyle={tdStyle} sortable />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
@@ -818,32 +995,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
             ))}
           </div>
         )}
-        <div style={{ overflowX: 'auto', maxHeight: '60vh', overflowY: 'auto' }}>
-          <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-            <thead style={{ position: 'sticky', top: 0, background: C.card }}>
-              <tr>{cfg.columns.map(c => <th key={c.label} style={thStyle}>{c.label}</th>)}</tr>
-            </thead>
-            <tbody>
-              {cfg.rows.map((row, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${C.surface}88` }}>
-                  {cfg.columns.map(c => {
-                    const color = typeof c.color === 'function' ? c.color(row) : c.color;
-                    return <td key={c.label} style={tdStyle(color)}>{c.render(row)}</td>;
-                  })}
-                </tr>
-              ))}
-            </tbody>
-            {cfg.totals && (
-              <tfoot>
-                <tr style={{ background: C.surface, borderTop: `2px solid ${C.border}` }}>
-                  {cfg.totals.map((val, i) => (
-                    <td key={i} style={{ padding: '8px 10px', fontSize: 11, fontFamily: C.mono, fontWeight: 700, color: i === 0 ? C.muted : C.text, whiteSpace: 'nowrap' }}>{val}</td>
-                  ))}
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
+        <SortableModalTable columns={cfg.columns} rows={cfg.rows} totals={cfg.totals} thStyle={thStyle} tdStyle={tdStyle} sortable />
       </div>
     </div>
   );
