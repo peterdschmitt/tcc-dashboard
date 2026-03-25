@@ -372,17 +372,24 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const totalDur = billableRows.reduce((s, c) => s + (c.duration || 0), 0);
       const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
       const bCount = billableRows.length;
+      // Build total calls per campaign (for RPC)
+      const totalCallsByCamp = {};
+      calls.forEach(c => {
+        const key = c.campaignCode || c.campaign || 'Unknown';
+        totalCallsByCamp[key] = (totalCallsByCamp[key] || 0) + 1;
+      });
       // Build campaign summary
       const bycamp = {};
       billableRows.forEach(c => {
         const key = c.campaignCode || c.campaign || 'Unknown';
-        if (!bycamp[key]) bycamp[key] = { campaign: key, vendor: c.vendor || '', calls: 0, spend: 0, totalDur: 0, buffer: c.buffer || 0, pricePerCall: c.pricePerCall || 0, agents: new Set() };
+        if (!bycamp[key]) bycamp[key] = { campaign: key, vendor: c.vendor || '', calls: 0, spend: 0, totalDur: 0, buffer: c.buffer || 0, pricePerCall: c.pricePerCall || 0, agents: new Set(), totalCalls: totalCallsByCamp[key] || 0 };
         bycamp[key].calls++;
         bycamp[key].spend += c.cost || 0;
         bycamp[key].totalDur += c.duration || 0;
         if (c.rep) bycamp[key].agents.add(c.rep);
       });
       const campRows = Object.values(bycamp).map(r => ({ ...r, agentCount: r.agents.size })).sort((a, b) => b.spend - a.spend);
+      const allCallsTotal = calls.length;
       return {
         title: 'Billable Calls — Detail',
         summary: `${bCount} billable calls · ${fmtDollar(totalSpend)} total spend`,
@@ -402,6 +409,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: '$/Call',      render: r => r.pricePerCall > 0 ? fmtDollar(r.pricePerCall, 2) : '—',     color: C.muted, sortValue: r => r.pricePerCall },
           { label: 'Buffer',      render: r => r.buffer ? r.buffer + 's' : '—',                              color: C.muted, sortValue: r => r.buffer },
           { label: 'Avg Duration', render: r => fmtDur(r.calls > 0 ? Math.round(r.totalDur / r.calls) : 0), color: C.green, sortValue: r => r.calls > 0 ? r.totalDur / r.calls : 0 },
+          { label: 'RPC',         render: r => r.totalCalls > 0 ? fmtDollar(r.spend / r.totalCalls, 2) : '—', color: r => { const v = r.totalCalls > 0 ? r.spend / r.totalCalls : null; return !v ? C.muted : v <= 35 ? C.green : v <= 43 ? C.yellow : C.red; }, sortValue: r => r.totalCalls > 0 ? r.spend / r.totalCalls : 0 },
           { label: 'Agents',      render: r => fmt(r.agentCount),                                            color: C.muted, sortValue: r => r.agentCount },
         ],
         campaignTotals: [
@@ -411,6 +419,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           fmtDollar(bCount > 0 ? totalSpend / bCount : 0, 2),
           '', '',
           fmtDur(bCount > 0 ? Math.round(totalDur / bCount) : 0),
+          allCallsTotal > 0 ? fmtDollar(totalSpend / allCallsTotal, 2) : '—',
           '',
         ],
         allRows: billableRows,
