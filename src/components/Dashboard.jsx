@@ -220,8 +220,8 @@ function SortableModalTable({ columns, rows, totals, thStyle, tdStyle, onRowClic
 }
 
 function TileModal({ tileKey, policies, calls, pnl, onClose }) {
-  const [billableTab, setBillableTab] = useState('campaign');
-  const [drillCampaign, setDrillCampaign] = useState(null);
+  const [modalTab, setModalTab] = useState('campaign');
+  const [drillTarget, setDrillTarget] = useState(null);
   if (!tileKey) return null;
 
   const placed = policies.filter(isPlaced);
@@ -908,83 +908,221 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: -1,
   });
 
-  // Billable calls tabbed view
-  if (cfg.tabbed && tileKey === 'billable_calls') {
-    const fmtDur = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
-    // Drill-down: show calls for a specific campaign
-    if (drillCampaign) {
-      const campCalls = cfg.allRows.filter(c => (c.campaignCode || c.campaign || 'Unknown') === drillCampaign);
-      const campSpend = campCalls.reduce((s, c) => s + (c.cost || 0), 0);
-      const campDur = campCalls.reduce((s, c) => s + (c.duration || 0), 0);
-      return (
-        <div style={overlayStyle} onClick={onClose}>
-          <div style={modalStyle} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button onClick={() => setDrillCampaign(null)} style={{ background: 'transparent', border: 'none', color: C.accent, fontSize: 12, cursor: 'pointer', padding: 0 }}>← Back</button>
-                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{drillCampaign} — Billable Calls</h2>
-              </div>
-              <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
-            </div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{campCalls.length} billable calls · {fmtDollar(campSpend)} spend</div>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Calls</div>
-                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.green }}>{fmt(campCalls.length)}</div>
-              </div>
-              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Spend</div>
-                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.yellow }}>{fmtDollar(campSpend, 2)}</div>
-              </div>
-              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Avg Duration</div>
-                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: C.text }}>{fmtDur(campCalls.length > 0 ? Math.round(campDur / campCalls.length) : 0)}</div>
-              </div>
-            </div>
-            <SortableModalTable columns={cfg.columns} rows={campCalls} totals={[
-              'TOTAL', '', '', '', '', '',
-              fmtDur(campDur) + ` (avg ${fmtDur(campCalls.length > 0 ? Math.round(campDur/campCalls.length) : 0)})`,
-              '',
-              fmtDollar(campSpend, 2) + ` (avg ${fmtDollar(campCalls.length > 0 ? campSpend/campCalls.length : 0, 2)})`,
-              '', '', '',
-            ]} thStyle={thStyle} tdStyle={tdStyle} sortable />
-          </div>
-        </div>
-      );
+  // === Build Campaign / Agent / All views for all tiles ===
+  const fmtDurV = s => { if (!s) return '0s'; const m = Math.floor(s/60); const sec = s%60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
+
+  const buildPolGroupRows = (pols, keyFn) => {
+    const map = {};
+    pols.forEach(p => {
+      const key = keyFn(p) || 'Unknown';
+      if (!map[key]) map[key] = { campaign: key, agent: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0, isSalaried: p.isSalaried };
+      map[key].apps++;
+      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+      map[key].leadSpend += getCallCost(p);
+    });
+    return Object.values(map).sort((a,b) => b.premium - a.premium);
+  };
+
+  const buildCallGroupRows = (cls, keyFn) => {
+    const map = {};
+    cls.forEach(c => {
+      const key = keyFn(c) || 'Unknown';
+      if (!map[key]) map[key] = { campaign: key, agent: key, vendor: c.vendor||'', total: 0, billable: 0, spend: 0, totalDur: 0, buffer: c.buffer||0, pricePerCall: c.pricePerCall||0 };
+      map[key].total++;
+      if (c.isBillable) { map[key].billable++; map[key].spend += c.cost||0; }
+      map[key].totalDur += c.duration||0;
+    });
+    return Object.values(map).sort((a,b) => b.total - a.total);
+  };
+
+  const buildMergedAgentRows = () => {
+    const map = {};
+    calls.forEach(c => {
+      const key = c.rep || 'Unknown';
+      if (!map[key]) map[key] = { agent: key, calls: 0, billable: 0, spend: 0, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
+      map[key].calls++;
+      if (c.isBillable) { map[key].billable++; map[key].spend += c.cost||0; }
+    });
+    policies.forEach(p => {
+      const key = p.agent || 'Unknown';
+      if (!map[key]) map[key] = { agent: key, calls: 0, billable: 0, spend: 0, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
+      map[key].apps++;
+      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+    });
+    return Object.values(map).sort((a,b) => b.premium - a.premium);
+  };
+
+  // Column templates for grouped views
+  const polGroupCols = (isAgent) => [
+    isAgent
+      ? { label: 'Agent', render: r => r.agent, color: C.accent, sortValue: r => r.agent }
+      : { label: 'Campaign', render: r => r.campaign, color: C.accent, sortValue: r => r.campaign },
+    { label: 'Apps', render: r => fmt(r.apps), color: C.text, sortValue: r => r.apps },
+    { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
+    { label: 'Place Rate', render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—', color: r => { const v = r.apps>0?r.placed/r.apps*100:0; return v>=80?C.green:v>=64?C.yellow:C.red; }, sortValue: r => r.apps>0?r.placed/r.apps:0 },
+    { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium },
+    { label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—', color: C.muted, sortValue: r => r.placed>0?r.premium/r.placed:0 },
+    { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission },
+    { label: 'GAR', render: r => fmtDollar(r.gar, 0), color: C.green, sortValue: r => r.gar },
+  ];
+
+  const callGroupCols = (isAgent) => {
+    const base = [
+      isAgent
+        ? { label: 'Agent', render: r => r.agent, color: C.accent, sortValue: r => r.agent }
+        : { label: 'Campaign', render: r => r.campaign, color: C.accent, sortValue: r => r.campaign },
+    ];
+    if (!isAgent) base.push({ label: 'Vendor', render: r => r.vendor || '—', color: C.muted, sortValue: r => r.vendor||'' });
+    return [...base,
+      { label: 'Total', render: r => fmt(r.total), color: C.text, sortValue: r => r.total },
+      { label: 'Billable', render: r => fmt(r.billable), color: C.green, sortValue: r => r.billable },
+      { label: 'Bill Rate', render: r => r.total>0 ? fmtPct(r.billable/r.total*100) : '—', color: r => { const v = r.total>0?r.billable/r.total*100:0; return v>=65?C.green:v>=52?C.yellow:C.red; }, sortValue: r => r.total>0?r.billable/r.total:0 },
+      { label: 'Spend', render: r => fmtDollar(r.spend, 2), color: C.yellow, sortValue: r => r.spend },
+      { label: 'Avg Dur', render: r => fmtDurV(r.total > 0 ? Math.round(r.totalDur/r.total) : 0), color: C.green, sortValue: r => r.total>0?r.totalDur/r.total:0 },
+      { label: 'RPC', render: r => r.total>0 ? fmtDollar(r.spend/r.total, 2) : '—', color: r => { const v = r.total>0?r.spend/r.total:null; return !v?C.muted:v<=35?C.green:v<=43?C.yellow:C.red; }, sortValue: r => r.total>0?r.spend/r.total:0 },
+    ];
+  };
+
+  const mergedAgentCols = [
+    { label: 'Agent', render: r => r.agent, color: C.accent, sortValue: r => r.agent },
+    { label: 'Calls', render: r => fmt(r.calls), color: C.text, sortValue: r => r.calls },
+    { label: 'Billable', render: r => fmt(r.billable), color: C.green, sortValue: r => r.billable },
+    { label: 'Apps', render: r => fmt(r.apps), color: C.text, sortValue: r => r.apps },
+    { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
+    { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium },
+    { label: 'Spend', render: r => fmtDollar(r.spend, 2), color: C.yellow, sortValue: r => r.spend },
+    { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission },
+    { label: 'GAR', render: r => fmtDollar(r.gar, 0), color: C.green, sortValue: r => r.gar },
+    { label: 'Net Rev', render: r => { const n = (r.gar||0)-(r.spend||0)-(r.commission||0); return fmtDollar(n, 0); }, color: r => ((r.gar||0)-(r.spend||0)-(r.commission||0))>=0?C.green:C.red, sortValue: r => (r.gar||0)-(r.spend||0)-(r.commission||0) },
+    { label: 'CPA', render: r => r.placed>0 ? fmtDollar(r.spend/r.placed, 0) : '—', color: r => { const v = r.placed>0?r.spend/r.placed:null; return !v?C.muted:v<=250?C.green:v<=312?C.yellow:C.red; }, sortValue: r => r.placed>0?r.spend/r.placed:Infinity },
+    { label: 'Close Rate', render: r => r.billable>0 ? fmtPct(r.placed/r.billable*100) : '—', color: r => { const v = r.billable>0?r.placed/r.billable*100:0; return v>=5?C.green:v>=4?C.yellow:C.red; }, sortValue: r => r.billable>0?r.placed/r.billable:0 },
+  ];
+
+  // Generic "all individual records" columns
+  const allPolicyCols = [
+    { label: 'Date', render: r => r.submitDate, color: C.muted, sortValue: r => r.submitDate||'' },
+    { label: 'Agent', render: r => r.agent, color: C.text, sortValue: r => r.agent||'' },
+    { label: 'Client', render: r => `${r.firstName} ${r.lastName}`.trim(), color: C.text, sortValue: r => r.lastName||'' },
+    { label: 'Lead Source', render: r => r.leadSource || '—', color: C.muted, sortValue: r => r.leadSource||'' },
+    { label: 'Carrier', render: r => r.carrier, color: C.text, sortValue: r => r.carrier||'' },
+    { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium||0 },
+    { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission||0 },
+    { label: 'GAR', render: r => fmtDollar(r.grossAdvancedRevenue, 0), color: C.green, sortValue: r => r.grossAdvancedRevenue||0 },
+    { label: 'Status', render: r => r.placed, color: r => isPlaced(r)?C.green:C.muted, sortValue: r => r.placed||'' },
+  ];
+
+  const allCallCols = [
+    { label: 'Date', render: r => r.date, color: C.muted, sortValue: r => r.date||'' },
+    { label: 'Agent', render: r => r.rep || '—', color: C.text, sortValue: r => r.rep||'' },
+    { label: 'Campaign', render: r => r.campaign || '—', color: C.text, sortValue: r => r.campaign||'' },
+    { label: 'Status', render: r => r.callStatus || '—', color: C.muted, sortValue: r => r.callStatus||'' },
+    { label: 'Duration', render: r => fmtDurV(r.duration), color: r => r.isBillable?C.green:C.muted, sortValue: r => r.duration||0 },
+    { label: 'Billable?', render: r => r.isBillable ? '✓ YES' : '✗ NO', color: r => r.isBillable?C.green:C.red, sortValue: r => r.isBillable?1:0 },
+    { label: 'Cost', render: r => r.cost>0 ? fmtDollar(r.cost, 2) : '—', color: r => r.cost>0?C.yellow:C.muted, sortValue: r => r.cost||0 },
+    { label: 'State', render: r => r.state || '—', color: C.muted, sortValue: r => r.state||'' },
+    { label: 'Phone', render: r => r.phone || '—', color: C.muted, sortValue: r => r.phone||'' },
+  ];
+
+  // Determine tile category and build views
+  const POLICY_TILE_KEYS = new Set(['apps_submitted', 'gross_adv_revenue', 'monthly_premium', 'agent_commission', 'avg_premium']);
+  const CALL_TILE_KEYS = new Set(['total_calls', 'billable_calls']);
+
+  let views;
+  if (POLICY_TILE_KEYS.has(tileKey)) {
+    const src = cfg.rows;
+    views = {
+      campaign: { columns: polGroupCols(false), rows: buildPolGroupRows(src, p => p.leadSource) },
+      agent: { columns: polGroupCols(true), rows: buildPolGroupRows(src, p => p.agent) },
+      all: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
+    };
+  } else if (CALL_TILE_KEYS.has(tileKey)) {
+    const src = tileKey === 'billable_calls' ? calls.filter(c => c.isBillable) : [...calls];
+    views = {
+      campaign: { columns: callGroupCols(false), rows: buildCallGroupRows(src, c => c.campaignCode || c.campaign) },
+      agent: { columns: callGroupCols(true), rows: buildCallGroupRows(src, c => c.rep) },
+      all: { columns: cfg.columns, rows: cfg.allRows || cfg.rows, totals: cfg.totals },
+    };
+  } else if (tileKey === 'billable_rate') {
+    views = {
+      campaign: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
+      agent: { columns: callGroupCols(true), rows: buildCallGroupRows(calls, c => c.rep) },
+      all: { columns: allCallCols, rows: [...calls].sort((a,b) => (b.date||'').localeCompare(a.date||'')) },
+    };
+  } else if (tileKey === 'placement_rate') {
+    views = {
+      campaign: { columns: polGroupCols(false), rows: buildPolGroupRows(policies, p => p.leadSource) },
+      agent: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
+      all: { columns: allPolicyCols, rows: [...policies].sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
+    };
+  } else {
+    // PnL tiles: lead_spend, net_revenue, cpa, rpc, close_rate, premium_cost_ratio
+    const isCallCentric = tileKey === 'lead_spend' || tileKey === 'rpc';
+    views = {
+      campaign: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
+      agent: { columns: mergedAgentCols, rows: buildMergedAgentRows() },
+      all: isCallCentric
+        ? { columns: allCallCols, rows: [...calls].filter(c => c.isBillable).sort((a,b) => (b.date||'').localeCompare(a.date||'')) }
+        : { columns: allPolicyCols, rows: policies.filter(isPlaced).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
+    };
+  }
+
+  // Drill-down handling
+  if (drillTarget) {
+    const dt = drillTarget;
+    let drillRows, drillCols;
+    const isCallSource = CALL_TILE_KEYS.has(tileKey) || tileKey === 'billable_rate' || tileKey === 'lead_spend' || tileKey === 'rpc';
+    if (isCallSource) {
+      const src = tileKey === 'billable_calls' ? calls.filter(c => c.isBillable) : calls;
+      drillRows = src.filter(c => {
+        if (dt.type === 'campaign') return (c.campaignCode || c.campaign || 'Unknown') === dt.value;
+        return (c.rep || 'Unknown') === dt.value;
+      }).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+      drillCols = allCallCols;
+    } else {
+      const src = POLICY_TILE_KEYS.has(tileKey) ? cfg.rows : policies;
+      drillRows = src.filter(p => {
+        if (dt.type === 'campaign') return (p.leadSource || 'Unknown') === dt.value;
+        return (p.agent || 'Unknown') === dt.value;
+      }).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||''));
+      drillCols = allPolicyCols;
     }
+    const drillKpis = isCallSource ? [
+      { label: 'Calls', value: fmt(drillRows.length), color: C.text },
+      { label: 'Billable', value: fmt(drillRows.filter(c => c.isBillable).length), color: C.green },
+      { label: 'Spend', value: fmtDollar(drillRows.reduce((s,c) => s+(c.cost||0), 0), 2), color: C.yellow },
+    ] : [
+      { label: 'Policies', value: fmt(drillRows.length), color: C.text },
+      { label: 'Placed', value: fmt(drillRows.filter(isPlaced).length), color: C.green },
+      { label: 'Premium', value: fmtDollar(drillRows.reduce((s,p) => s+(p.premium||0), 0), 2), color: C.green },
+    ];
+
     return (
       <div style={overlayStyle} onClick={onClose}>
         <div style={modalStyle} onClick={e => e.stopPropagation()}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{cfg.title}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button onClick={() => setDrillTarget(null)} style={{ background: 'transparent', border: 'none', color: C.accent, fontSize: 12, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{dt.value}</h2>
+            </div>
             <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
           </div>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{cfg.summary}</div>
-          {cfg.financials && (
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-              {cfg.financials.map(f => (
-                <div key={f.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
-                  <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{f.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: f.color }}>{f.value}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 0, marginBottom: 0, borderBottom: `1px solid ${C.border}` }}>
-            <button style={tabBtnStyle(billableTab === 'campaign')} onClick={() => setBillableTab('campaign')}>By Campaign</button>
-            <button style={tabBtnStyle(billableTab === 'all')} onClick={() => setBillableTab('all')}>All</button>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{drillRows.length} records</div>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            {drillKpis.map(f => (
+              <div key={f.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 14px', flex: 1 }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{f.label}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: C.mono, color: f.color }}>{f.value}</div>
+              </div>
+            ))}
           </div>
-          <div style={{ paddingTop: 12 }}>
-            {billableTab === 'campaign' ? (
-              <SortableModalTable columns={cfg.campaignColumns} rows={cfg.campaignRows} totals={cfg.campaignTotals} thStyle={thStyle} tdStyle={tdStyle} onRowClick={row => setDrillCampaign(row.campaign)} sortable />
-            ) : (
-              <SortableModalTable columns={cfg.columns} rows={cfg.allRows} totals={cfg.totals} thStyle={thStyle} tdStyle={tdStyle} sortable />
-            )}
-          </div>
+          <SortableModalTable columns={drillCols} rows={drillRows} thStyle={thStyle} tdStyle={tdStyle} sortable />
         </div>
       </div>
     );
   }
+
+  // Normal tabbed view
+  const activeView = views[modalTab];
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -1004,7 +1142,22 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
             ))}
           </div>
         )}
-        <SortableModalTable columns={cfg.columns} rows={cfg.rows} totals={cfg.totals} thStyle={thStyle} tdStyle={tdStyle} sortable />
+        <div style={{ display: 'flex', gap: 0, marginBottom: 0, borderBottom: `1px solid ${C.border}` }}>
+          <button style={tabBtnStyle(modalTab === 'campaign')} onClick={() => { setModalTab('campaign'); setDrillTarget(null); }}>By Campaign</button>
+          <button style={tabBtnStyle(modalTab === 'agent')} onClick={() => { setModalTab('agent'); setDrillTarget(null); }}>By Agent</button>
+          <button style={tabBtnStyle(modalTab === 'all')} onClick={() => { setModalTab('all'); setDrillTarget(null); }}>All</button>
+        </div>
+        <div style={{ paddingTop: 12 }}>
+          <SortableModalTable
+            columns={activeView.columns}
+            rows={activeView.rows}
+            totals={activeView.totals}
+            thStyle={thStyle}
+            tdStyle={tdStyle}
+            onRowClick={modalTab !== 'all' ? row => setDrillTarget({ type: modalTab, value: row.campaign || row.agent }) : undefined}
+            sortable
+          />
+        </div>
       </div>
     </div>
   );
@@ -1127,7 +1280,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
 
   return (
     <>
-    {activeTile && <TileModal tileKey={activeTile} policies={policies} calls={calls} pnl={pnl} onClose={() => setActiveTile(null)} />}
+    {activeTile && <TileModal key={activeTile} tileKey={activeTile} policies={policies} calls={calls} pnl={pnl} onClose={() => setActiveTile(null)} />}
     <Section title={`Goal Comparison — ${days} active day${days !== 1 ? 's' : ''}`}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rows.map((row, ri) => (
