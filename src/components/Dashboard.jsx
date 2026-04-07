@@ -160,7 +160,7 @@ function Breadcrumb({ items }) {
   );
 }
 
-const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'total_calls', 'billable_calls', 'billable_rate', 'monthly_premium', 'lead_spend', 'agent_commission', 'net_revenue', 'cpa', 'rpc', 'close_rate', 'placement_rate', 'premium_cost_ratio', 'avg_premium'];
+const MODAL_CONFIGS_KEYS = ['apps_submitted', 'gross_adv_revenue', 'eff_revenue', 'total_calls', 'billable_calls', 'billable_rate', 'monthly_premium', 'lead_spend', 'agent_commission', 'net_revenue', 'cpa', 'rpc', 'close_rate', 'placement_rate', 'premium_cost_ratio', 'avg_premium'];
 
 // ─── TILE DETAIL MODAL ─────────────────────────────
 function SortableModalTable({ columns, rows, totals, thStyle, tdStyle, onRowClick, sortable = false }) {
@@ -322,6 +322,41 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           fmtDollar(garTotalComm, 2),
           fmtDollar(garTotalSpend, 2),
           fmtDollar(garNet, 2),
+          '',
+        ],
+      };
+    })(),
+    eff_revenue: (() => {
+      const garRows = policies.filter(isPlaced).sort((a, b) => b.submitDate.localeCompare(a.submitDate));
+      const garTotalGAR  = garRows.reduce((s, r) => s + (r.grossAdvancedRevenue || 0), 0);
+      const garTotalComm = garRows.reduce((s, r) => s + (r.commission || 0), 0);
+      const garTotalSpend = garRows.reduce((s, r) => s + getCallCost(r), 0);
+      const garCount = garRows.length;
+      return {
+        title: 'Effectuated Revenue — Placed Policies',
+        summary: `${garCount} placed policies · GAR adjusted by effectuation rate`,
+        financials: [
+          { label: 'Gross Adv Revenue', value: fmtDollar(garTotalGAR),   color: C.green },
+          { label: 'Eff. Revenue',      value: fmtDollar(garTotalGAR * 0.70), color: C.accent },
+          { label: 'Lead Cost',         value: fmtDollar(garTotalSpend), color: C.yellow },
+        ],
+        rows: garRows,
+        columns: [
+          { label: 'Date',          render: r => r.submitDate,                                                                      color: C.muted },
+          { label: 'Agent',         render: r => r.agent,                                                                           color: C.text },
+          { label: 'Client',        render: r => `${r.firstName} ${r.lastName}`.trim(),                                             color: C.text },
+          { label: 'Carrier',       render: r => r.carrier,                                                                         color: C.text },
+          { label: 'Product',       render: r => r.product || '—',                                                                  color: C.muted },
+          { label: 'Premium',       render: r => fmtDollar(r.premium, 2),                                                           color: C.green },
+          { label: 'Gross Adv Rev', render: r => fmtDollar(r.grossAdvancedRevenue, 0),                                             color: C.green },
+          { label: 'Eff. Revenue',  render: r => fmtDollar((r.grossAdvancedRevenue||0) * 0.70, 0),                                 color: C.accent },
+          { label: 'Status',        render: r => r.placed,                                                                          color: () => C.green },
+        ],
+        totals: [
+          'TOTAL', `${garCount} placed`, '', '', '',
+          fmtDollar(garRows.reduce((s,r) => s+(r.premium||0),0), 2),
+          fmtDollar(garTotalGAR, 0),
+          fmtDollar(garTotalGAR * 0.70, 0),
           '',
         ],
       };
@@ -1246,7 +1281,11 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
   const avgPremium = placed.length > 0 ? totalPremium / placed.length : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
-  const netRevenue = totalGAR - totalLeadSpend - totalComm;
+  // Effectuation: apply rate to GAR if enabled in settings
+  const effEnabled = (cg.effectuation_enabled ?? 1) >= 1;
+  const effRate = effEnabled ? (cg.effectuation_rate ?? 70) / 100 : 1;
+  const effRevenue = totalGAR * effRate;
+  const netRevenue = effRevenue - totalLeadSpend - totalComm;
   const premCostRatio = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
 
   const m = key => meta[key] || { lower: false, yellow: 80 };
@@ -1262,6 +1301,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
     [
       { label: 'Monthly Premium', actual: totalPremium, dailyGoal: cg.monthly_premium, key: 'monthly_premium', format: v => fmtDollar(v, 2) },
       { label: 'Gross Adv Revenue', actual: totalGAR, dailyGoal: cg.gross_adv_revenue, key: 'gross_adv_revenue', format: v => fmtDollar(v) },
+      { label: `Eff. Revenue${effEnabled ? ' (' + (effRate * 100).toFixed(0) + '%)' : ''}`, actual: effRevenue, dailyGoal: cg.eff_revenue, key: 'eff_revenue', format: v => fmtDollar(v) },
       { label: 'Lead Spend', actual: totalLeadSpend, dailyGoal: cg.lead_spend, key: 'lead_spend', format: v => fmtDollar(v) },
       { label: 'Agent Commission', actual: totalComm, dailyGoal: cg.agent_commission, key: 'agent_commission', format: v => fmtDollar(v) },
       { label: 'Net Revenue', actual: netRevenue, dailyGoal: cg.net_revenue, key: 'net_revenue', format: v => fmtDollar(v) },

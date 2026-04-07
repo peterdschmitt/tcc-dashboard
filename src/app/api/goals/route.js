@@ -40,6 +40,9 @@ export async function GET() {
       premium_target: 'monthly_premium', premiumtarget: 'monthly_premium',
       grossadvrevenue: 'gross_adv_revenue', gross_advanced_revenue: 'gross_adv_revenue',
       agentcommission: 'agent_commission', netrevenue: 'net_revenue',
+      effectuationrate: 'effectuation_rate', effectuation: 'effectuation_rate',
+      effectuationenabled: 'effectuation_enabled', eff_rev: 'eff_revenue',
+      effrevenue: 'eff_revenue',
       leadspend: 'lead_spend', totalcalls: 'total_calls',
       billablecalls: 'billable_calls', appssubmitted: 'apps_submitted',
       apps_per_day: 'apps_submitted', policiesplaced: 'policies_placed',
@@ -61,7 +64,9 @@ export async function GET() {
       cpa: 250, rpc: 35, close_rate: 5, placement_rate: 80, billable_rate: 65,
       avg_premium: 70, apps_submitted: 5, policies_placed: 3, total_calls: 50,
       billable_calls: 35, monthly_premium: 500, gross_adv_revenue: 4000,
+      eff_revenue: 2800, // gross_adv_revenue * effectuation_rate (4000 * 0.70)
       lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 2.5,
+      effectuation_rate: 70, effectuation_enabled: 1,
     };
     // Default meta (lower-is-better and yellow threshold)
     const defaultMeta = {
@@ -72,6 +77,7 @@ export async function GET() {
       apps_submitted: { lower: false, yellow: 80 }, policies_placed: { lower: false, yellow: 80 },
       total_calls: { lower: false, yellow: 80 }, billable_calls: { lower: false, yellow: 80 },
       monthly_premium: { lower: false, yellow: 80 }, gross_adv_revenue: { lower: false, yellow: 80 },
+      eff_revenue: { lower: false, yellow: 80 },
       agent_commission: { lower: false, yellow: 80 }, net_revenue: { lower: false, yellow: 80 },
       premium_cost_ratio: { lower: false, yellow: 80 },
     };

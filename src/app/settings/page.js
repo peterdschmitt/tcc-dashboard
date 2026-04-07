@@ -336,11 +336,44 @@ export default function SettingsPage() {
     setSaving(false);
   }
 
+  const [effRate, setEffRate] = useState(70);
+  const [effEnabled, setEffEnabled] = useState(true);
+  const [effSaving, setEffSaving] = useState(false);
+
+  // Load effectuation settings from goals
+  useEffect(() => {
+    fetch('/api/goals').then(r => r.json()).then(g => {
+      const cg = g?.company || {};
+      if (cg.effectuation_rate != null) setEffRate(cg.effectuation_rate);
+      setEffEnabled((cg.effectuation_enabled ?? 1) >= 1);
+    }).catch(() => {});
+  }, []);
+
+  async function saveEffectuation() {
+    setEffSaving(true);
+    try {
+      const res = await fetch('/api/settings/effectuation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effectuation_rate: effRate, effectuation_enabled: effEnabled ? 1 : 0 }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      showToast('Effectuation settings saved');
+      // Clear dashboard cache so new rate takes effect
+      fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
+    } catch (e) {
+      showToast('Save failed: ' + e.message, 'error');
+    }
+    setEffSaving(false);
+  }
+
   const tabs = [
     { id: 'pricing', label: 'Publisher Pricing', icon: '📡', description: 'Campaign codes, vendors, price per billable call, buffer thresholds' },
     { id: 'companyGoals', label: 'Company Daily Goals', icon: '🎯', description: 'CPA targets, close rates, premium goals' },
     { id: 'agentGoals', label: 'Agent Daily Goals', icon: '👤', description: 'Per-agent performance targets' },
     { id: 'commission', label: 'Commission Rates', icon: '💰', description: 'Carrier/product commission schedule' },
+    { id: 'effectuation', label: 'Effectuation Rate', icon: '📊', description: 'Expected effectuation rate applied to Gross Adv Revenue' },
   ];
 
   const currentTab = tabs.find(t => t.id === activeTab);
@@ -433,7 +466,61 @@ export default function SettingsPage() {
                 }
               />
 
-              {currentData.error ? (
+              {activeTab === 'effectuation' ? (
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24 }}>
+                  <p style={{ fontSize: 12, color: C.muted, margin: '0 0 20px', lineHeight: 1.6 }}>
+                    The effectuation rate estimates what percentage of submitted policies will ultimately be accepted and placed by the carrier.
+                    When enabled, <strong style={{ color: C.text }}>Eff. Revenue</strong> = Gross Adv Revenue × Effectuation Rate, and
+                    <strong style={{ color: C.text }}> Net Revenue</strong> uses Eff. Revenue instead of Gross Adv Revenue.
+                  </p>
+
+                  {/* Enable/Disable toggle */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, padding: '14px 16px', background: C.surface, borderRadius: 8, border: `1px solid ${C.border}` }}>
+                    <div onClick={() => setEffEnabled(!effEnabled)} style={{
+                      width: 44, height: 24, borderRadius: 12, cursor: 'pointer', transition: 'all 0.2s',
+                      background: effEnabled ? C.accent : C.border, position: 'relative',
+                    }}>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 9, background: '#fff', position: 'absolute',
+                        top: 3, left: effEnabled ? 23 : 3, transition: 'left 0.2s',
+                      }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                        Effectuation Adjustment {effEnabled ? <span style={{ color: C.green }}>Enabled</span> : <span style={{ color: C.muted }}>Disabled</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted }}>
+                        {effEnabled ? 'Eff. Revenue and Net Revenue use the adjusted rate below' : 'Disabled — Eff. Revenue = 100% of Gross Adv Revenue (no adjustment)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Rate input */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24, opacity: effEnabled ? 1 : 0.4, pointerEvents: effEnabled ? 'auto' : 'none' }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: C.text, minWidth: 140 }}>Effectuation Rate</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="number"
+                        min="0" max="100" step="1"
+                        value={effRate}
+                        onChange={e => setEffRate(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
+                        style={{ ...inputStyle, width: 80, textAlign: 'center', fontSize: 16, fontWeight: 700 }}
+                        onFocus={e => e.target.style.borderColor = inputFocusColor}
+                        onBlur={e => e.target.style.borderColor = C.border}
+                      />
+                      <span style={{ fontSize: 16, fontWeight: 700, color: C.muted }}>%</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: C.muted }}>
+                      e.g. $10,000 GAR × {effRate}% = {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(10000 * effRate / 100)} Eff. Revenue
+                    </span>
+                  </div>
+
+                  {/* Save button */}
+                  <Btn onClick={saveEffectuation} disabled={effSaving}>
+                    {effSaving ? '↻ Saving...' : 'Save Effectuation Settings'}
+                  </Btn>
+                </div>
+              ) : currentData.error ? (
                 <div style={{ background: C.yellowDim, border: `1px solid ${C.yellow}`, borderRadius: 8, padding: 20, marginBottom: 16 }}>
                   <p style={{ margin: 0, fontSize: 13, color: C.text }}>
                     <strong>Tab not found:</strong> {currentData.error}

@@ -214,7 +214,7 @@ function CampaignComboChart({ camp, avgNetRevenue, avgBillableCalls, axisStyle, 
                 return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={2.5} fill={C.accent} />;
               }}
             />
-            <Line yAxisId="right" dataKey="totalCalls" name="Total" stroke={C.muted} strokeWidth={1.5} strokeDasharray="4 3" connectNulls dot={false} />
+            <Line yAxisId="right" dataKey="totalCalls" name="Total Calls" stroke={C.muted} strokeWidth={1.5} strokeDasharray="4 3" connectNulls dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
