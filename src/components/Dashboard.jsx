@@ -970,6 +970,18 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     return Object.values(map).sort((a,b) => b.total - a.total);
   };
 
+  const buildCarrierGroupRows = (pols) => {
+    const map = {};
+    pols.forEach(p => {
+      const key = p.carrier || 'Unknown';
+      if (!map[key]) map[key] = { carrier: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0 };
+      map[key].apps++;
+      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+      map[key].leadSpend += getCallCost(p);
+    });
+    return Object.values(map).sort((a,b) => b.premium - a.premium);
+  };
+
   const buildMergedAgentRows = () => {
     const map = {};
     calls.forEach(c => {
@@ -992,6 +1004,17 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     isAgent
       ? { label: 'Agent', render: r => r.agent, color: C.accent, sortValue: r => r.agent }
       : { label: 'Campaign', render: r => r.campaign, color: C.accent, sortValue: r => r.campaign },
+    { label: 'Apps', render: r => fmt(r.apps), color: C.text, sortValue: r => r.apps },
+    { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
+    { label: 'Place Rate', render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—', color: r => { const v = r.apps>0?r.placed/r.apps*100:0; return v>=80?C.green:v>=64?C.yellow:C.red; }, sortValue: r => r.apps>0?r.placed/r.apps:0 },
+    { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium },
+    { label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—', color: C.muted, sortValue: r => r.placed>0?r.premium/r.placed:0 },
+    { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission },
+    { label: 'GAR', render: r => fmtDollar(r.gar, 0), color: C.green, sortValue: r => r.gar },
+  ];
+
+  const carrierGroupCols = [
+    { label: 'Carrier', render: r => r.carrier, color: C.accent, sortValue: r => r.carrier },
     { label: 'Apps', render: r => fmt(r.apps), color: C.text, sortValue: r => r.apps },
     { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
     { label: 'Place Rate', render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—', color: r => { const v = r.apps>0?r.placed/r.apps*100:0; return v>=80?C.green:v>=64?C.yellow:C.red; }, sortValue: r => r.apps>0?r.placed/r.apps:0 },
@@ -1059,7 +1082,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
   ];
 
   // Determine tile category and build views
-  const POLICY_TILE_KEYS = new Set(['apps_submitted', 'gross_adv_revenue', 'monthly_premium', 'agent_commission', 'avg_premium']);
+  const POLICY_TILE_KEYS = new Set(['apps_submitted', 'gross_adv_revenue', 'eff_revenue', 'monthly_premium', 'agent_commission', 'avg_premium']);
   const CALL_TILE_KEYS = new Set(['total_calls', 'billable_calls']);
 
   let views;
@@ -1068,6 +1091,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     views = {
       campaign: { columns: polGroupCols(false), rows: buildPolGroupRows(src, p => p.leadSource) },
       agent: { columns: polGroupCols(true), rows: buildPolGroupRows(src, p => p.agent) },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(src) },
       all: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
     };
   } else if (CALL_TILE_KEYS.has(tileKey)) {
@@ -1075,18 +1099,21 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     views = {
       campaign: { columns: callGroupCols(false), rows: buildCallGroupRows(src, c => c.campaignCode || c.campaign) },
       agent: { columns: callGroupCols(true), rows: buildCallGroupRows(src, c => c.rep) },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies) },
       all: { columns: cfg.columns, rows: cfg.allRows || cfg.rows, totals: cfg.totals },
     };
   } else if (tileKey === 'billable_rate') {
     views = {
       campaign: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
       agent: { columns: callGroupCols(true), rows: buildCallGroupRows(calls, c => c.rep) },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies) },
       all: { columns: allCallCols, rows: [...calls].sort((a,b) => (b.date||'').localeCompare(a.date||'')) },
     };
   } else if (tileKey === 'placement_rate') {
     views = {
       campaign: { columns: polGroupCols(false), rows: buildPolGroupRows(policies, p => p.leadSource) },
       agent: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies) },
       all: { columns: allPolicyCols, rows: [...policies].sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
     };
   } else {
@@ -1095,6 +1122,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     views = {
       campaign: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
       agent: { columns: mergedAgentCols, rows: buildMergedAgentRows() },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies.filter(isPlaced)) },
       all: isCallCentric
         ? { columns: allCallCols, rows: [...calls].filter(c => c.isBillable).sort((a,b) => (b.date||'').localeCompare(a.date||'')) }
         : { columns: allPolicyCols, rows: policies.filter(isPlaced).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
@@ -1106,7 +1134,12 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     const dt = drillTarget;
     let drillRows, drillCols;
     const isCallSource = CALL_TILE_KEYS.has(tileKey) || tileKey === 'billable_rate' || tileKey === 'lead_spend' || tileKey === 'rpc';
-    if (isCallSource) {
+    if (dt.type === 'carrier') {
+      // Carrier drill-down always shows policies
+      const src = POLICY_TILE_KEYS.has(tileKey) ? cfg.rows : policies;
+      drillRows = src.filter(p => (p.carrier || 'Unknown') === dt.value).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||''));
+      drillCols = allPolicyCols;
+    } else if (isCallSource) {
       const src = tileKey === 'billable_calls' ? calls.filter(c => c.isBillable) : calls;
       drillRows = src.filter(c => {
         if (dt.type === 'campaign') return (c.campaignCode || c.campaign || 'Unknown') === dt.value;
@@ -1121,7 +1154,12 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       }).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||''));
       drillCols = allPolicyCols;
     }
-    const drillKpis = isCallSource ? [
+    const drillKpis = dt.type === 'carrier' ? [
+      { label: 'Policies', value: fmt(drillRows.length), color: C.text },
+      { label: 'Placed', value: fmt(drillRows.filter(isPlaced).length), color: C.green },
+      { label: 'Premium', value: fmtDollar(drillRows.reduce((s,p) => s+(p.premium||0), 0), 2), color: C.green },
+      { label: 'GAR', value: fmtDollar(drillRows.reduce((s,p) => s+(p.grossAdvancedRevenue||0), 0), 0), color: C.green },
+    ] : isCallSource ? [
       { label: 'Calls', value: fmt(drillRows.length), color: C.text },
       { label: 'Billable', value: fmt(drillRows.filter(c => c.isBillable).length), color: C.green },
       { label: 'Spend', value: fmtDollar(drillRows.reduce((s,c) => s+(c.cost||0), 0), 2), color: C.yellow },
@@ -1180,6 +1218,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
         <div style={{ display: 'flex', gap: 0, marginBottom: 0, borderBottom: `1px solid ${C.border}` }}>
           <button style={tabBtnStyle(modalTab === 'campaign')} onClick={() => { setModalTab('campaign'); setDrillTarget(null); }}>By Campaign</button>
           <button style={tabBtnStyle(modalTab === 'agent')} onClick={() => { setModalTab('agent'); setDrillTarget(null); }}>By Agent</button>
+          <button style={tabBtnStyle(modalTab === 'carrier')} onClick={() => { setModalTab('carrier'); setDrillTarget(null); }}>By Carrier</button>
           <button style={tabBtnStyle(modalTab === 'all')} onClick={() => { setModalTab('all'); setDrillTarget(null); }}>All</button>
         </div>
         <div style={{ paddingTop: 12 }}>
@@ -1189,7 +1228,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
             totals={activeView.totals}
             thStyle={thStyle}
             tdStyle={tdStyle}
-            onRowClick={modalTab !== 'all' ? row => setDrillTarget({ type: modalTab, value: row.campaign || row.agent }) : undefined}
+            onRowClick={modalTab !== 'all' ? row => setDrillTarget({ type: modalTab, value: row.campaign || row.agent || row.carrier }) : undefined}
             sortable
           />
         </div>
