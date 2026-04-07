@@ -143,19 +143,7 @@ export async function GET() {
         ]);
       });
 
-      // TOTAL row — same policy fields, Type=TOTAL, sums in financial columns
-      exportRows.push([
-        p.policyNumber, p.insuredName, p.agent, p.carrier, p.product, p.leadSource,
-        p.state, p.phone, '', 'TOTAL', '',
-        p.premium, p.annualPremium, p.faceAmount, p.expectedCommission,
-        '', '', '',
-        Math.round(netReceived * 100) / 100,
-        Math.round(totalClawback * 100) / 100,
-        '',
-        Math.round(netReceived * 100) / 100,
-        carrierBal, ourBal, delta,
-        commStatus, p.status, '',
-      ]);
+      // TOTAL rows removed — clean data export without subtotals
     }
 
     // Build XLSX workbook
