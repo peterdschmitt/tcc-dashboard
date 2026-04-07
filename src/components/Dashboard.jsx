@@ -284,7 +284,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       ],
     },
     gross_adv_revenue: (() => {
-      const garRows = policies.filter(isPlaced).sort((a, b) => b.submitDate.localeCompare(a.submitDate));
+      const garRows = [...policies].sort((a, b) => b.submitDate.localeCompare(a.submitDate));
       const garTotalGAR  = garRows.reduce((s, r) => s + (r.grossAdvancedRevenue || 0), 0);
       const garTotalComm = garRows.reduce((s, r) => s + (r.commission || 0), 0);
       const garTotalSpend = garRows.reduce((s, r) => s + getCallCost(r), 0);
@@ -952,7 +952,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const key = keyFn(p) || 'Unknown';
       if (!map[key]) map[key] = { campaign: key, agent: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0, isSalaried: p.isSalaried };
       map[key].apps++;
-      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+      map[key].gar += p.grossAdvancedRevenue||0;
+      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; }
       map[key].leadSpend += getCallCost(p);
     });
     return Object.values(map).sort((a,b) => b.premium - a.premium);
@@ -976,7 +977,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const key = p.carrier || 'Unknown';
       if (!map[key]) map[key] = { carrier: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0 };
       map[key].apps++;
-      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+      map[key].gar += p.grossAdvancedRevenue||0;
+      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; }
       map[key].leadSpend += getCallCost(p);
     });
     return Object.values(map).sort((a,b) => b.premium - a.premium);
