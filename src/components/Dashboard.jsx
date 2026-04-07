@@ -1131,6 +1131,42 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     };
   }
 
+  // Export current view to Excel
+  const exportToExcel = (columns, rows, totalsArr, label) => {
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = columns.map(c => c.label);
+      const dataRows = rows.map(row => columns.map(c => {
+        // Extract plain text from render function
+        const val = c.render(row);
+        if (val == null) return '';
+        // If it's a React element, try to get text content
+        if (typeof val === 'object' && val.props) return val.props.children || '';
+        return String(val).replace(/[$,%]/g, m => m); // keep formatting
+      }));
+      // Parse numeric-looking values back to numbers for Excel
+      const parsed = dataRows.map(row => row.map(v => {
+        const stripped = String(v).replace(/[$,%x]/g, '').replace(/,/g, '').trim();
+        if (stripped === '' || stripped === '—' || stripped === 'N/A') return v;
+        const num = Number(stripped);
+        return !isNaN(num) && stripped !== '' ? num : v;
+      }));
+      const aoa = [headers, ...parsed];
+      if (totalsArr && totalsArr.length > 0) aoa.push(totalsArr);
+      const ws = utils.aoa_to_sheet(aoa);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 12) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Export');
+      const date = new Date().toISOString().slice(0, 10);
+      writeFile(wb, `TCC_${label}_${date}.xlsx`);
+    });
+  };
+
+  const exportBtnStyle = {
+    background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 4,
+    color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', padding: '4px 10px',
+    fontFamily: C.sans, whiteSpace: 'nowrap',
+  };
+
   // Drill-down handling
   if (drillTarget) {
     const dt = drillTarget;
@@ -1179,7 +1215,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
               <button onClick={() => setDrillTarget(null)} style={{ background: 'transparent', border: 'none', color: C.accent, fontSize: 12, cursor: 'pointer', padding: 0 }}>← Back</button>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{dt.value}</h2>
             </div>
-            <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button onClick={() => exportToExcel(drillCols, drillRows, null, `${tileKey}_${dt.value}`)} style={exportBtnStyle}>Export</button>
+              <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+            </div>
           </div>
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{drillRows.length} records</div>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
@@ -1204,7 +1243,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>{cfg.title}</h2>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => exportToExcel(activeView.columns, activeView.rows, activeView.totals, `${tileKey}_${modalTab}`)} style={exportBtnStyle}>Export</button>
+            <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>✕</button>
+          </div>
         </div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{cfg.summary}</div>
         {cfg.financials && (
