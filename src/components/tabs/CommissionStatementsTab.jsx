@@ -108,6 +108,11 @@ export default function CommissionStatementsTab() {
   const [organizeResult, setOrganizeResult] = useState(null);
   const [organizeError, setOrganizeError] = useState(null);
 
+  // File listing state
+  const [fileList, setFileList] = useState(null);
+  const [fileListLoading, setFileListLoading] = useState(false);
+  const [fileListError, setFileListError] = useState(null);
+
   // Sort state for each table
   const historySort = useSort('uploadDate', 'desc');
   const reconSort = useSort('balance', 'desc');
@@ -265,6 +270,21 @@ export default function CommissionStatementsTab() {
     } catch (err) {
       setOrganizeError(err.message);
       setOrganizeStatus('error');
+    }
+  };
+
+  const handleListFiles = async () => {
+    setFileListLoading(true);
+    setFileListError(null);
+    try {
+      const res = await fetch('/api/commission-statements/files');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setFileList(data);
+    } catch (err) {
+      setFileListError(err.message);
+    } finally {
+      setFileListLoading(false);
     }
   };
 
@@ -1051,6 +1071,18 @@ export default function CommissionStatementsTab() {
               >
                 {organizeStatus === 'scanning' ? '⏳ Scanning Drive...' : 'Scan Files'}
               </button>
+              <button
+                onClick={handleListFiles}
+                disabled={fileListLoading}
+                style={{
+                  background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6,
+                  color: C.accent, fontSize: 11, fontWeight: 600, padding: '6px 14px',
+                  cursor: fileListLoading ? 'not-allowed' : 'pointer',
+                  opacity: fileListLoading ? 0.5 : 1,
+                }}
+              >
+                {fileListLoading ? '⏳ Loading...' : '📂 View Synced Files'}
+              </button>
               {organizePreview && organizePreview.proposals?.filter(p => p.status === 'will_move').length > 0 && (
                 <button
                   onClick={handleOrganizeExecute}
@@ -1204,6 +1236,96 @@ export default function CommissionStatementsTab() {
                 >
                   Dismiss
                 </button>
+              </div>
+            )}
+
+            {/* File listing error */}
+            {fileListError && (
+              <div style={{ fontSize: 12, color: C.red, marginTop: 12 }}>Error loading files: {fileListError}</div>
+            )}
+
+            {/* File listing by carrier */}
+            {fileList && (
+              <div style={{ marginTop: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>
+                    Synced Files — <span style={{ color: C.accent }}>{fileList.totalFiles}</span> total
+                  </div>
+                  <button
+                    onClick={() => setFileList(null)}
+                    style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 10, padding: '4px 10px', cursor: 'pointer' }}
+                  >
+                    Hide
+                  </button>
+                </div>
+
+                {Object.entries(fileList.carriers).sort((a, b) => a[0].localeCompare(b[0])).map(([carrier, files]) => (
+                  <div key={carrier} style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{
+                        background: C.accent + '22', border: `1px solid ${C.accent}44`, borderRadius: 4,
+                        padding: '2px 8px', fontSize: 11, color: C.accent, fontWeight: 700,
+                      }}>{carrier}</span>
+                      <span style={{ fontSize: 10, color: C.muted }}>{files.length} file{files.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={thStyle}>Filename</th>
+                            <th style={thStyle}>Size</th>
+                            <th style={thStyle}>Modified</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {files.map((f, i) => (
+                            <tr key={f.id || i}>
+                              <td style={{ ...tdStyle, fontSize: 11 }}>{f.name}</td>
+                              <td style={{ ...tdStyle, fontSize: 10, color: C.muted, whiteSpace: 'nowrap' }}>{f.size}</td>
+                              <td style={{ ...tdStyle, fontSize: 10, color: C.muted, whiteSpace: 'nowrap' }}>
+                                {f.modified ? new Date(f.modified).toLocaleDateString() : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+
+                {fileList.root.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{
+                        background: C.yellowDim, border: `1px solid ${C.yellow}44`, borderRadius: 4,
+                        padding: '2px 8px', fontSize: 11, color: C.yellow, fontWeight: 700,
+                      }}>Root (Unorganized)</span>
+                      <span style={{ fontSize: 10, color: C.muted }}>{fileList.root.length} file{fileList.root.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={thStyle}>Filename</th>
+                            <th style={thStyle}>Size</th>
+                            <th style={thStyle}>Modified</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fileList.root.map((f, i) => (
+                            <tr key={f.id || i}>
+                              <td style={{ ...tdStyle, fontSize: 11, color: C.yellow }}>{f.name}</td>
+                              <td style={{ ...tdStyle, fontSize: 10, color: C.muted, whiteSpace: 'nowrap' }}>{f.size}</td>
+                              <td style={{ ...tdStyle, fontSize: 10, color: C.muted, whiteSpace: 'nowrap' }}>
+                                {f.modified ? new Date(f.modified).toLocaleDateString() : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </Section>
