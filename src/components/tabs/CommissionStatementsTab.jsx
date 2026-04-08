@@ -1206,7 +1206,7 @@ function PolicyCashFlow({ policyNumber, policySummary }) {
                   opacity: organizeStatus === 'scanning' || organizeStatus === 'organizing' ? 0.5 : 1,
                 }}
               >
-                {organizeStatus === 'scanning' ? 'Scanning...' : 'Scan Files'}
+                {organizeStatus === 'scanning' ? '⏳ Scanning Drive...' : 'Scan Files'}
               </button>
               {organizePreview && organizePreview.proposals?.filter(p => p.status === 'will_move').length > 0 && (
                 <button
@@ -1223,6 +1223,13 @@ function PolicyCashFlow({ policyNumber, policySummary }) {
                 </button>
               )}
             </div>
+
+            {organizeStatus === 'scanning' && (
+              <div style={{ padding: '20px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: C.accent, fontWeight: 600, marginBottom: 6 }}>Scanning Google Drive...</div>
+                <div style={{ fontSize: 11, color: C.muted }}>Downloading and analyzing each file to detect carrier. This may take 30-60 seconds.</div>
+              </div>
+            )}
 
             {/* Already organized summary */}
             {organizePreview && organizePreview.subfolderSummary && Object.keys(organizePreview.subfolderSummary).length > 0 && (
