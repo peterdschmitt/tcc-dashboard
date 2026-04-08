@@ -1,10 +1,14 @@
 export const dynamic = 'force-dynamic';
-import { fetchSheet, getSheetsClient, invalidateCache } from '@/lib/sheets';
+import { fetchSheet, getDriveClient, getSheetsClient, invalidateCache } from '@/lib/sheets';
 import { fuzzyMatchPolicyholder } from '@/lib/utils';
 import { parseStatement } from '@/lib/parsers/index';
 import { buildLedgerRow, buildStatementRow } from '@/lib/ledger';
+import {
+  ensureCarrierFolders, buildStandardFilename, computeContentFingerprint, checkDuplicate,
+} from '@/lib/drive-organize';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 
 export async function POST(request) {
   try {
@@ -12,6 +16,7 @@ export async function POST(request) {
     const file = formData.get('file');
     const carrierHint = formData.get('carrier') || null;
     const dryRun = formData.get('dryRun') === 'true';
+    const skipDuplicate = formData.get('skipDuplicate') === 'true';
 
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
@@ -44,14 +49,11 @@ export async function POST(request) {
     let totalAdvances = 0, totalRecoveries = 0, cancellationsDetected = 0;
 
     for (const record of parsed.records) {
-      // Enrich agent name
       if (record.agentId && agentMap[record.agentId]) record.agent = agentMap[record.agentId];
 
-      // Track totals
       if (record.commissionAmount > 0) totalAdvances += record.commissionAmount;
       if (record.commissionAmount < 0) totalRecoveries += Math.abs(record.commissionAmount);
 
-      // Fuzzy match to sales tracker
       const matchResult = fuzzyMatchPolicyholder(
         { 'Policy No.': record.policyNumber, 'Insured': record.insuredName, 'Agent': record.agent },
         salesRows
@@ -67,7 +69,6 @@ export async function POST(request) {
         else { unmatchCount++; }
       } else { unmatchCount++; }
 
-      // Cancellation handling
       if (record.cancellationIndicator && status !== 'unmatched') {
         cancellationsDetected++;
         if (status === 'auto_matched') { status = 'pending_review'; matchCount--; pendingCount++; }
@@ -77,21 +78,14 @@ export async function POST(request) {
         });
       }
 
-      // Add system fields to record
       record.transactionId = randomUUID();
       record.advanceAmount = record.advanceAmount || (record.commissionAmount > 0 ? record.commissionAmount : 0);
 
-      // Build ledger row using shared module (dictionary-based, never positional)
       const row = buildLedgerRow(record, {
-        carrier: parsed.carrier,
-        carrierId: parsed.carrierId,
+        carrier: parsed.carrier, carrierId: parsed.carrierId,
         statementDate: parsed.statementDate || parsed.payPeriod,
-        processingDate,
-        filename,
-        matchedPolicy,
-        matchType,
-        matchConfidence,
-        status,
+        processingDate, filename,
+        matchedPolicy, matchType, matchConfidence, status,
         notes: record.cancellationIndicator ? 'Cancellation detected' : '',
       });
 
@@ -101,14 +95,79 @@ export async function POST(request) {
     const netAmount = totalAdvances - totalRecoveries;
     const totalRecords = parsed.records.length;
 
-    // Step 4: Write to Google Sheets
+    // Step 3b: Content-based duplicate detection
+    const contentHash = computeContentFingerprint(
+      parsed.carrierId, parsed.payPeriod, totalRecords, netAmount
+    );
+
+    let duplicateWarning = null;
+    try {
+      const salesSheetId = process.env.SALES_SHEET_ID;
+      const statementsTab = process.env.COMMISSION_STATEMENTS_TAB || 'Commission Statements';
+      const existingStatements = await fetchSheet(salesSheetId, statementsTab, 60);
+      const dupCheck = checkDuplicate(contentHash, existingStatements);
+      if (dupCheck.isDuplicate && !skipDuplicate) {
+        duplicateWarning = {
+          message: `This file appears to be a duplicate of "${dupCheck.matchedFile}" (same carrier, pay period, and ${dupCheck.isPartialMatch ? 'similar' : 'identical'} record count).`,
+          matchedFile: dupCheck.matchedFile,
+          isPartialMatch: dupCheck.isPartialMatch || false,
+        };
+        if (dryRun) {
+          return NextResponse.json({
+            success: false, dryRun: true, duplicateWarning,
+            carrier: parsed.carrier, payPeriod: parsed.payPeriod,
+            summary: { totalRecords, matched: matchCount, unmatched: unmatchCount, pendingReview: pendingCount,
+              totalAdvances: Math.round(totalAdvances * 100) / 100,
+              totalRecoveries: Math.round(totalRecoveries * 100) / 100,
+              netAmount: Math.round(netAmount * 100) / 100, cancellationsDetected },
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[upload] Duplicate check warning:', err.message);
+    }
+
+    // Step 4: Upload file to Drive carrier subfolder
+    let driveFileId = '';
+    let organizedFilename = '';
+    if (!dryRun) {
+      try {
+        const parentFolderId = process.env.COMMISSION_DRIVE_FOLDER_ID;
+        if (parentFolderId && parsed.carrierId) {
+          const drive = await getDriveClient();
+          const folderMap = await ensureCarrierFolders(drive, parentFolderId);
+          const targetFolderId = folderMap[parsed.carrierId];
+
+          if (targetFolderId) {
+            organizedFilename = buildStandardFilename(parsed.carrierId, parsed.payPeriod, parsed.statementDate, filename);
+
+            const driveRes = await drive.files.create({
+              requestBody: {
+                name: organizedFilename,
+                parents: [targetFolderId],
+              },
+              media: {
+                mimeType: file.type || 'application/octet-stream',
+                body: Readable.from(buffer),
+              },
+              fields: 'id',
+            });
+            driveFileId = driveRes.data.id;
+            console.log(`[upload] Uploaded to Drive: ${organizedFilename} (${driveFileId})`);
+          }
+        }
+      } catch (err) {
+        console.error('[upload] Drive upload warning:', err.message);
+      }
+    }
+
+    // Step 5: Write to Google Sheets
     if (!dryRun && totalRecords > 0) {
       const sheets = await getSheetsClient();
       const salesSheetId = process.env.SALES_SHEET_ID;
       const ledgerTab = process.env.COMMISSION_LEDGER_TAB || 'Commission Ledger';
       const statementsTab = process.env.COMMISSION_STATEMENTS_TAB || 'Commission Statements';
 
-      // Write ledger rows
       const ledgerRows = allEnriched.map(e => e.row);
       await sheets.spreadsheets.values.append({
         spreadsheetId: salesSheetId, range: ledgerTab,
@@ -117,13 +176,13 @@ export async function POST(request) {
       });
       console.log(`[upload] Wrote ${ledgerRows.length} ledger rows`);
 
-      // Write statement metadata
       const stmtRow = buildStatementRow({
         statementId, carrier: parsed.carrier,
         payPeriod: parsed.payPeriod, statementDate: parsed.statementDate,
         filename, fileType, totalRecords,
         matched: matchCount, unmatched: unmatchCount, pendingReview: pendingCount,
         totalAdvances, totalRecoveries, netAmount, cancellationsDetected,
+        contentHash, driveFileId, organizedFilename,
       });
       await sheets.spreadsheets.values.append({
         spreadsheetId: salesSheetId, range: statementsTab,
@@ -138,6 +197,8 @@ export async function POST(request) {
     return NextResponse.json({
       success: true, dryRun, statementId,
       carrier: parsed.carrier, payPeriod: parsed.payPeriod,
+      organizedFilename,
+      duplicateWarning,
       summary: {
         totalRecords, matched: matchCount, unmatched: unmatchCount,
         pendingReview: pendingCount,

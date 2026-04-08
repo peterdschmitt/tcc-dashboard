@@ -3,36 +3,54 @@ import { fetchSheet, getDriveClient, getSheetsClient, invalidateCache } from '@/
 import { fuzzyMatchPolicyholder } from '@/lib/utils';
 import { parseStatement, shouldSkip } from '@/lib/parsers/index';
 import { buildLedgerRow, buildStatementRow } from '@/lib/ledger';
+import {
+  ensureCarrierFolders, buildStandardFilename, moveFileToCarrierFolder,
+  listAllCommissionFiles, computeContentFingerprint,
+} from '@/lib/drive-organize';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 
 const SUPPORTED_EXTENSIONS = ['.pdf', '.xlsx', '.xls', '.csv'];
 
+/**
+ * List all Drive files across root folder AND carrier subfolders.
+ * Returns new (unprocessed) files from any location.
+ */
 async function listDriveFiles() {
   const folderId = process.env.COMMISSION_DRIVE_FOLDER_ID;
   if (!folderId) throw new Error('COMMISSION_DRIVE_FOLDER_ID not configured');
 
   const drive = await getDriveClient();
-  const res = await drive.files.list({
-    q: `'${folderId}' in parents and trashed = false`,
-    fields: 'files(id, name, mimeType, size, createdTime, modifiedTime)',
-    orderBy: 'createdTime desc',
-    pageSize: 200,
-  });
+  const { rootFiles, subfolderFiles, folderMap } = await listAllCommissionFiles(drive, folderId);
 
-  const driveFiles = (res.data.files || []).filter(f => {
+  // Combine all files from root + subfolders
+  const allDriveFiles = [...rootFiles];
+  for (const [carrierId, files] of Object.entries(subfolderFiles)) {
+    for (const f of files) {
+      f._carrierId = carrierId; // tag with carrier for later
+      f._inSubfolder = true;
+      allDriveFiles.push(f);
+    }
+  }
+
+  // Filter out skip patterns and unsupported extensions
+  const driveFiles = allDriveFiles.filter(f => {
     const ext = (f.name || '').toLowerCase();
     return SUPPORTED_EXTENSIONS.some(e => ext.endsWith(e)) && !shouldSkip(f.name);
   });
 
-  // Get already-processed filenames
+  // Get already-processed filenames (check both original and organized names)
   const salesSheetId = process.env.SALES_SHEET_ID;
   const statementsTab = process.env.COMMISSION_STATEMENTS_TAB || 'Commission Statements';
   const statements = await fetchSheet(salesSheetId, statementsTab, 60);
-  const processedFiles = new Set(statements.map(s => (s['File Name'] || '').trim()));
+  const processedFiles = new Set();
+  for (const s of statements) {
+    if (s['File Name']) processedFiles.add(s['File Name'].trim());
+    if (s['Organized Filename']) processedFiles.add(s['Organized Filename'].trim());
+  }
 
   const newFiles = driveFiles.filter(f => !processedFiles.has(f.name));
-  return { driveFiles, processedFiles: [...processedFiles], newFiles };
+  return { driveFiles, processedFiles: [...processedFiles], newFiles, folderMap, folderId };
 }
 
 async function downloadDriveFile(fileId) {
@@ -43,8 +61,9 @@ async function downloadDriveFile(fileId) {
 
 /**
  * Process one file — shared logic used by both sync and upload.
+ * Now also organizes the file into the correct carrier subfolder.
  */
-async function processOneFile(buffer, filename, salesRows, driveFileId) {
+async function processOneFile(buffer, filename, salesRows, driveFileId, fileAlreadyInSubfolder) {
   const fileType = filename.toLowerCase().endsWith('.pdf') ? 'PDF'
     : filename.toLowerCase().match(/\.xlsx?$/) ? 'XLSX'
     : filename.toLowerCase().endsWith('.csv') ? 'CSV' : 'Unknown';
@@ -58,7 +77,6 @@ async function processOneFile(buffer, filename, salesRows, driveFileId) {
   const statementId = randomUUID();
   const processingDate = new Date().toISOString().split('T')[0];
   const ledgerRows = [];
-  const cancellationAlerts = [];
   let matchCount = 0, unmatchCount = 0, pendingCount = 0;
   let totalAdvances = 0, totalRecoveries = 0, cancellationsDetected = 0;
 
@@ -105,6 +123,30 @@ async function processOneFile(buffer, filename, salesRows, driveFileId) {
   const netAmount = totalAdvances - totalRecoveries;
   const totalRecords = parsed.records.length;
 
+  // Compute content fingerprint for duplicate detection
+  const contentHash = computeContentFingerprint(
+    parsed.carrierId, parsed.payPeriod, totalRecords, totalAdvances - totalRecoveries
+  );
+
+  // Organize file into carrier subfolder (if not already there)
+  let organizedFilename = '';
+  if (driveFileId && !fileAlreadyInSubfolder && parsed.carrierId) {
+    try {
+      const drive = await getDriveClient();
+      const parentFolderId = process.env.COMMISSION_DRIVE_FOLDER_ID;
+      const folderMap = await ensureCarrierFolders(drive, parentFolderId);
+      const targetFolderId = folderMap[parsed.carrierId];
+
+      if (targetFolderId) {
+        organizedFilename = buildStandardFilename(parsed.carrierId, parsed.payPeriod, parsed.statementDate, filename);
+        await moveFileToCarrierFolder(drive, driveFileId, targetFolderId, organizedFilename, parentFolderId);
+        console.log(`[sync] Organized: ${filename} → ${organizedFilename}`);
+      }
+    } catch (err) {
+      console.error(`[sync] Warning: could not organize file: ${err.message}`);
+    }
+  }
+
   // Write to sheets
   const sheets = await getSheetsClient();
   const salesSheetId = process.env.SALES_SHEET_ID;
@@ -126,6 +168,7 @@ async function processOneFile(buffer, filename, salesRows, driveFileId) {
     filename, fileType, totalRecords,
     matched: matchCount, unmatched: unmatchCount, pendingReview: pendingCount,
     totalAdvances, totalRecoveries, netAmount, cancellationsDetected,
+    contentHash, driveFileId: driveFileId || '', organizedFilename,
   });
   await sheets.spreadsheets.values.append({
     spreadsheetId: salesSheetId, range: statementsTab,
@@ -136,6 +179,7 @@ async function processOneFile(buffer, filename, salesRows, driveFileId) {
 
   return {
     statementId, filename, carrier: parsed.carrier, payPeriod: parsed.payPeriod,
+    organizedFilename,
     summary: { totalRecords, matched: matchCount, unmatched: unmatchCount, pendingReview: pendingCount,
       totalAdvances: Math.round(totalAdvances * 100) / 100,
       totalRecoveries: Math.round(totalRecoveries * 100) / 100,
@@ -143,7 +187,7 @@ async function processOneFile(buffer, filename, salesRows, driveFileId) {
   };
 }
 
-// GET — list new files in Drive folder
+// GET — list new files in Drive folder (root + subfolders)
 export async function GET() {
   try {
     const { driveFiles, processedFiles, newFiles } = await listDriveFiles();
@@ -152,7 +196,10 @@ export async function GET() {
       totalInFolder: driveFiles.length,
       alreadyProcessed: processedFiles.length,
       newFilesCount: newFiles.length,
-      newFiles: newFiles.map(f => ({ id: f.id, name: f.name, size: f.size, createdTime: f.createdTime })),
+      newFiles: newFiles.map(f => ({
+        id: f.id, name: f.name, size: f.size, createdTime: f.createdTime,
+        inSubfolder: !!f._inSubfolder, carrierId: f._carrierId || null,
+      })),
     });
   } catch (error) {
     console.error('[sync] GET error:', error);
@@ -160,7 +207,7 @@ export async function GET() {
   }
 }
 
-// POST — process all new files from Drive folder
+// POST — process all new files from Drive folder (root + subfolders)
 export async function POST() {
   try {
     const { newFiles } = await listDriveFiles();
@@ -179,7 +226,7 @@ export async function POST() {
       try {
         console.log(`[sync] Downloading ${file.name}...`);
         const buffer = await downloadDriveFile(file.id);
-        const result = await processOneFile(buffer, file.name, salesRows, file.id);
+        const result = await processOneFile(buffer, file.name, salesRows, file.id, !!file._inSubfolder);
         results.push(result);
         console.log(`[sync] ✓ ${file.name}: ${result.summary.totalRecords} records`);
       } catch (err) {
@@ -193,7 +240,9 @@ export async function POST() {
       processed: results.length,
       failed: errors.length,
       totalRecords: results.reduce((s, r) => s + r.summary.totalRecords, 0),
-      results: results.map(r => ({ filename: r.filename, carrier: r.carrier, ...r.summary })),
+      results: results.map(r => ({
+        filename: r.filename, carrier: r.carrier, organizedFilename: r.organizedFilename, ...r.summary,
+      })),
       errors,
     });
   } catch (error) {

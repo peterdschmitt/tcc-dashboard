@@ -228,6 +228,7 @@ export const STATEMENTS_HEADERS = [
   'File Name', 'File Type', 'Total Records', 'Matched', 'Unmatched',
   'Pending Review', 'Total Advances', 'Total Recoveries', 'Net Amount',
   'Cancellations Detected', 'Status',
+  'Content Hash', 'Drive File ID', 'Organized Filename',
 ];
 
 export function buildStatementRow(meta) {
@@ -247,5 +248,8 @@ export function buildStatementRow(meta) {
     fmtNum(meta.netAmount),
     String(meta.cancellationsDetected || 0),
     'processed',
+    meta.contentHash || '',
+    meta.driveFileId || '',
+    meta.organizedFilename || '',
   ];
 }

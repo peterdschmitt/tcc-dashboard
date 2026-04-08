@@ -78,6 +78,7 @@ const SUB_TABS = [
   { id: 'upload', label: 'Upload' },
   { id: 'history', label: 'History' },
   { id: 'reconciliation', label: 'Reconciliation' },
+  { id: 'organize', label: 'Organize Files' },
 ];
 
 export default function CommissionStatementsTab() {
@@ -100,6 +101,12 @@ export default function CommissionStatementsTab() {
   const [syncPreview, setSyncPreview] = useState(null);
   const [syncResult, setSyncResult] = useState(null);
   const [syncError, setSyncError] = useState(null);
+
+  // Organize files state
+  const [organizeStatus, setOrganizeStatus] = useState(null); // null | 'scanning' | 'preview' | 'organizing' | 'done' | 'error'
+  const [organizePreview, setOrganizePreview] = useState(null);
+  const [organizeResult, setOrganizeResult] = useState(null);
+  const [organizeError, setOrganizeError] = useState(null);
 
   // Sort state for each table
   const historySort = useSort('uploadDate', 'desc');
@@ -138,7 +145,7 @@ export default function CommissionStatementsTab() {
     } catch (e) { console.error('Failed to load pending:', e); }
   };
 
-  const handleUpload = async (dryRun = false) => {
+  const handleUpload = async (dryRun = false, skipDuplicate = false) => {
     if (!file) return;
     setUploading(true);
     setUploadResult(null);
@@ -147,6 +154,7 @@ export default function CommissionStatementsTab() {
       formData.append('file', file);
       formData.append('carrier', carrier);
       formData.append('dryRun', dryRun.toString());
+      if (skipDuplicate) formData.append('skipDuplicate', 'true');
 
       const res = await fetch('/api/commission-statements/upload', {
         method: 'POST',
@@ -225,6 +233,38 @@ export default function CommissionStatementsTab() {
     } catch (err) {
       setSyncError(err.message);
       setSyncStatus('error');
+    }
+  };
+
+  const handleOrganizeScan = async () => {
+    setOrganizeStatus('scanning');
+    setOrganizePreview(null);
+    setOrganizeResult(null);
+    setOrganizeError(null);
+    try {
+      const res = await fetch('/api/commission-statements/organize');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setOrganizePreview(data);
+      setOrganizeStatus('preview');
+    } catch (err) {
+      setOrganizeError(err.message);
+      setOrganizeStatus('error');
+    }
+  };
+
+  const handleOrganizeExecute = async () => {
+    setOrganizeStatus('organizing');
+    setOrganizeError(null);
+    try {
+      const res = await fetch('/api/commission-statements/organize', { method: 'POST' });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setOrganizeResult(data);
+      setOrganizeStatus('done');
+    } catch (err) {
+      setOrganizeError(err.message);
+      setOrganizeStatus('error');
     }
   };
 
@@ -426,7 +466,7 @@ export default function CommissionStatementsTab() {
                         <tr>
                           <th style={thStyle}>File</th>
                           <th style={thStyle}>Carrier</th>
-                          <th style={thStyle}>Period</th>
+                          <th style={thStyle}>Saved As</th>
                           <th style={thStyle}>Records</th>
                           <th style={thStyle}>Matched</th>
                           <th style={thStyle}>Unmatched</th>
@@ -439,8 +479,13 @@ export default function CommissionStatementsTab() {
                         {syncResult.results.map((r, i) => (
                           <tr key={i}>
                             <td style={{ ...tdStyle, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.filename}</td>
-                            <td style={tdStyle}>{r.carrier}</td>
-                            <td style={tdStyle}>{r.payPeriod || '—'}</td>
+                            <td style={tdStyle}>
+                              <span style={{
+                                background: C.accent + '22', border: `1px solid ${C.accent}44`, borderRadius: 4,
+                                padding: '2px 6px', fontSize: 10, color: C.accent, fontWeight: 600,
+                              }}>{r.carrier}</span>
+                            </td>
+                            <td style={{ ...tdStyle, fontSize: 9, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: C.mono, color: C.muted }}>{r.organizedFilename || r.payPeriod || '—'}</td>
                             <td style={{ ...tdStyle, textAlign: 'center' }}>{r.totalRecords}</td>
                             <td style={{ ...tdStyle, textAlign: 'center', color: C.green }}>{r.matched}</td>
                             <td style={{ ...tdStyle, textAlign: 'center', color: r.unmatched > 0 ? C.red : C.muted }}>{r.unmatched}</td>
@@ -511,6 +556,38 @@ export default function CommissionStatementsTab() {
                     </div>
                     <button onClick={() => setUploadResult(null)} style={{ background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 16 }}>×</button>
                   </div>
+
+                  {/* Duplicate warning */}
+                  {uploadResult.duplicateWarning && (
+                    <div style={{ background: C.yellowDim, border: `1px solid ${C.yellow}`, borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: C.yellow, textTransform: 'uppercase', marginBottom: 6 }}>Possible Duplicate</div>
+                      <div style={{ fontSize: 12, color: C.text, marginBottom: 8 }}>{uploadResult.duplicateWarning.message}</div>
+                      {uploadResult.dryRun && (
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button
+                            onClick={() => handleUpload(false, true)}
+                            disabled={uploading}
+                            style={{ background: C.yellow, border: 'none', borderRadius: 6, color: '#000', fontSize: 11, fontWeight: 700, padding: '6px 14px', cursor: 'pointer' }}
+                          >
+                            Process Anyway
+                          </button>
+                          <button
+                            onClick={() => setUploadResult(null)}
+                            style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 11, padding: '6px 14px', cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Organized filename */}
+                  {uploadResult.organizedFilename && (
+                    <div style={{ fontSize: 11, color: C.green, marginBottom: 12, fontFamily: C.mono }}>
+                      Saved to Drive: {uploadResult.organizedFilename}
+                    </div>
+                  )}
 
                   {/* KPI row */}
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1107,6 +1184,179 @@ function PolicyCashFlow({ policyNumber, policySummary }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ═══════════════ ORGANIZE FILES VIEW ═══════════════ */}
+      {subTab === 'organize' && (
+        <div>
+          <Section title="Organize Commission Files">
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
+              Scan your Google Drive folder and organize commission files into carrier subfolders with standardized names.
+              Files that can&apos;t be detected will stay in the root folder.
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+              <button
+                onClick={handleOrganizeScan}
+                disabled={organizeStatus === 'scanning' || organizeStatus === 'organizing'}
+                style={{
+                  background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6,
+                  color: C.muted, fontSize: 11, fontWeight: 600, padding: '6px 14px',
+                  cursor: organizeStatus === 'scanning' || organizeStatus === 'organizing' ? 'not-allowed' : 'pointer',
+                  opacity: organizeStatus === 'scanning' || organizeStatus === 'organizing' ? 0.5 : 1,
+                }}
+              >
+                {organizeStatus === 'scanning' ? 'Scanning...' : 'Scan Files'}
+              </button>
+              {organizePreview && organizePreview.proposals?.filter(p => p.status === 'will_move').length > 0 && (
+                <button
+                  onClick={handleOrganizeExecute}
+                  disabled={organizeStatus === 'organizing'}
+                  style={{
+                    background: C.accent, border: 'none', borderRadius: 6,
+                    color: '#fff', fontSize: 11, fontWeight: 700, padding: '6px 14px',
+                    cursor: organizeStatus === 'organizing' ? 'not-allowed' : 'pointer',
+                    opacity: organizeStatus === 'organizing' ? 0.5 : 1,
+                  }}
+                >
+                  {organizeStatus === 'organizing' ? 'Organizing...' : `Organize ${organizePreview.proposals.filter(p => p.status === 'will_move').length} Files`}
+                </button>
+              )}
+            </div>
+
+            {/* Already organized summary */}
+            {organizePreview && organizePreview.subfolderSummary && Object.keys(organizePreview.subfolderSummary).length > 0 && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                {Object.entries(organizePreview.subfolderSummary).map(([folder, count]) => (
+                  <KPICard key={folder} label={folder} value={count} color={C.accent} subtitle="files in subfolder" />
+                ))}
+              </div>
+            )}
+
+            {/* Scan preview table */}
+            {organizeStatus === 'preview' && organizePreview?.proposals?.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, color: C.text }}>{organizePreview.rootFilesCount}</span> files in root folder &nbsp;·&nbsp;
+                  <span style={{ fontWeight: 700, color: C.green }}>{organizePreview.proposals.filter(p => p.status === 'will_move').length}</span> can be organized &nbsp;·&nbsp;
+                  <span style={{ fontWeight: 700, color: organizePreview.proposals.filter(p => p.status === 'undetected').length > 0 ? C.yellow : C.muted }}>{organizePreview.proposals.filter(p => p.status === 'undetected').length}</span> undetected
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Current Name</th>
+                      <th style={thStyle}>Carrier</th>
+                      <th style={thStyle}>Pay Period</th>
+                      <th style={thStyle}>Records</th>
+                      <th style={thStyle}>Target Folder</th>
+                      <th style={thStyle}>New Name</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {organizePreview.proposals.map((p, i) => (
+                      <tr key={i} style={{ background: p.status === 'undetected' ? C.yellowDim : 'transparent' }}>
+                        <td style={{ ...tdStyle, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.currentName}</td>
+                        <td style={tdStyle}>
+                          {p.carrier ? (
+                            <span style={{
+                              background: C.accent + '22', border: `1px solid ${C.accent}44`, borderRadius: 4,
+                              padding: '2px 6px', fontSize: 10, color: C.accent, fontWeight: 600,
+                            }}>{p.carrier}</span>
+                          ) : (
+                            <span style={{ fontSize: 10, color: C.yellow }}>Unknown</span>
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, fontSize: 11 }}>{p.payPeriod || '—'}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{p.recordCount || '—'}</td>
+                        <td style={{ ...tdStyle, fontSize: 11, color: p.targetFolder ? C.green : C.yellow }}>{p.targetFolder || 'Root (unchanged)'}</td>
+                        <td style={{ ...tdStyle, fontSize: 9, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: C.mono, color: C.muted }}>
+                          {p.proposedName || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {organizeStatus === 'preview' && organizePreview?.proposals?.length === 0 && (
+              <div style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>
+                All files are already organized — nothing in the root folder to move.
+              </div>
+            )}
+
+            {/* Organize results */}
+            {organizeStatus === 'done' && organizeResult && (
+              <div style={{ background: C.greenDim, border: `1px solid ${C.green}`, borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.green, textTransform: 'uppercase', marginBottom: 10 }}>
+                  Organization Complete
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <KPICard label="Files Moved" value={organizeResult.moved} color={C.green} />
+                  {organizeResult.failed > 0 && <KPICard label="Failed" value={organizeResult.failed} color={C.red} />}
+                  {Object.entries(organizeResult.movedByCarrier || {}).map(([carrier, count]) => (
+                    <KPICard key={carrier} label={carrier} value={count} color={C.accent} />
+                  ))}
+                </div>
+                {organizeResult.results?.length > 0 && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={thStyle}>Original</th>
+                          <th style={thStyle}>Carrier</th>
+                          <th style={thStyle}>New Name</th>
+                          <th style={thStyle}>Folder</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {organizeResult.results.map((r, i) => (
+                          <tr key={i}>
+                            <td style={{ ...tdStyle, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.originalName}</td>
+                            <td style={tdStyle}>
+                              <span style={{
+                                background: C.accent + '22', border: `1px solid ${C.accent}44`, borderRadius: 4,
+                                padding: '2px 6px', fontSize: 10, color: C.accent, fontWeight: 600,
+                              }}>{r.carrier}</span>
+                            </td>
+                            <td style={{ ...tdStyle, fontSize: 9, fontFamily: C.mono, color: C.muted }}>{r.newName}</td>
+                            <td style={{ ...tdStyle, fontSize: 11, color: C.green }}>{r.folder}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {organizeResult.errors?.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: C.red, textTransform: 'uppercase', marginBottom: 4 }}>Errors</div>
+                    {organizeResult.errors.map((e, i) => (
+                      <div key={i} style={{ fontSize: 11, color: C.red, fontFamily: C.mono }}>{e.filename}: {e.error}</div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => { setOrganizeStatus(null); setOrganizePreview(null); setOrganizeResult(null); }}
+                  style={{ marginTop: 10, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 10, padding: '4px 10px', cursor: 'pointer' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Error */}
+            {organizeStatus === 'error' && organizeError && (
+              <div style={{ background: C.redDim, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.red }}>Error: {organizeError}</div>
+                <button
+                  onClick={() => { setOrganizeStatus(null); setOrganizeError(null); }}
+                  style={{ marginTop: 8, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, fontSize: 10, padding: '4px 10px', cursor: 'pointer' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </Section>
         </div>
       )}
     </div>
