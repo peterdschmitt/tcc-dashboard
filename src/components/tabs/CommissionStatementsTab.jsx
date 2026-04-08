@@ -1029,163 +1029,6 @@ export default function CommissionStatementsTab() {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// Sub-component: loads and displays ledger entries for a specific statement
-function StatementDetail({ statementId, fileName }) {
-  const [entries, setEntries] = useState(null);
-  const detailSort = useSort(null);
-
-  useEffect(() => {
-    fetch(`/api/commission-statements?view=ledger`)
-      .then(r => r.json())
-      .then(data => {
-        const filtered = (data.entries || []).filter(e => e.statementFile === fileName);
-        setEntries(filtered);
-      })
-      .catch(() => setEntries([]));
-  }, [statementId, fileName]);
-
-  if (!entries) return <div style={{ color: C.muted, fontSize: 12 }}>Loading...</div>;
-  if (entries.length === 0) return <div style={{ color: C.muted, fontSize: 12 }}>No entries found for this statement.</div>;
-
-  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
-  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
-
-  const sorted = sortData(entries, detailSort.sortKey, detailSort.sortDir);
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <SortTh label="Policy #" field="policyNumber" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Insured" field="insuredName" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Agent" field="agent" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Type" field="transactionType" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Amount" field="commissionAmount" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Balance" field="outstandingBalance" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Matched To" field="matchedPolicy" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-            <SortTh label="Status" field="status" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((e, i) => (
-            <tr key={i}>
-              <td style={tdStyle}>{e.policyNumber}</td>
-              <td style={tdStyle}>{e.insuredName}</td>
-              <td style={tdStyle}>{e.agent}</td>
-              <td style={tdStyle}>{e.transactionType}</td>
-              <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
-              <td style={tdStyle}>{fmtDollar(e.outstandingBalance)}</td>
-              <td style={tdStyle}>{e.matchedPolicy || '—'}</td>
-              <td style={tdStyle}>
-                <span style={{
-                  fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
-                  background: e.status === 'auto_matched' || e.status === 'approved' ? C.greenDim : e.status === 'pending_review' ? C.yellowDim : C.redDim,
-                  color: e.status === 'auto_matched' || e.status === 'approved' ? C.green : e.status === 'pending_review' ? C.yellow : C.red,
-                }}>
-                  {e.status?.replace('_', ' ') || '—'}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// Sub-component: per-policy chronological cash flow with running balance
-function PolicyCashFlow({ policyNumber, policySummary }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    setData(null);
-    setError(null);
-    fetch(`/api/commission-statements/policy/${encodeURIComponent(policyNumber)}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) { setError(d.error); return; }
-        setData(d);
-      })
-      .catch(e => setError(e.message));
-  }, [policyNumber]);
-
-  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
-  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
-
-  if (error) return <div style={{ color: C.red, fontSize: 12 }}>Error: {error}</div>;
-  if (!data) return <div style={{ color: C.muted, fontSize: 12 }}>Loading cash flow...</div>;
-
-  const info = data.policyInfo || {};
-  const entries = (data.entries || [])
-    .slice()
-    .sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
-
-  // Compute running balance
-  let running = 0;
-  const withRunning = entries.map(e => {
-    running += e.commissionAmount || 0;
-    return { ...e, runningBalance: running };
-  });
-
-  return (
-    <div>
-      {/* KPI cards */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <KPICard label="Insured" value={info.insuredName || policySummary.insuredName || '—'} color={C.text} />
-        <KPICard label="Policy #" value={policyNumber} color={C.accent} />
-        <KPICard label="Carrier" value={info.carrier || policySummary.carrier || '—'} color={C.muted} />
-        <KPICard label="Agent" value={info.agent || '—'} color={C.muted} />
-        <KPICard label="Premium" value={fmtDollar(info.premium || policySummary.premium || 0)} color={C.accent} />
-        <KPICard label="Total Paid" value={fmtDollar(data.totalPaid || 0)} color={C.green} />
-        <KPICard label="Clawbacks" value={fmtDollar(data.totalClawback || 0)} color={(data.totalClawback || 0) > 0 ? C.red : C.muted} />
-        <KPICard label="Net Commission" value={fmtDollar(data.netCommission || 0)} color={(data.netCommission || 0) >= 0 ? C.green : C.red} />
-      </div>
-
-      {/* Chronological entries table */}
-      {withRunning.length === 0 ? (
-        <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', padding: 20 }}>No ledger entries found for this policy.</div>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={thStyle}>Date</th>
-                <th style={thStyle}>Type</th>
-                <th style={thStyle}>Amount</th>
-                <th style={thStyle}>Running Balance</th>
-                <th style={thStyle}>Statement File</th>
-                <th style={thStyle}>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {withRunning.map((e, i) => (
-                <tr key={i}>
-                  <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
-                      background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim,
-                      color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red,
-                    }}>
-                      {e.transactionType}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
-                  <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
-                  <td style={{ ...tdStyle, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
-                  <td style={{ ...tdStyle, fontSize: 10, color: C.muted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.notes || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       {/* ═══════════════ ORGANIZE FILES VIEW ═══════════════ */}
       {subTab === 'organize' && (
@@ -1364,6 +1207,163 @@ function PolicyCashFlow({ policyNumber, policySummary }) {
               </div>
             )}
           </Section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sub-component: loads and displays ledger entries for a specific statement
+function StatementDetail({ statementId, fileName }) {
+  const [entries, setEntries] = useState(null);
+  const detailSort = useSort(null);
+
+  useEffect(() => {
+    fetch(`/api/commission-statements?view=ledger`)
+      .then(r => r.json())
+      .then(data => {
+        const filtered = (data.entries || []).filter(e => e.statementFile === fileName);
+        setEntries(filtered);
+      })
+      .catch(() => setEntries([]));
+  }, [statementId, fileName]);
+
+  if (!entries) return <div style={{ color: C.muted, fontSize: 12 }}>Loading...</div>;
+  if (entries.length === 0) return <div style={{ color: C.muted, fontSize: 12 }}>No entries found for this statement.</div>;
+
+  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
+  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
+
+  const sorted = sortData(entries, detailSort.sortKey, detailSort.sortDir);
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <SortTh label="Policy #" field="policyNumber" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Insured" field="insuredName" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Agent" field="agent" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Type" field="transactionType" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Amount" field="commissionAmount" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Balance" field="outstandingBalance" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Matched To" field="matchedPolicy" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+            <SortTh label="Status" field="status" {...detailSort} onSort={detailSort.toggle} style={thStyle} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((e, i) => (
+            <tr key={i}>
+              <td style={tdStyle}>{e.policyNumber}</td>
+              <td style={tdStyle}>{e.insuredName}</td>
+              <td style={tdStyle}>{e.agent}</td>
+              <td style={tdStyle}>{e.transactionType}</td>
+              <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+              <td style={tdStyle}>{fmtDollar(e.outstandingBalance)}</td>
+              <td style={tdStyle}>{e.matchedPolicy || '—'}</td>
+              <td style={tdStyle}>
+                <span style={{
+                  fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
+                  background: e.status === 'auto_matched' || e.status === 'approved' ? C.greenDim : e.status === 'pending_review' ? C.yellowDim : C.redDim,
+                  color: e.status === 'auto_matched' || e.status === 'approved' ? C.green : e.status === 'pending_review' ? C.yellow : C.red,
+                }}>
+                  {e.status?.replace('_', ' ') || '—'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Sub-component: per-policy chronological cash flow with running balance
+function PolicyCashFlow({ policyNumber, policySummary }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    fetch(`/api/commission-statements/policy/${encodeURIComponent(policyNumber)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { setError(d.error); return; }
+        setData(d);
+      })
+      .catch(e => setError(e.message));
+  }, [policyNumber]);
+
+  const thStyle = { textAlign: 'left', padding: '6px 10px', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', borderBottom: `1px solid ${C.border}` };
+  const tdStyle = { padding: '6px 10px', fontSize: 11, color: C.text, fontFamily: C.mono, borderBottom: `1px solid ${C.border}` };
+
+  if (error) return <div style={{ color: C.red, fontSize: 12 }}>Error: {error}</div>;
+  if (!data) return <div style={{ color: C.muted, fontSize: 12 }}>Loading cash flow...</div>;
+
+  const info = data.policyInfo || {};
+  const entries = (data.entries || [])
+    .slice()
+    .sort((a, b) => (a.statementDate || '').localeCompare(b.statementDate || ''));
+
+  // Compute running balance
+  let running = 0;
+  const withRunning = entries.map(e => {
+    running += e.commissionAmount || 0;
+    return { ...e, runningBalance: running };
+  });
+
+  return (
+    <div>
+      {/* KPI cards */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <KPICard label="Insured" value={info.insuredName || policySummary.insuredName || '—'} color={C.text} />
+        <KPICard label="Policy #" value={policyNumber} color={C.accent} />
+        <KPICard label="Carrier" value={info.carrier || policySummary.carrier || '—'} color={C.muted} />
+        <KPICard label="Agent" value={info.agent || '—'} color={C.muted} />
+        <KPICard label="Premium" value={fmtDollar(info.premium || policySummary.premium || 0)} color={C.accent} />
+        <KPICard label="Total Paid" value={fmtDollar(data.totalPaid || 0)} color={C.green} />
+        <KPICard label="Clawbacks" value={fmtDollar(data.totalClawback || 0)} color={(data.totalClawback || 0) > 0 ? C.red : C.muted} />
+        <KPICard label="Net Commission" value={fmtDollar(data.netCommission || 0)} color={(data.netCommission || 0) >= 0 ? C.green : C.red} />
+      </div>
+
+      {/* Chronological entries table */}
+      {withRunning.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', padding: 20 }}>No ledger entries found for this policy.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Date</th>
+                <th style={thStyle}>Type</th>
+                <th style={thStyle}>Amount</th>
+                <th style={thStyle}>Running Balance</th>
+                <th style={thStyle}>Statement File</th>
+                <th style={thStyle}>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withRunning.map((e, i) => (
+                <tr key={i}>
+                  <td style={tdStyle}>{e.statementDate ? new Date(e.statementDate).toLocaleDateString() : '—'}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
+                      background: e.transactionType === 'advance' ? C.greenDim : e.transactionType === 'override' ? '#1a2538' : C.redDim,
+                      color: e.transactionType === 'advance' ? C.green : e.transactionType === 'override' ? C.accent : C.red,
+                    }}>
+                      {e.transactionType}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, color: e.commissionAmount >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.commissionAmount)}</td>
+                  <td style={{ ...tdStyle, color: e.runningBalance >= 0 ? C.green : C.red, fontWeight: 700 }}>{fmtDollar(e.runningBalance)}</td>
+                  <td style={{ ...tdStyle, fontSize: 10, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.statementFile || '—'}</td>
+                  <td style={{ ...tdStyle, fontSize: 10, color: C.muted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.notes || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
