@@ -7,6 +7,7 @@ import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
+import AiAnalystPane from './AiAnalystPane';
 import DatePicker from './shared/DatePicker';
 
 const C = {
@@ -1352,16 +1353,16 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
   const days = Math.max(activeDays.size, 1);
 
   const placed = policies.filter(isPlaced);
-  const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
+  const totalPremium = policies.reduce((s, p) => s + p.premium, 0);
   const totalLeadSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
   const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
-  const totalComm = placed.reduce((s, p) => s + p.commission, 0);
+  const totalComm = policies.reduce((s, p) => s + p.commission, 0);
   const billable = calls.filter(c => c.isBillable).length;
   const totalCalls = calls.length;
   const cpa = policies.length > 0 ? totalLeadSpend / policies.length : 0;
-  const closeRate = billable > 0 ? placed.length / billable * 100 : 0;
+  const closeRate = billable > 0 ? policies.length / billable * 100 : 0;
   const placementRate = policies.length > 0 ? placed.length / policies.length * 100 : 0;
-  const avgPremium = placed.length > 0 ? totalPremium / placed.length : 0;
+  const avgPremium = policies.length > 0 ? totalPremium / policies.length : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
   // Effectuation: apply rate to GAR if enabled in settings
@@ -3211,6 +3212,7 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         {activeTab === 'commission-statements' && <CommissionStatementsTab />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
       </div>
+      <AiAnalystPane activeTab={activeTab} />
     </div>
   );
 }
