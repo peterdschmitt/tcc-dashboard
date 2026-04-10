@@ -69,6 +69,7 @@ export async function GET(request, { params }) {
       paymentType: salesRow['Payment Type'] || '',
       state: salesRow['State'] || '',
       phone: salesRow['Phone Number'] || '',
+      textFriendly: salesRow['Text Friendly'] || '',
     } : null;
 
     // Carrier-aggregated comparison data (from most recent entry)

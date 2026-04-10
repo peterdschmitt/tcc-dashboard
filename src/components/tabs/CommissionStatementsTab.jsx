@@ -1778,6 +1778,8 @@ function PolicyCashFlow({ policyNumber, policySummary }) {
         <KPICard label="Carrier" value={info.carrier || policySummary.carrier || '—'} color={C.muted} />
         <KPICard label="Agent" value={info.agent || '—'} color={C.muted} />
         <KPICard label="Premium" value={fmtDollar(info.premium || policySummary.premium || 0)} color={C.accent} />
+        <KPICard label="Phone" value={info.phone || '—'} color={C.muted} />
+        <KPICard label="Text Friendly" value={info.textFriendly || '—'} color={info.textFriendly?.toLowerCase() === 'yes' ? C.green : C.muted} />
         <KPICard label="Total Paid" value={fmtDollar(data.totalPaid || 0)} color={C.green} />
         <KPICard label="Clawbacks" value={fmtDollar(data.totalClawback || 0)} color={(data.totalClawback || 0) > 0 ? C.red : C.muted} />
         <KPICard label="Net Commission" value={fmtDollar(data.netCommission || 0)} color={(data.netCommission || 0) >= 0 ? C.green : C.red} />
