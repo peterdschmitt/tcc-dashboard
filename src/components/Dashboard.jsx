@@ -1464,8 +1464,104 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
     </>
   );
 }
+// ─── VIRTUAL AGENT TILES ─────────────────────────────
+function normalizePhone(raw) {
+  if (!raw) return '';
+  return raw.replace(/\D/g, '').slice(-10);
+}
+
+function VirtualAgentTiles({ vaData, policies, goals, dateRange }) {
+  const vaCalls = vaData?.calls || [];
+  const cg = goals?.company || {};
+  const meta = goals?.companyMeta || {};
+
+  if (!vaCalls.length && !cg.va_calls) return null;
+
+  // Count active days for period goal scaling
+  const activeDays = new Set();
+  vaCalls.forEach(c => { if (c.date) activeDays.add(c.date); });
+  const days = Math.max(activeDays.size, 1);
+
+  const totalVACalls = vaCalls.length;
+  const transfers = vaCalls.filter(c => c.transferConfirmation).length;
+  const transferRate = totalVACalls > 0 ? (transfers / totalVACalls) * 100 : 0;
+
+  // Match VA caller IDs to policy phone numbers for sales attribution
+  const policyPhones = new Set();
+  (policies || []).forEach(p => {
+    const ph = normalizePhone(p.phone || p.phoneNumber || p['Phone Number']);
+    if (ph) policyPhones.add(ph);
+  });
+  const vaSales = vaCalls.filter(c => c.transferConfirmation && c.callerId && policyPhones.has(c.callerId)).length;
+  const vaConvRate = transfers > 0 ? (vaSales / transfers) * 100 : 0;
+
+  const m = key => meta[key] || { lower: false, yellow: 80 };
+
+  const tiles = [
+    { label: 'VA Calls', actual: totalVACalls, dailyGoal: cg.va_calls, key: 'va_calls', format: v => fmt(v) },
+    { label: 'VA Transfers', actual: transfers, dailyGoal: cg.va_transfers, key: 'va_transfers', format: v => fmt(v) },
+    { label: 'Transfer Rate', actual: transferRate, dailyGoal: cg.va_transfer_rate, key: 'va_transfer_rate', format: fmtPct, isRate: true },
+    { label: 'VA Sales', actual: vaSales, dailyGoal: cg.va_sales, key: 'va_sales', format: v => fmt(v) },
+    { label: 'VA Conversion', actual: vaConvRate, dailyGoal: cg.va_conversion_rate, key: 'va_conversion_rate', format: fmtPct, isRate: true },
+  ];
+
+  return (
+    <Section title={`Virtual Agent Screener — ${days} active day${days !== 1 ? 's' : ''}`}>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tiles.length}, 1fr)`, gap: 8 }}>
+          {tiles.map(g => {
+            const gm = m(g.key);
+            const periodGoal = g.dailyGoal ? (g.isRate ? g.dailyGoal : g.dailyGoal * days) : null;
+            const ratio = periodGoal ? (gm.lower ? periodGoal / g.actual : g.actual / periodGoal) : null;
+            const pctOff = periodGoal ? (gm.lower ? ((periodGoal - g.actual) / periodGoal * 100) : ((g.actual - periodGoal) / periodGoal * 100)) : null;
+            const pctLabel = pctOff !== null ? (pctOff >= 0 ? '+' + pctOff.toFixed(1) + '%' : pctOff.toFixed(1) + '%') : null;
+            const tileColor = !periodGoal ? '#ffffff' : ratio >= 1 ? C.green : ratio >= (gm.yellow / 100) ? C.yellow : C.red;
+            const tileBg = !periodGoal ? C.surface : ratio >= 1 ? C.greenDim : ratio >= (gm.yellow / 100) ? C.yellowDim : C.redDim;
+            return (
+              <div key={g.label} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 9, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{g.label}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color: tileColor, lineHeight: 1 }}>{g.format(g.actual)}</span>
+                  {pctLabel && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, fontFamily: C.mono, color: tileColor,
+                      background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: 4, lineHeight: 1.2,
+                    }}>{pctLabel}</span>
+                  )}
+                </div>
+                {periodGoal && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 6 }}>
+                    {!g.isRate && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 13, color: '#b0c4de', fontFamily: C.mono, fontWeight: 600 }}>Period Goal</span>
+                        <span style={{ fontSize: 13, color: '#e0e8f0', fontFamily: C.mono, fontWeight: 700 }}>{g.format(periodGoal)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 11, color: '#8fa3be', fontFamily: C.mono }}>Daily Goal</span>
+                      <span style={{ fontSize: 11, color: '#b0c4de', fontFamily: C.mono }}>{g.format(g.dailyGoal)}</span>
+                    </div>
+                  </div>
+                )}
+                {periodGoal && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ flex: 1, height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min((ratio || 0) * 100, 100)}%`, height: '100%', background: tileColor, borderRadius: 2, transition: 'width 0.5s ease' }} />
+                    </div>
+                    <span style={{ fontSize: 10, fontFamily: C.mono, color: tileColor, minWidth: 36 }}>{ratio ? (ratio * 100).toFixed(0) + '%' : '—'}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 // ─── DAILY ACTIVITY TAB ────────────────────────────
-function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolicies }) {
+function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolicies, vaData }) {
   const [drillDay, setDrillDay] = useState(null);
   const [overrides, setOverrides] = useState({}); // rowIndex → 'N' | 'Y' | ''
   const [flagging, setFlagging] = useState(null); // rowIndex currently being saved
@@ -1516,6 +1612,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
   return (
     <>
       <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />
+      <VirtualAgentTiles vaData={vaData} policies={policies} goals={goals} dateRange={dateRange} />
       {drillDay ? (() => {
         const rawDayCalls = calls.filter(c => c.date === drillDay).sort((a, b) => b.duration - a.duration);
         // Apply local overrides on top of server-side data
@@ -1612,7 +1709,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
 }
 
 // ─── PUBLISHERS TAB ─────────────────────────────────
-function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies }) {
+function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies, vaData }) {
   const [drill, setDrill] = useState(null);
   const cg = goals?.company || {};
 
@@ -1694,6 +1791,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
   return (
     <>
     <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
+    <VirtualAgentTiles vaData={vaData} policies={policies} goals={goals} dateRange={dateRange} />
     <Section title="Publisher Performance" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="totalPremium" onRowClick={r => r.campaign !== 'TOTAL' && setDrill(r.campaign)} totalsRow={pubTotals} columns={[
         { key: 'campaign', label: 'Publisher', align: 'left', bold: true, mono: false },
@@ -1718,7 +1816,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
 }
 
 // ─── AGENTS TAB ──────────────────────────────────────
-function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) {
+function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, vaData }) {
   const [drill, setDrill] = useState(null);
   const days = calcDays(dateRange.start, dateRange.end);
   const ag = goals?.agent || {};
@@ -1811,6 +1909,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) 
   return (
     <>
     <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
+    <VirtualAgentTiles vaData={vaData} policies={policies} goals={goals} dateRange={dateRange} />
     <Section title="Agent Rankings" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="premium" onRowClick={r => r.agent !== 'TOTAL' && setDrill(r.agent)} totalsRow={agentTotals} columns={[
         { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false, render: r => <span>{r.agent}{isSalaried(r.agent) && <SalaryBadge />}</span> },
@@ -1831,7 +1930,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies }) 
 }
 
 // ─── CARRIERS TAB ────────────────────────────────────
-function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }) {
+function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, vaData }) {
   const [drill, setDrill] = useState(null);
 
   // Group by Carrier + Product + Payout
@@ -1894,6 +1993,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }
   return (
     <>
     <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} />
+    <VirtualAgentTiles vaData={vaData} policies={policies} goals={goals} dateRange={dateRange} />
     <Section title="Carrier / Product Overview" rightContent={<span style={{ fontSize: 10, color: C.muted }}>Click a row to drill down</span>}>
       <SortableTable defaultSort="premium" onRowClick={r => r.key !== 'TOTAL' && setDrill(r.key)} totalsRow={carrierTotals} columns={[
         { key: 'carrier', label: 'Carrier', align: 'left', bold: true, mono: false },
@@ -1914,7 +2014,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies }
 }
 
 // ─── P&L TAB ─────────────────────────────────────────
-function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange }) {
+function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange, vaData }) {
   const placed = policies.filter(isPlaced);
   const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
   const totalComm = placed.reduce((s, p) => s + p.commission, 0);
@@ -1931,6 +2031,7 @@ function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange }) {
   return (
     <>
       <GoalComparison policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />
+      <VirtualAgentTiles vaData={vaData} policies={policies} goals={goals} dateRange={dateRange} />
       <Section title="Publisher P&L Detail">
         <SortableTable defaultSort="netRevenue" columns={[
           { key: 'campaign', label: 'Publisher', align: 'left', bold: true, mono: false },
@@ -3137,7 +3238,7 @@ function AgentPerformanceTab({ dateRange, calls, policies }) {
   );
 }
 // ─── MAIN DASHBOARD ──────────────────────────────────
-export default function Dashboard({ data, allTimePolicies, goals, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource }) {
+export default function Dashboard({ data, allTimePolicies, goals, vaData, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource }) {
   const [activeTab, setActiveTab] = useState('daily');
   if (loading || !data) {
     return (
@@ -3199,11 +3300,11 @@ export default function Dashboard({ data, allTimePolicies, goals, loading, dateR
         </div>
       </div>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
-        {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}
-        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}
-        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
-        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} />}
-        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
+        {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
+        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
+        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
+        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
+        {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
         {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
         {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}

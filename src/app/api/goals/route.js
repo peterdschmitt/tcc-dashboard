@@ -44,6 +44,11 @@ export async function GET() {
       effectuationenabled: 'effectuation_enabled', eff_rev: 'eff_revenue',
       effrevenue: 'eff_revenue',
       leadspend: 'lead_spend', totalcalls: 'total_calls',
+      vacalls: 'va_calls', va_total_calls: 'va_calls',
+      vatransfers: 'va_transfers', va_transfer: 'va_transfers',
+      vatransferrate: 'va_transfer_rate', va_xfer_rate: 'va_transfer_rate',
+      vasales: 'va_sales', va_sale: 'va_sales',
+      vaconversionrate: 'va_conversion_rate', va_conv_rate: 'va_conversion_rate',
       billablecalls: 'billable_calls', appssubmitted: 'apps_submitted',
       apps_per_day: 'apps_submitted', policiesplaced: 'policies_placed',
       policies_per_day: 'policies_placed', premiumcost: 'premium_cost_ratio',
@@ -67,6 +72,8 @@ export async function GET() {
       eff_revenue: 2800, // gross_adv_revenue * effectuation_rate (4000 * 0.70)
       lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 2.5,
       effectuation_rate: 70, effectuation_enabled: 1,
+      va_calls: 100, va_transfers: 30, va_transfer_rate: 30,
+      va_sales: 5, va_conversion_rate: 15,
     };
     // Default meta (lower-is-better and yellow threshold)
     const defaultMeta = {
@@ -80,6 +87,9 @@ export async function GET() {
       eff_revenue: { lower: false, yellow: 80 },
       agent_commission: { lower: false, yellow: 80 }, net_revenue: { lower: false, yellow: 80 },
       premium_cost_ratio: { lower: false, yellow: 80 },
+      va_calls: { lower: false, yellow: 80 }, va_transfers: { lower: false, yellow: 80 },
+      va_transfer_rate: { lower: false, yellow: 80 }, va_sales: { lower: false, yellow: 80 },
+      va_conversion_rate: { lower: false, yellow: 80 },
     };
     Object.entries(defaults).forEach(([k, v]) => {
       if (!goals.company[k]) goals.company[k] = v;

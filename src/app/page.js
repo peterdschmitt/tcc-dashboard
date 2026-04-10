@@ -6,6 +6,7 @@ export default function Home() {
   const [data, setData] = useState(null);
   const [allTimePolicies, setAllTimePolicies] = useState([]);
   const [goals, setGoals] = useState(null);
+  const [vaData, setVaData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [earliestDate, setEarliestDate] = useState(null);
@@ -66,17 +67,20 @@ export default function Home() {
         const isAllRange = dateRange.preset === 'all' ||
           (dateRange.start === '2020-01-01' && dateRange.end === '2030-12-31');
 
-        const [dashRes, goalsRes] = await Promise.all([
+        const [dashRes, goalsRes, vaRes] = await Promise.all([
           fetch('/api/dashboard?start=' + dateRange.start + '&end=' + dateRange.end + '&source=' + dataSource),
           fetch('/api/goals'),
+          fetch('/api/virtual-agent?start=' + dateRange.start + '&end=' + dateRange.end).catch(() => null),
         ]);
         if (!dashRes.ok) throw new Error('Dashboard API: ' + dashRes.status);
         if (!goalsRes.ok) throw new Error('Goals API: ' + goalsRes.status);
         const dashData = await dashRes.json();
         const goalsData = await goalsRes.json();
+        const vaResult = vaRes?.ok ? await vaRes.json() : null;
         if (!cancelled) {
           setData(dashData);
           setGoals(goalsData);
+          setVaData(vaResult);
           // When fetching all-time data, reuse it for the status breakdown widget
           // instead of making a separate API call
           if (isAllRange && dashData.policies) {
@@ -129,6 +133,7 @@ export default function Home() {
       data={data}
       allTimePolicies={allTimePolicies}
       goals={goals}
+      vaData={vaData}
       loading={loading}
       dateRange={dateRange}
       applyPreset={applyPreset}
