@@ -204,10 +204,19 @@ export function calcCommission(premium, carrier, product, age, commissionRates) 
   });
 
   const best = scored[0];
+
+  // Carrier-specific advance months (how many months the carrier pays upfront)
+  const carrierLower = (best.rate.carrier || '').toLowerCase();
+  let advMonths = best.rate.advanceMonths || 9; // default
+  if (carrierLower.includes('transamerica')) advMonths = 18;
+  else if (carrierLower.includes('aig') || carrierLower.includes('corebridge')) advMonths = 10;
+  else if (carrierLower.includes('cica')) advMonths = 6;
+  // American Amicable, Baltimore Life = 9 (default)
+
   return {
     commission: premium * best.rate.commissionRate,
     rate: best.rate.commissionRate,
-    advanceMonths: best.rate.advanceMonths || 9,
+    advanceMonths: advMonths,
     matched: true,
     matchedCarrier: best.rate.carrier,
     matchedProduct: best.rate.product,

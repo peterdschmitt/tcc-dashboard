@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { fetchSheet } from '@/lib/sheets';
-import { calcCommission } from '@/lib/utils';
+import { calcCommission, normalizePlacedStatus } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 export async function GET(request) {
@@ -128,6 +128,32 @@ export async function GET(request) {
         fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600),
       ]);
 
+      // Deduplicate ledger entries: same policy + date + amount + type = duplicate
+      const seenLedger = new Set();
+      const dedupedLedger = [];
+      let dupesRemoved = 0;
+      for (const lr of ledgerRows) {
+        const key = [
+          (lr['Policy #'] || '').trim(),
+          (lr['Statement Date'] || '').trim(),
+          (lr['Commission Amount'] || '0').trim(),
+          (lr['Transaction Type'] || '').trim(),
+          (lr['Agent ID'] || '').trim(),
+        ].join('|');
+        if (seenLedger.has(key)) { dupesRemoved++; continue; }
+        seenLedger.add(key);
+        dedupedLedger.push(lr);
+      }
+      if (dupesRemoved > 0) console.log(`[reconciliation] Removed ${dupesRemoved} duplicate ledger entries`);
+
+      // Build commission rate lookup once
+      const commRates = commRows.map(r => ({
+        carrier: r['Carrier']?.trim(),
+        product: r['Product']?.trim(),
+        ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
+        commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
+      }));
+
       // Build per-policy commission balance
       const policyMap = {};
 
@@ -139,15 +165,14 @@ export async function GET(request) {
         const product = (sr['Carrier + Product + Payout'] || '').split(',').slice(1).join(',').split(',')[0]?.trim() || '';
         const premium = parseFloat(sr['Monthly Premium']) || 0;
 
-        // Calculate expected commission
-        const commRates = commRows.map(r => ({
-          carrier: r['Carrier']?.trim(),
-          product: r['Product']?.trim(),
-          ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
-          commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
-        }));
+        // Calculate expected commission: premium × commission rate (rate already includes advance months)
         const commResult = calcCommission(premium, carrier, product, 0, commRates);
-        const expectedComm = commResult.matched ? premium * commResult.rate * 9 : premium * 9; // rough estimate
+        // Commission rate from sheet is the advance % (e.g., 135% = premium × 1.35 × advance months)
+        // Expected total advance = premium × rate × advance months (typically 9, 6 for CICA)
+        const advMonths = commResult.advanceMonths || 9;
+        const expectedComm = commResult.matched
+          ? premium * commResult.rate * advMonths
+          : premium * 9;
 
         policyMap[pn] = {
           policyNumber: pn,
@@ -160,6 +185,8 @@ export async function GET(request) {
           submitDate: sr['Application Submitted Date']?.trim() || '',
           effectiveDate: sr['Effective Date']?.trim() || '',
           expectedCommission: Math.round(expectedComm * 100) / 100,
+          commissionRate: commResult.matched ? commResult.rate : null,
+          advanceMonths: advMonths,
           totalPaid: 0,
           totalClawback: 0,
           netReceived: 0,
@@ -167,8 +194,8 @@ export async function GET(request) {
         };
       }
 
-      // Aggregate ledger entries
-      for (const lr of ledgerRows) {
+      // Aggregate deduped ledger entries
+      for (const lr of dedupedLedger) {
         const matchedPn = (lr['Matched Policy #'] || '').trim();
         const amount = parseFloat(lr['Commission Amount']) || 0;
         if (matchedPn && policyMap[matchedPn]) {
@@ -199,6 +226,148 @@ export async function GET(request) {
           totalReceived: Math.round(totalReceived * 100) / 100,
           variance: Math.round((totalReceived - totalExpected) * 100) / 100,
           discrepancies: withActivity.filter(p => Math.abs(p.balance) > 1).length,
+          duplicatesRemoved: dupesRemoved,
+        },
+      });
+    }
+
+    // ─── Waterfall view ─────────────────────────────────────
+    // All policies from sales sheet, enriched with commission + carrier data
+    if (view === 'waterfall') {
+      // Fetch all data sources in parallel
+      const [salesRows, ledgerRows, commRows] = await Promise.all([
+        fetchSheet(salesSheetId, process.env.SALES_TAB_NAME || 'Sheet1', 0),
+        fetchSheet(salesSheetId, ledgerTab, 60),
+        fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600),
+      ]);
+
+      // Deduplicate ledger
+      const seenLedger = new Set();
+      const dedupedLedger = [];
+      for (const lr of ledgerRows) {
+        const key = [
+          (lr['Policy #'] || '').trim(),
+          (lr['Statement Date'] || '').trim(),
+          (lr['Commission Amount'] || '0').trim(),
+          (lr['Transaction Type'] || '').trim(),
+          (lr['Agent ID'] || '').trim(),
+        ].join('|');
+        if (seenLedger.has(key)) continue;
+        seenLedger.add(key);
+        dedupedLedger.push(lr);
+      }
+
+      // Commission rates lookup
+      const commRates = commRows.map(r => ({
+        carrier: r['Carrier']?.trim(),
+        product: r['Product']?.trim(),
+        ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
+        commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
+      }));
+
+      // Build unified policy map from sales tracker
+      const policyMap = {};
+      for (const sr of salesRows) {
+        const pn = (sr['Policy #'] || '').trim();
+        if (!pn) continue;
+        const carrier = (sr['Carrier + Product + Payout'] || '').split(',')[0]?.trim() || '';
+        const product = (sr['Carrier + Product + Payout'] || '').split(',').slice(1).join(',').split(',')[0]?.trim() || '';
+        const premium = parseFloat(sr['Monthly Premium']) || 0;
+
+        const commResult = calcCommission(premium, carrier, product, 0, commRates);
+        const advMonths = commResult.advanceMonths || 9;
+        const expectedComm = commResult.matched ? premium * commResult.rate * advMonths : 0;
+
+        policyMap[pn] = {
+          policyNumber: pn,
+          insuredName: `${sr['First Name'] || ''} ${sr['Last Name'] || ''}`.trim(),
+          carrier,
+          product,
+          premium,
+          agent: sr['Agent'] || '',
+          status: sr['Policy Status']?.trim() || normalizePlacedStatus(sr['Placed?']) || '',
+          submitDate: sr['Application Submitted Date']?.trim() || '',
+          effectiveDate: sr['Effective Date']?.trim() || '',
+          expectedCommission: Math.round(expectedComm * 100) / 100,
+          commissionRate: commResult.matched ? commResult.rate : null,
+          advanceMonths: advMonths,
+          totalPaid: 0,
+          totalClawback: 0,
+          netReceived: 0,
+          entries: 0,
+        };
+      }
+
+      // Aggregate deduped ledger entries
+      for (const lr of dedupedLedger) {
+        const matchedPn = (lr['Matched Policy #'] || '').trim();
+        const amount = parseFloat(lr['Commission Amount']) || 0;
+        if (matchedPn && policyMap[matchedPn]) {
+          if (amount > 0) policyMap[matchedPn].totalPaid += amount;
+          else policyMap[matchedPn].totalClawback += Math.abs(amount);
+          policyMap[matchedPn].entries++;
+        }
+      }
+
+      // Finalize all policies
+      const allPolicies = Object.values(policyMap).map(p => {
+        const totalPaid = Math.round(p.totalPaid * 100) / 100;
+        const totalClawback = Math.round(p.totalClawback * 100) / 100;
+        const netReceived = Math.round((p.totalPaid - p.totalClawback) * 100) / 100;
+        const balance = Math.round((p.expectedCommission - totalPaid + totalClawback) * 100) / 100;
+        const carrierPaid = p.entries > 0;
+        return {
+          ...p,
+          totalPaid,
+          totalClawback,
+          netReceived,
+          balance, // positive = carrier owes you, negative = overpaid
+          carrierPaid, // true if any commission statement entry exists
+          hasChargeback: totalClawback > 0,
+          unpaid: ['Active - In Force', 'Advance Released'].includes(p.status) && !carrierPaid && p.premium > 0,
+        };
+      });
+
+      // Summary
+      const totalPremium = allPolicies.reduce((s, p) => s + p.premium, 0);
+      const paidCount = allPolicies.filter(p => p.carrierPaid).length;
+      const totalExpected = allPolicies.filter(p => p.expectedCommission > 0).reduce((s, p) => s + p.expectedCommission, 0);
+      const totalReceived = allPolicies.reduce((s, p) => s + p.netReceived, 0);
+      const totalBalance = allPolicies.reduce((s, p) => s + p.balance, 0);
+
+      // By-status breakdown
+      const byStatus = {};
+      for (const p of allPolicies) {
+        const st = p.status || '(No Status)';
+        if (!byStatus[st]) byStatus[st] = { count: 0, premium: 0, paid: 0, expected: 0, received: 0, balance: 0 };
+        byStatus[st].count++;
+        byStatus[st].premium += p.premium;
+        if (p.carrierPaid) byStatus[st].paid++;
+        byStatus[st].expected += p.expectedCommission;
+        byStatus[st].received += p.netReceived;
+        byStatus[st].balance += p.balance;
+      }
+
+      // Gap analysis
+      const unpaidActive = allPolicies.filter(p => p.unpaid);
+      const unpaidPending = allPolicies.filter(p => ['Submitted - Pending', 'Pending'].includes(p.status) && !p.carrierPaid);
+      const chargebacks = allPolicies.filter(p => p.hasChargeback);
+
+      return NextResponse.json({
+        policies: allPolicies,
+        summary: {
+          totalPolicies: allPolicies.length,
+          totalPremium: Math.round(totalPremium * 100) / 100,
+          paidCount,
+          totalExpected: Math.round(totalExpected * 100) / 100,
+          totalReceived: Math.round(totalReceived * 100) / 100,
+          totalBalance: Math.round(totalBalance * 100) / 100,
+        },
+        byStatus,
+        gaps: {
+          unpaidActive: { count: unpaidActive.length, premium: Math.round(unpaidActive.reduce((s, p) => s + p.premium, 0) * 100) / 100 },
+          unpaidPending: { count: unpaidPending.length, premium: Math.round(unpaidPending.reduce((s, p) => s + p.premium, 0) * 100) / 100 },
+          chargebacks: { count: chargebacks.length, amount: Math.round(chargebacks.reduce((s, p) => s + p.totalClawback, 0) * 100) / 100 },
         },
       });
     }

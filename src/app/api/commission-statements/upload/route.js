@@ -94,6 +94,7 @@ export async function POST(request) {
 
     const netAmount = totalAdvances - totalRecoveries;
     const totalRecords = parsed.records.length;
+    let dupsSkipped = 0;
 
     // Step 3b: Content-based duplicate detection
     const contentHash = computeContentFingerprint(
@@ -161,20 +162,56 @@ export async function POST(request) {
       }
     }
 
-    // Step 5: Write to Google Sheets
+    // Step 5: Write to Google Sheets (with row-level dedup)
     if (!dryRun && totalRecords > 0) {
       const sheets = await getSheetsClient();
       const salesSheetId = process.env.SALES_SHEET_ID;
       const ledgerTab = process.env.COMMISSION_LEDGER_TAB || 'Commission Ledger';
       const statementsTab = process.env.COMMISSION_STATEMENTS_TAB || 'Commission Statements';
 
+      // Row-level dedup: check existing ledger for identical entries
+      let existingLedger = [];
+      try {
+        existingLedger = await fetchSheet(salesSheetId, ledgerTab, 0);
+      } catch (e) { /* empty ledger is fine */ }
+
+      const existingKeys = new Set();
+      for (const lr of existingLedger) {
+        const key = [
+          (lr['Policy #'] || '').trim(),
+          (lr['Statement Date'] || '').trim(),
+          (lr['Commission Amount'] || '0').trim(),
+          (lr['Transaction Type'] || '').trim(),
+          (lr['Agent ID'] || '').trim(),
+        ].join('|');
+        existingKeys.add(key);
+      }
+
+      // Filter out rows that already exist in the ledger
+      const LEDGER_COL = { policyNum: 4, stmtDate: 1, commAmount: 16, txnType: 8, agentId: 7 }; // 0-indexed
       const ledgerRows = allEnriched.map(e => e.row);
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: salesSheetId, range: ledgerTab,
-        valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: ledgerRows },
+      const newRows = ledgerRows.filter(row => {
+        const key = [
+          (row[LEDGER_COL.policyNum] || '').trim(),
+          (row[LEDGER_COL.stmtDate] || '').trim(),
+          (row[LEDGER_COL.commAmount] || '0').trim(),
+          (row[LEDGER_COL.txnType] || '').trim(),
+          (row[LEDGER_COL.agentId] || '').trim(),
+        ].join('|');
+        return !existingKeys.has(key);
       });
-      console.log(`[upload] Wrote ${ledgerRows.length} ledger rows`);
+
+      dupsSkipped = ledgerRows.length - newRows.length;
+      if (dupsSkipped > 0) console.log(`[upload] Skipped ${dupsSkipped} duplicate ledger rows`);
+
+      if (newRows.length > 0) {
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: salesSheetId, range: ledgerTab,
+          valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
+          requestBody: { values: newRows },
+        });
+      }
+      console.log(`[upload] Wrote ${newRows.length} ledger rows (${dupsSkipped} duplicates skipped)`);
 
       const stmtRow = buildStatementRow({
         statementId, carrier: parsed.carrier,
@@ -206,6 +243,7 @@ export async function POST(request) {
         totalRecoveries: Math.round(totalRecoveries * 100) / 100,
         netAmount: Math.round(netAmount * 100) / 100,
         cancellationsDetected,
+        duplicatesSkipped: dupsSkipped || 0,
       },
       cancellationAlerts,
       agentSummary: parsed.agentSummary || [],

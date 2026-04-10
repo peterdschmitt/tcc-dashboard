@@ -78,6 +78,7 @@ const SUB_TABS = [
   { id: 'upload', label: 'Upload' },
   { id: 'history', label: 'History' },
   { id: 'reconciliation', label: 'Reconciliation' },
+  { id: 'waterfall', label: 'Waterfall' },
   { id: 'organize', label: 'Organize Files' },
 ];
 
@@ -120,10 +121,16 @@ export default function CommissionStatementsTab() {
   const unmatchedSort = useSort(null);
   const [reconGroupBy, setReconGroupBy] = useState('none'); // 'none' | 'status' | 'month'
 
+  // Waterfall state
+  const [waterfall, setWaterfall] = useState(null);
+  const [waterfallCollapsed, setWaterfallCollapsed] = useState({});
+  const waterfallSort = useSort('submitDate', 'desc');
+
   // Load data on mount and tab change
   useEffect(() => {
     if (subTab === 'history') loadStatements();
     if (subTab === 'reconciliation') loadReconciliation();
+    if (subTab === 'waterfall') loadWaterfall();
   }, [subTab]);
 
   const loadStatements = async () => {
@@ -140,6 +147,14 @@ export default function CommissionStatementsTab() {
       const data = await res.json();
       setReconciliation(data);
     } catch (e) { console.error('Failed to load reconciliation:', e); }
+  };
+
+  const loadWaterfall = async () => {
+    try {
+      const res = await fetch('/api/commission-statements?view=waterfall');
+      const data = await res.json();
+      setWaterfall(data);
+    } catch (e) { console.error('Failed to load waterfall:', e); }
   };
 
   const loadPending = async () => {
@@ -1045,6 +1060,221 @@ export default function CommissionStatementsTab() {
                   <PolicyCashFlow policyNumber={selectedPolicy.policyNumber} policySummary={selectedPolicy} />
                 </Section>
               )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ WATERFALL VIEW ═══════════════ */}
+      {subTab === 'waterfall' && (
+        <div>
+          {!waterfall ? (
+            <div style={{ textAlign: 'center', padding: 40, color: C.muted }}>Loading waterfall data...</div>
+          ) : (
+            <>
+              {/* KPI Summary */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                <KPICard label="Total Policies" value={waterfall.summary.totalPolicies} color={C.accent} />
+                <KPICard label="Monthly Premium" value={fmtDollar(waterfall.summary.totalPremium)} color={C.text} />
+                <KPICard label="Carrier Paid" value={`${waterfall.summary.paidCount}/${waterfall.summary.totalPolicies}`}
+                  color={waterfall.summary.paidCount > 0 ? C.green : C.muted}
+                  subtitle={fmtDollar(waterfall.summary.totalReceived)} />
+                <KPICard label="Expected Commission" value={fmtDollar(waterfall.summary.totalExpected)} color={C.accent}
+                  subtitle={`${waterfall.summary.paidCount} policies with activity`} />
+                <KPICard label="Outstanding Balance" value={fmtDollar(waterfall.summary.totalBalance)}
+                  color={waterfall.summary.totalBalance > 100 ? C.red : C.green}
+                  tooltip="Positive = carriers owe you. Negative = overpaid." />
+              </div>
+
+              {/* Status Groups */}
+              {(() => {
+                const STATUS_ORDER = [
+                  'Active - In Force', 'Advance Released', 'Submitted - Pending',
+                  'Pending', 'Hold Application', 'NeedReqmnt', 'Initial Premium Not Paid',
+                  'Declined', 'Canceled', 'Cancelled', 'Lapsed', '(Carrier Only)', '(No Status)',
+                ];
+                const STATUS_ICON = {
+                  'Active - In Force': '●', 'Advance Released': '●',
+                  'Submitted - Pending': '◐', 'Pending': '◐',
+                  'Hold Application': '◯', 'NeedReqmnt': '◯', 'Initial Premium Not Paid': '◯',
+                  'Declined': '✗', 'Canceled': '✗', 'Cancelled': '✗', 'Lapsed': '✗',
+                  '(Carrier Only)': '◇', '(No Status)': '?',
+                };
+                const STATUS_COLOR = {
+                  'Active - In Force': C.green, 'Advance Released': C.green,
+                  'Submitted - Pending': C.yellow, 'Pending': C.yellow,
+                  'Hold Application': C.muted, 'NeedReqmnt': C.muted, 'Initial Premium Not Paid': C.muted,
+                  'Declined': C.red, 'Canceled': C.red, 'Cancelled': C.red, 'Lapsed': C.red,
+                  '(Carrier Only)': C.accent, '(No Status)': C.muted,
+                };
+
+                // Group policies by status
+                const groups = {};
+                for (const p of waterfall.policies) {
+                  const st = p.status || '(No Status)';
+                  if (!groups[st]) groups[st] = [];
+                  groups[st].push(p);
+                }
+
+                // Sort groups by STATUS_ORDER
+                const orderedStatuses = STATUS_ORDER.filter(s => groups[s]);
+                // Add any statuses not in our order list
+                Object.keys(groups).forEach(s => { if (!orderedStatuses.includes(s)) orderedStatuses.push(s); });
+
+                return orderedStatuses.map(status => {
+                  const grp = groups[status];
+                  const collapsed = waterfallCollapsed[status];
+                  const grpPrem = grp.reduce((s, p) => s + p.premium, 0);
+                  const grpPaid = grp.filter(p => p.carrierPaid).length;
+                  const grpReceived = grp.reduce((s, p) => s + p.netReceived, 0);
+                  const grpBalance = grp.reduce((s, p) => s + p.balance, 0);
+                  const icon = STATUS_ICON[status] || '?';
+                  const color = STATUS_COLOR[status] || C.muted;
+
+                  const sorted = sortData(grp, waterfallSort.sortKey, waterfallSort.sortDir);
+
+                  return (
+                    <div key={status} style={{ marginTop: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                      {/* Group Header */}
+                      <div
+                        onClick={() => setWaterfallCollapsed(prev => ({ ...prev, [status]: !prev[status] }))}
+                        style={{
+                          padding: '10px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
+                          borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
+                          background: collapsed ? 'transparent' : 'rgba(255,255,255,0.02)',
+                        }}
+                      >
+                        <span style={{ color: C.muted, fontSize: 10, width: 12 }}>{collapsed ? '▸' : '▾'}</span>
+                        <span style={{ color, fontSize: 14, fontWeight: 700 }}>{icon}</span>
+                        <span style={{ color, fontSize: 13, fontWeight: 700 }}>{status}</span>
+                        <span style={{ color: C.muted, fontSize: 11 }}>— {grp.length} policies</span>
+                        <span style={{ color: C.muted, fontSize: 11, marginLeft: 'auto' }}>
+                          {fmtDollar(grpPrem)}/mo
+                        </span>
+                        <span style={{ color: grpPaid > 0 ? C.green : C.muted, fontSize: 10 }}>
+                          Paid {grpPaid}/{grp.length}
+                        </span>
+                        {grpReceived !== 0 && (
+                          <span style={{ color: grpReceived >= 0 ? C.green : C.red, fontSize: 10, fontFamily: C.mono }}>
+                            Rcvd {fmtDollar(grpReceived)}
+                          </span>
+                        )}
+                        {grpBalance !== 0 && (
+                          <span style={{ color: grpBalance > 0 ? C.yellow : C.green, fontSize: 10, fontFamily: C.mono }}>
+                            Bal {fmtDollar(grpBalance)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Table */}
+                      {!collapsed && (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                            <thead>
+                              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <SortTh label="Policy #" field="policyNumber" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Insured" field="insuredName" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Agent" field="agent" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Carrier" field="carrier" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Premium" field="premium" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
+                                <SortTh label="Submitted" field="submitDate" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Effective" field="effectiveDate" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
+                                <SortTh label="Paid" field="carrierPaid" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'center' }} />
+                                <SortTh label="Expected" field="expectedCommission" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
+                                <SortTh label="Received" field="netReceived" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
+                                <SortTh label="Balance" field="balance" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
+                                <th style={{ padding: '6px 10px', fontSize: 9, color: C.muted, width: 30 }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sorted.map((p, i) => {
+                                const flag = p.unpaid ? '⚠' : p.hasChargeback && p.netReceived < 0 ? '‼' : '';
+                                return (
+                                  <tr key={p.policyNumber} style={{
+                                    borderBottom: `1px solid ${C.border}`,
+                                    background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                                  }}>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text }}>{p.policyNumber}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 10, color: C.text, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.insuredName}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 10, color: C.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.agent}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.carrier}</td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text, textAlign: 'right' }}>{fmtDollar(p.premium)}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted }}>{p.submitDate}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted }}>{p.effectiveDate}</td>
+                                    <td style={{ padding: '5px 10px', textAlign: 'center', fontSize: 12 }}>
+                                      {p.carrierPaid
+                                        ? <span style={{ color: C.green }}>✓</span>
+                                        : <span style={{ color: C.muted, fontSize: 9 }}>—</span>}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: p.expectedCommission > 0 ? C.text : C.muted, textAlign: 'right' }}>
+                                      {p.expectedCommission > 0 ? fmtDollar(p.expectedCommission) : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, textAlign: 'right',
+                                      color: p.netReceived > 0 ? C.green : p.netReceived < 0 ? C.red : C.muted }}>
+                                      {p.carrierPaid ? fmtDollar(p.netReceived) : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, textAlign: 'right',
+                                      color: p.balance > 1 ? C.yellow : p.balance < -1 ? C.green : C.muted }}>
+                                      {p.expectedCommission > 0 ? fmtDollar(p.balance) : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontSize: 12, textAlign: 'center', color: flag === '⚠' ? C.yellow : flag === '‼' ? C.red : 'transparent' }}>
+                                      {flag}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {/* Subtotal row */}
+                              <tr style={{ borderTop: `2px solid ${C.border}`, background: 'rgba(91,159,255,0.05)' }}>
+                                <td colSpan={4} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: C.accent }}>
+                                  {grp.length} {grp.length === 1 ? 'policy' : 'policies'}
+                                </td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
+                                  {fmtDollar(grpPrem)}
+                                </td>
+                                <td colSpan={2}></td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center', fontSize: 10, color: C.accent }}>{grpPaid}</td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
+                                  {fmtDollar(grp.reduce((s, p) => s + p.expectedCommission, 0))}
+                                </td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, textAlign: 'right',
+                                  color: grpReceived >= 0 ? C.green : C.red }}>
+                                  {fmtDollar(grpReceived)}
+                                </td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, textAlign: 'right',
+                                  color: grpBalance > 1 ? C.yellow : C.green }}>
+                                  {fmtDollar(grpBalance)}
+                                </td>
+                                <td></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
+
+              {/* Gap Analysis */}
+              <Section title="Gap Analysis">
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <KPICard label="Active — Unpaid"
+                    value={waterfall.gaps.unpaidActive.count}
+                    color={waterfall.gaps.unpaidActive.count > 0 ? C.red : C.green}
+                    subtitle={`${fmtDollar(waterfall.gaps.unpaidActive.premium)}/mo at risk`}
+                    tooltip="Active policies where the carrier has not paid any commission yet" />
+                  <KPICard label="Pending — Unpaid"
+                    value={waterfall.gaps.unpaidPending.count}
+                    color={waterfall.gaps.unpaidPending.count > 0 ? C.yellow : C.green}
+                    subtitle={`${fmtDollar(waterfall.gaps.unpaidPending.premium)}/mo pending`}
+                    tooltip="Submitted/pending policies awaiting carrier payment" />
+                  <KPICard label="Chargebacks"
+                    value={waterfall.gaps.chargebacks.count}
+                    color={waterfall.gaps.chargebacks.count > 0 ? C.red : C.green}
+                    subtitle={fmtDollar(waterfall.gaps.chargebacks.amount)}
+                    tooltip="Policies where the carrier clawed back commission" />
+                </div>
+              </Section>
             </>
           )}
         </div>
