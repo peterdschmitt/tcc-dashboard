@@ -68,7 +68,7 @@ export async function GET(request, { params }) {
       leadSource: salesRow['Lead Source'] || '',
       paymentType: salesRow['Payment Type'] || '',
       state: salesRow['State'] || '',
-      phone: salesRow['Phone Number'] || '',
+      phone: salesRow['Phone Number (US format)'] || salesRow['Phone Number'] || '',
       textFriendly: salesRow['Text Friendly'] || '',
     } : null;
 

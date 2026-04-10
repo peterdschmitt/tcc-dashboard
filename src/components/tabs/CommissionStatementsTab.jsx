@@ -79,6 +79,7 @@ const SUB_TABS = [
   { id: 'history', label: 'History' },
   { id: 'reconciliation', label: 'Reconciliation' },
   { id: 'waterfall', label: 'Waterfall' },
+  { id: 'anticipated', label: 'Anticipated Payments' },
   { id: 'organize', label: 'Organize Files' },
 ];
 
@@ -127,11 +128,18 @@ export default function CommissionStatementsTab() {
   const waterfallSort = useSort('submitDate', 'desc');
   const [waterfallDetail, setWaterfallDetail] = useState(null); // selected policy for drill-down
 
+  // Anticipated payments state
+  const [anticipated, setAnticipated] = useState(null);
+  const [anticipatedDetail, setAnticipatedDetail] = useState(null);
+  const [anticipatedCollapsed, setAnticipatedCollapsed] = useState({});
+  const anticipatedSort = useSort('daysSinceSubmit', 'desc');
+
   // Load data on mount and tab change
   useEffect(() => {
     if (subTab === 'history') loadStatements();
     if (subTab === 'reconciliation') loadReconciliation();
     if (subTab === 'waterfall') loadWaterfall();
+    if (subTab === 'anticipated') loadAnticipated();
   }, [subTab]);
 
   const loadStatements = async () => {
@@ -156,6 +164,14 @@ export default function CommissionStatementsTab() {
       const data = await res.json();
       setWaterfall(data);
     } catch (e) { console.error('Failed to load waterfall:', e); }
+  };
+
+  const loadAnticipated = async () => {
+    try {
+      const res = await fetch('/api/commission-statements?view=anticipated');
+      const data = await res.json();
+      setAnticipated(data);
+    } catch (e) { console.error('Failed to load anticipated:', e); }
   };
 
   const loadPending = async () => {
@@ -1385,6 +1401,200 @@ export default function CommissionStatementsTab() {
                     tooltip="Policies where the carrier clawed back commission" />
                 </div>
               </Section>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ ANTICIPATED PAYMENTS VIEW ═══════════════ */}
+      {subTab === 'anticipated' && (
+        <div>
+          {!anticipated ? (
+            <div style={{ textAlign: 'center', padding: 40, color: C.muted }}>Loading anticipated payments...</div>
+          ) : anticipatedDetail ? (
+            <div>
+              <button
+                onClick={() => setAnticipatedDetail(null)}
+                style={{ background: 'none', border: `1px solid ${C.border}`, color: C.accent, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 11, marginBottom: 12 }}
+              >
+                ← Back to Anticipated Payments
+              </button>
+              <PolicyCashFlow policyNumber={anticipatedDetail.policyNumber} policySummary={anticipatedDetail} />
+            </div>
+          ) : (
+            <>
+              {/* KPI Summary */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                <KPICard label="Anticipated" value={anticipated.summary.anticipated.count}
+                  color={C.accent} subtitle={`${fmtDollar(anticipated.summary.anticipated.premium)}/mo`}
+                  tooltip="Active, Pending, or Unknown status — payment expected" />
+                <KPICard label="Expected Commission" value={fmtDollar(anticipated.summary.anticipated.expectedCommission)}
+                  color={C.green} tooltip="Total commission expected from anticipated policies" />
+                <KPICard label="On Hold" value={anticipated.summary.onHold.count}
+                  color={C.yellow} subtitle={`${fmtDollar(anticipated.summary.onHold.premium)}/mo`}
+                  tooltip="Hold Application, NeedReqmnt, Not Yet Paid" />
+                <KPICard label="Unlikely" value={anticipated.summary.unlikely.count}
+                  color={C.red} subtitle={`${fmtDollar(anticipated.summary.unlikely.premium)}/mo`}
+                  tooltip="Declined, Canceled, Lapsed — payment unlikely" />
+                <div style={{ marginLeft: 'auto', alignSelf: 'center' }}>
+                  <button
+                    onClick={() => {
+                      import('xlsx').then(({ utils, writeFile }) => {
+                        const rows = anticipated.policies.map(p => ({
+                          'Category': anticipated.categories.anticipated.includes(p.status) ? 'Anticipated'
+                            : anticipated.categories.onHold.includes(p.status) ? 'On Hold' : 'Unlikely',
+                          'Status': p.status, 'Policy #': p.policyNumber, 'Insured': p.insuredName,
+                          'Agent': p.agent, 'Carrier': p.carrier, 'Product': p.product,
+                          'Premium': p.premium, 'Expected Commission': p.expectedCommission,
+                          'Phone': p.phone, 'Text Friendly': p.textFriendly,
+                          'Submitted': p.submitDate, 'Effective': p.effectiveDate,
+                          'Outcome': p.outcome, 'Days Since Submit': p.daysSinceSubmit,
+                        }));
+                        const ws = utils.json_to_sheet(rows);
+                        const wb = utils.book_new();
+                        utils.book_append_sheet(wb, ws, 'Anticipated');
+                        writeFile(wb, `TCC_Anticipated_Payments_${new Date().toISOString().slice(0,10)}.xlsx`);
+                      });
+                    }}
+                    style={{ background: C.accent, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
+                  >
+                    Export Excel
+                  </button>
+                </div>
+              </div>
+
+              {/* Aging Buckets */}
+              <Section title="Aging — Days Since Submission">
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {[['0-30', '0–30 Days', C.green], ['31-60', '31–60 Days', C.yellow], ['61-90', '61–90 Days', C.yellow], ['90+', '90+ Days', C.red], ['unknown', 'No Date', C.muted]].map(([key, label, color]) => (
+                    <KPICard key={key} label={label}
+                      value={anticipated.aging[key]?.count || 0}
+                      color={(anticipated.aging[key]?.count || 0) > 0 ? color : C.muted}
+                      subtitle={`${fmtDollar(anticipated.aging[key]?.premium || 0)}/mo`} />
+                  ))}
+                </div>
+              </Section>
+
+              {/* Policy Groups: Anticipated → On Hold → Unlikely */}
+              {(() => {
+                const GROUPS = [
+                  { key: 'anticipated', label: 'Anticipated — Payment Expected', color: C.green, icon: '●',
+                    filter: p => anticipated.categories.anticipated.includes(p.status) },
+                  { key: 'onHold', label: 'On Hold — Action Required', color: C.yellow, icon: '◐',
+                    filter: p => anticipated.categories.onHold.includes(p.status) },
+                  { key: 'unlikely', label: 'Unlikely — Declined / Canceled', color: C.red, icon: '✗',
+                    filter: p => !anticipated.categories.anticipated.includes(p.status) && !anticipated.categories.onHold.includes(p.status) },
+                ];
+
+                const thStyle = { padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' };
+                const thRight = { ...thStyle, textAlign: 'right' };
+                const thCenter = { ...thStyle, textAlign: 'center' };
+
+                return GROUPS.map(({ key, label, color, icon, filter }) => {
+                  const grp = anticipated.policies.filter(filter);
+                  if (grp.length === 0) return null;
+                  const collapsed = anticipatedCollapsed[key];
+                  const grpPrem = grp.reduce((s, p) => s + p.premium, 0);
+                  const grpExp = grp.reduce((s, p) => s + p.expectedCommission, 0);
+                  const sorted = sortData(grp, anticipatedSort.sortKey, anticipatedSort.sortDir);
+
+                  return (
+                    <div key={key} style={{ marginTop: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                      <div
+                        onClick={() => setAnticipatedCollapsed(prev => ({ ...prev, [key]: !prev[key] }))}
+                        style={{
+                          padding: '10px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
+                          borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
+                          background: collapsed ? 'transparent' : 'rgba(255,255,255,0.02)',
+                        }}
+                      >
+                        <span style={{ color: C.muted, fontSize: 10, width: 12 }}>{collapsed ? '▸' : '▾'}</span>
+                        <span style={{ color, fontSize: 14, fontWeight: 700 }}>{icon}</span>
+                        <span style={{ color, fontSize: 13, fontWeight: 700 }}>{label}</span>
+                        <span style={{ color: C.muted, fontSize: 11 }}>— {grp.length} policies</span>
+                        <span style={{ color: C.muted, fontSize: 11, marginLeft: 'auto' }}>{fmtDollar(grpPrem)}/mo</span>
+                        <span style={{ color, fontSize: 10, fontFamily: C.mono }}>Exp {fmtDollar(grpExp)}</span>
+                      </div>
+
+                      {!collapsed && (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                            <thead>
+                              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <SortTh label="Policy #" field="policyNumber" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Insured" field="insuredName" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Agent" field="agent" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Carrier" field="carrier" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Status" field="status" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Premium" field="premium" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thRight} />
+                                <SortTh label="Expected" field="expectedCommission" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thRight} />
+                                <SortTh label="Phone" field="phone" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Text" field="textFriendly" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thCenter} />
+                                <SortTh label="Submitted" field="submitDate" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                                <SortTh label="Days" field="daysSinceSubmit" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thRight}
+                                  tooltip="Days since application submitted" />
+                                <SortTh label="Outcome" field="outcome" {...anticipatedSort} onSort={anticipatedSort.toggle} style={thStyle} />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sorted.map((p, i) => {
+                                const agingColor = p.daysSinceSubmit == null ? C.muted
+                                  : p.daysSinceSubmit <= 30 ? C.green
+                                  : p.daysSinceSubmit <= 60 ? C.yellow
+                                  : C.red;
+                                return (
+                                  <tr key={p.policyNumber}
+                                    onClick={() => setAnticipatedDetail(p)}
+                                    style={{
+                                      borderBottom: `1px solid ${C.border}`,
+                                      background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                                      cursor: 'pointer',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(91,159,255,0.08)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'}
+                                  >
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.accent }}>{p.policyNumber}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 10, color: C.text, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.insuredName}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 10, color: C.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.agent}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.carrier}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: color }}>{p.status}</td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text, textAlign: 'right' }}>{fmtDollar(p.premium)}</td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text, textAlign: 'right' }}>
+                                      {p.expectedCommission > 0 ? fmtDollar(p.expectedCommission) : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 9, color: C.muted, whiteSpace: 'nowrap' }}>{p.phone || '—'}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, textAlign: 'center', color: p.textFriendly?.toLowerCase() === 'yes' ? C.green : C.muted }}>
+                                      {p.textFriendly ? (p.textFriendly.toLowerCase() === 'yes' ? '✓' : p.textFriendly) : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted }}>{p.submitDate}</td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, textAlign: 'right', color: agingColor, fontWeight: 700 }}>
+                                      {p.daysSinceSubmit != null ? p.daysSinceSubmit : '—'}
+                                    </td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.outcome || '—'}</td>
+                                  </tr>
+                                );
+                              })}
+                              {/* Subtotal */}
+                              <tr style={{ borderTop: `2px solid ${C.border}`, background: 'rgba(91,159,255,0.05)' }}>
+                                <td colSpan={5} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: C.accent }}>
+                                  {grp.length} {grp.length === 1 ? 'policy' : 'policies'}
+                                </td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
+                                  {fmtDollar(grpPrem)}
+                                </td>
+                                <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
+                                  {fmtDollar(grpExp)}
+                                </td>
+                                <td colSpan={5}></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </>
           )}
         </div>

@@ -285,7 +285,7 @@ export async function GET(request) {
           product,
           premium,
           agent: sr['Agent'] || '',
-          phone: sr['Phone Number']?.trim() || '',
+          phone: (sr['Phone Number (US format)'] || sr['Phone Number'] || '').trim(),
           textFriendly: sr['Text Friendly']?.trim() || '',
           status: sr['Policy Status']?.trim() || normalizePlacedStatus(sr['Placed?']) || '',
           submitDate: sr['Application Submitted Date']?.trim() || '',
@@ -403,6 +403,135 @@ export async function GET(request) {
           unpaidActive: { count: unpaidActive.length, premium: Math.round(unpaidActive.reduce((s, p) => s + p.premium, 0) * 100) / 100 },
           unpaidPending: { count: unpaidPending.length, premium: Math.round(unpaidPending.reduce((s, p) => s + p.premium, 0) * 100) / 100 },
           chargebacks: { count: chargebacks.length, amount: Math.round(chargebacks.reduce((s, p) => s + p.totalClawback, 0) * 100) / 100 },
+        },
+      });
+    }
+
+    // ─── Anticipated Payments view ────────────────────
+    // Policies where we expect carrier payment but haven't received it yet
+    if (view === 'anticipated') {
+      const [salesRows, ledgerRows, commRows] = await Promise.all([
+        fetchSheet(salesSheetId, process.env.SALES_TAB_NAME || 'Sheet1', 0),
+        fetchSheet(salesSheetId, ledgerTab, 60),
+        fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600),
+      ]);
+
+      // Deduplicate ledger
+      const seenLedger = new Set();
+      const dedupedLedger = [];
+      for (const lr of ledgerRows) {
+        const key = [
+          (lr['Policy #'] || '').trim(),
+          (lr['Statement Date'] || '').trim(),
+          (lr['Commission Amount'] || '0').trim(),
+          (lr['Transaction Type'] || '').trim(),
+          (lr['Agent ID'] || '').trim(),
+        ].join('|');
+        if (seenLedger.has(key)) continue;
+        seenLedger.add(key);
+        dedupedLedger.push(lr);
+      }
+
+      const commRates = commRows.map(r => ({
+        carrier: r['Carrier']?.trim(),
+        product: r['Product']?.trim(),
+        ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
+        commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
+      }));
+
+      // Build policies with commission data
+      const policyMap = {};
+      for (const sr of salesRows) {
+        const pn = (sr['Policy #'] || '').trim();
+        if (!pn) continue;
+        const carrier = (sr['Carrier + Product + Payout'] || '').split(',')[0]?.trim() || '';
+        const product = (sr['Carrier + Product + Payout'] || '').split(',').slice(1).join(',').split(',')[0]?.trim() || '';
+        const premium = parseFloat(sr['Monthly Premium']) || 0;
+        const commResult = calcCommission(premium, carrier, product, 0, commRates);
+        const advMonths = commResult.advanceMonths || 9;
+        const expectedComm = commResult.matched ? premium * commResult.rate * advMonths : 0;
+
+        policyMap[pn] = {
+          policyNumber: pn,
+          insuredName: `${sr['First Name'] || ''} ${sr['Last Name'] || ''}`.trim(),
+          carrier, product, premium,
+          agent: sr['Agent'] || '',
+          phone: (sr['Phone Number (US format)'] || sr['Phone Number'] || '').trim(),
+          textFriendly: sr['Text Friendly']?.trim() || '',
+          status: sr['Policy Status']?.trim() || normalizePlacedStatus(sr['Placed?']) || '',
+          submitDate: sr['Application Submitted Date']?.trim() || '',
+          effectiveDate: sr['Effective Date']?.trim() || '',
+          outcome: sr['Outcome at Application Submission']?.trim() || '',
+          expectedCommission: Math.round(expectedComm * 100) / 100,
+          advanceMonths: advMonths,
+          commissionRate: commResult.matched ? commResult.rate : null,
+          hasPaid: false,
+        };
+      }
+
+      // Mark policies that have ledger entries
+      for (const lr of dedupedLedger) {
+        const matchedPn = (lr['Matched Policy #'] || '').trim();
+        if (matchedPn && policyMap[matchedPn]) {
+          const amount = parseFloat(lr['Commission Amount']) || 0;
+          if (amount > 0) policyMap[matchedPn].hasPaid = true;
+        }
+      }
+
+      // Filter: unpaid + premium > 0
+      const allUnpaid = Object.values(policyMap).filter(p => !p.hasPaid && p.premium > 0);
+
+      // Categorize: anticipated (good-standing) vs unlikely
+      const ANTICIPATED_STATUSES = ['Active - In Force', 'Advance Released', 'Submitted - Pending', 'Pending', 'Unknown'];
+      const HOLD_STATUSES = ['Hold Application', 'NeedReqmnt', 'Initial Premium Not Paid', 'Not Yet Paid'];
+
+      const anticipated = allUnpaid.filter(p => ANTICIPATED_STATUSES.includes(p.status));
+      const onHold = allUnpaid.filter(p => HOLD_STATUSES.includes(p.status));
+      const unlikely = allUnpaid.filter(p => !ANTICIPATED_STATUSES.includes(p.status) && !HOLD_STATUSES.includes(p.status));
+
+      const sumPolicies = (arr) => ({
+        count: arr.length,
+        premium: Math.round(arr.reduce((s, p) => s + p.premium, 0) * 100) / 100,
+        expectedCommission: Math.round(arr.reduce((s, p) => s + p.expectedCommission, 0) * 100) / 100,
+      });
+
+      // Days since submission for aging
+      const now = new Date();
+      const withAging = [...anticipated, ...onHold, ...unlikely].map(p => {
+        let daysSinceSubmit = null;
+        if (p.submitDate) {
+          const parts = p.submitDate.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+          if (parts) {
+            const yr = parts[3].length === 2 ? 2000 + parseInt(parts[3]) : parseInt(parts[3]);
+            const dt = new Date(yr, parseInt(parts[1]) - 1, parseInt(parts[2]));
+            daysSinceSubmit = Math.floor((now - dt) / 86400000);
+          }
+        }
+        return { ...p, daysSinceSubmit };
+      });
+
+      // Aging buckets for anticipated
+      const anticipatedWithAge = withAging.filter(p => ANTICIPATED_STATUSES.includes(p.status));
+      const aging = {
+        '0-30': anticipatedWithAge.filter(p => p.daysSinceSubmit != null && p.daysSinceSubmit <= 30),
+        '31-60': anticipatedWithAge.filter(p => p.daysSinceSubmit != null && p.daysSinceSubmit > 30 && p.daysSinceSubmit <= 60),
+        '61-90': anticipatedWithAge.filter(p => p.daysSinceSubmit != null && p.daysSinceSubmit > 60 && p.daysSinceSubmit <= 90),
+        '90+': anticipatedWithAge.filter(p => p.daysSinceSubmit != null && p.daysSinceSubmit > 90),
+        'unknown': anticipatedWithAge.filter(p => p.daysSinceSubmit == null),
+      };
+
+      return NextResponse.json({
+        policies: withAging,
+        summary: {
+          total: sumPolicies(allUnpaid),
+          anticipated: sumPolicies(anticipated),
+          onHold: sumPolicies(onHold),
+          unlikely: sumPolicies(unlikely),
+        },
+        aging: Object.fromEntries(Object.entries(aging).map(([k, arr]) => [k, sumPolicies(arr)])),
+        categories: {
+          anticipated: ANTICIPATED_STATUSES,
+          onHold: HOLD_STATUSES,
         },
       });
     }
