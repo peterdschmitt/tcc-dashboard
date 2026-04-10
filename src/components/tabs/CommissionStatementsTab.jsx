@@ -125,6 +125,7 @@ export default function CommissionStatementsTab() {
   const [waterfall, setWaterfall] = useState(null);
   const [waterfallCollapsed, setWaterfallCollapsed] = useState({});
   const waterfallSort = useSort('submitDate', 'desc');
+  const [waterfallDetail, setWaterfallDetail] = useState(null); // selected policy for drill-down
 
   // Load data on mount and tab change
   useEffect(() => {
@@ -1070,10 +1071,21 @@ export default function CommissionStatementsTab() {
         <div>
           {!waterfall ? (
             <div style={{ textAlign: 'center', padding: 40, color: C.muted }}>Loading waterfall data...</div>
+          ) : waterfallDetail ? (
+            /* ── Policy Detail Drill-Down ── */
+            <div>
+              <button
+                onClick={() => setWaterfallDetail(null)}
+                style={{ background: 'none', border: `1px solid ${C.border}`, color: C.accent, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 11, marginBottom: 12 }}
+              >
+                ← Back to Waterfall
+              </button>
+              <PolicyCashFlow policyNumber={waterfallDetail.policyNumber} policySummary={waterfallDetail} />
+            </div>
           ) : (
             <>
-              {/* KPI Summary */}
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+              {/* KPI Summary + Export Button */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
                 <KPICard label="Total Policies" value={waterfall.summary.totalPolicies} color={C.accent} />
                 <KPICard label="Monthly Premium" value={fmtDollar(waterfall.summary.totalPremium)} color={C.text} />
                 <KPICard label="Carrier Paid" value={`${waterfall.summary.paidCount}/${waterfall.summary.totalPolicies}`}
@@ -1084,10 +1096,56 @@ export default function CommissionStatementsTab() {
                 <KPICard label="Outstanding Balance" value={fmtDollar(waterfall.summary.totalBalance)}
                   color={waterfall.summary.totalBalance > 100 ? C.red : C.green}
                   tooltip="Positive = carriers owe you. Negative = overpaid." />
+                <div style={{ marginLeft: 'auto', alignSelf: 'center' }}>
+                  <button
+                    onClick={() => {
+                      import('xlsx').then(({ utils, writeFile }) => {
+                        const months = waterfall.months || [];
+                        const rows = waterfall.policies.map(p => {
+                          const row = {
+                            'Status': p.status,
+                            'Policy #': p.policyNumber,
+                            'Insured': p.insuredName,
+                            'Agent': p.agent,
+                            'Carrier': p.carrier,
+                            'Product': p.product,
+                            'Premium': p.premium,
+                            'Submitted': p.submitDate,
+                            'Effective': p.effectiveDate,
+                            'Paid': p.carrierPaid ? 'Yes' : 'No',
+                            'Expected': p.expectedCommission,
+                            'Received': p.netReceived,
+                            'Balance': p.balance,
+                          };
+                          // Add monthly columns
+                          for (const m of months) {
+                            const label = new Date(m + '-15').toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                            row[label] = (p.monthlyPayments && p.monthlyPayments[m]) || 0;
+                          }
+                          row['Clawbacks'] = p.totalClawback;
+                          row['Flags'] = p.unpaid ? 'Unpaid' : p.hasChargeback ? 'Chargeback' : '';
+                          return row;
+                        });
+                        const ws = utils.json_to_sheet(rows);
+                        const wb = utils.book_new();
+                        utils.book_append_sheet(wb, ws, 'Waterfall');
+                        const date = new Date().toISOString().slice(0, 10);
+                        writeFile(wb, `TCC_Waterfall_${date}.xlsx`);
+                      });
+                    }}
+                    style={{
+                      background: C.accent, color: '#fff', border: 'none', padding: '8px 16px',
+                      borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                    }}
+                  >
+                    Export Excel
+                  </button>
+                </div>
               </div>
 
               {/* Status Groups */}
               {(() => {
+                const months = waterfall.months || [];
                 const STATUS_ORDER = [
                   'Active - In Force', 'Advance Released', 'Submitted - Pending',
                   'Pending', 'Hold Application', 'NeedReqmnt', 'Initial Premium Not Paid',
@@ -1108,6 +1166,16 @@ export default function CommissionStatementsTab() {
                   '(Carrier Only)': C.accent, '(No Status)': C.muted,
                 };
 
+                const thStyle = { padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' };
+                const thRight = { ...thStyle, textAlign: 'right' };
+                const thCenter = { ...thStyle, textAlign: 'center' };
+
+                // Format month header label (e.g. "2026-01" → "Jan 26")
+                const fmtMonth = (m) => {
+                  const d = new Date(m + '-15');
+                  return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                };
+
                 // Group policies by status
                 const groups = {};
                 for (const p of waterfall.policies) {
@@ -1118,7 +1186,6 @@ export default function CommissionStatementsTab() {
 
                 // Sort groups by STATUS_ORDER
                 const orderedStatuses = STATUS_ORDER.filter(s => groups[s]);
-                // Add any statuses not in our order list
                 Object.keys(groups).forEach(s => { if (!orderedStatuses.includes(s)) orderedStatuses.push(s); });
 
                 return orderedStatuses.map(status => {
@@ -1172,17 +1239,22 @@ export default function CommissionStatementsTab() {
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                             <thead>
                               <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                                <SortTh label="Policy #" field="policyNumber" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Insured" field="insuredName" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Agent" field="agent" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Carrier" field="carrier" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Premium" field="premium" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
-                                <SortTh label="Submitted" field="submitDate" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Effective" field="effectiveDate" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' }} />
-                                <SortTh label="Paid" field="carrierPaid" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'center' }} />
-                                <SortTh label="Expected" field="expectedCommission" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
-                                <SortTh label="Received" field="netReceived" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
-                                <SortTh label="Balance" field="balance" {...waterfallSort} onSort={waterfallSort.toggle} style={{ padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'right' }} />
+                                <SortTh label="Policy #" field="policyNumber" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Insured" field="insuredName" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Agent" field="agent" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Carrier" field="carrier" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Premium" field="premium" {...waterfallSort} onSort={waterfallSort.toggle} style={thRight} />
+                                <SortTh label="Submitted" field="submitDate" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Effective" field="effectiveDate" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Paid" field="carrierPaid" {...waterfallSort} onSort={waterfallSort.toggle} style={thCenter} />
+                                <SortTh label="Expected" field="expectedCommission" {...waterfallSort} onSort={waterfallSort.toggle} style={thRight} />
+                                {months.map(m => (
+                                  <th key={m} style={{ padding: '6px 6px', fontSize: 8, color: C.muted, textAlign: 'right', whiteSpace: 'nowrap', borderLeft: `1px solid ${C.border}` }}>
+                                    {fmtMonth(m)}
+                                  </th>
+                                ))}
+                                <SortTh label="Total Rcvd" field="netReceived" {...waterfallSort} onSort={waterfallSort.toggle} style={{ ...thRight, borderLeft: months.length > 0 ? `1px solid ${C.border}` : 'none' }} />
+                                <SortTh label="Balance" field="balance" {...waterfallSort} onSort={waterfallSort.toggle} style={thRight} />
                                 <th style={{ padding: '6px 10px', fontSize: 9, color: C.muted, width: 30 }}></th>
                               </tr>
                             </thead>
@@ -1190,11 +1262,17 @@ export default function CommissionStatementsTab() {
                               {sorted.map((p, i) => {
                                 const flag = p.unpaid ? '⚠' : p.hasChargeback && p.netReceived < 0 ? '‼' : '';
                                 return (
-                                  <tr key={p.policyNumber} style={{
-                                    borderBottom: `1px solid ${C.border}`,
-                                    background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
-                                  }}>
-                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text }}>{p.policyNumber}</td>
+                                  <tr key={p.policyNumber}
+                                    onClick={() => setWaterfallDetail(p)}
+                                    style={{
+                                      borderBottom: `1px solid ${C.border}`,
+                                      background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                                      cursor: 'pointer',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(91,159,255,0.08)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'}
+                                  >
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.accent }}>{p.policyNumber}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 10, color: C.text, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.insuredName}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 10, color: C.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.agent}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.carrier}</td>
@@ -1209,7 +1287,20 @@ export default function CommissionStatementsTab() {
                                     <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: p.expectedCommission > 0 ? C.text : C.muted, textAlign: 'right' }}>
                                       {p.expectedCommission > 0 ? fmtDollar(p.expectedCommission) : '—'}
                                     </td>
+                                    {months.map(m => {
+                                      const amt = p.monthlyPayments?.[m] || 0;
+                                      return (
+                                        <td key={m} style={{
+                                          padding: '5px 6px', fontFamily: C.mono, fontSize: 9, textAlign: 'right',
+                                          borderLeft: `1px solid ${C.border}`,
+                                          color: amt > 0 ? C.green : amt < 0 ? C.red : 'rgba(143,163,190,0.25)',
+                                        }}>
+                                          {amt !== 0 ? fmtDollar(amt) : '·'}
+                                        </td>
+                                      );
+                                    })}
                                     <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, textAlign: 'right',
+                                      borderLeft: months.length > 0 ? `1px solid ${C.border}` : 'none',
                                       color: p.netReceived > 0 ? C.green : p.netReceived < 0 ? C.red : C.muted }}>
                                       {p.carrierPaid ? fmtDollar(p.netReceived) : '—'}
                                     </td>
@@ -1236,7 +1327,20 @@ export default function CommissionStatementsTab() {
                                 <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
                                   {fmtDollar(grp.reduce((s, p) => s + p.expectedCommission, 0))}
                                 </td>
+                                {months.map(m => {
+                                  const mTotal = grp.reduce((s, p) => s + (p.monthlyPayments?.[m] || 0), 0);
+                                  return (
+                                    <td key={m} style={{
+                                      padding: '5px 6px', fontFamily: C.mono, fontSize: 9, textAlign: 'right', fontWeight: 700,
+                                      borderLeft: `1px solid ${C.border}`,
+                                      color: mTotal > 0 ? C.green : mTotal < 0 ? C.red : C.muted,
+                                    }}>
+                                      {mTotal !== 0 ? fmtDollar(mTotal) : '·'}
+                                    </td>
+                                  );
+                                })}
                                 <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, textAlign: 'right',
+                                  borderLeft: months.length > 0 ? `1px solid ${C.border}` : 'none',
                                   color: grpReceived >= 0 ? C.green : C.red }}>
                                   {fmtDollar(grpReceived)}
                                 </td>

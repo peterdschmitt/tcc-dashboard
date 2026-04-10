@@ -298,7 +298,10 @@ export async function GET(request) {
         };
       }
 
-      // Aggregate deduped ledger entries
+      // Collect all unique months from ledger for column headers
+      const allMonths = new Set();
+
+      // Aggregate deduped ledger entries (with monthly breakdown)
       for (const lr of dedupedLedger) {
         const matchedPn = (lr['Matched Policy #'] || '').trim();
         const amount = parseFloat(lr['Commission Amount']) || 0;
@@ -306,8 +309,29 @@ export async function GET(request) {
           if (amount > 0) policyMap[matchedPn].totalPaid += amount;
           else policyMap[matchedPn].totalClawback += Math.abs(amount);
           policyMap[matchedPn].entries++;
+
+          // Monthly breakdown — parse statement date to YYYY-MM
+          const rawDate = (lr['Statement Date'] || '').trim();
+          let monthKey = null;
+          // Try MM/DD/YYYY or M/D/YYYY
+          const mdyMatch = rawDate.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+          if (mdyMatch) {
+            monthKey = mdyMatch[3] + '-' + mdyMatch[1].padStart(2, '0');
+          } else {
+            // Try YYYY-MM-DD
+            const isoMatch = rawDate.match(/(\d{4})-(\d{1,2})/);
+            if (isoMatch) monthKey = isoMatch[1] + '-' + isoMatch[2].padStart(2, '0');
+          }
+          if (monthKey) {
+            allMonths.add(monthKey);
+            if (!policyMap[matchedPn].monthlyPayments) policyMap[matchedPn].monthlyPayments = {};
+            policyMap[matchedPn].monthlyPayments[monthKey] = (policyMap[matchedPn].monthlyPayments[monthKey] || 0) + amount;
+          }
         }
       }
+
+      // Sort months chronologically
+      const sortedMonths = [...allMonths].sort();
 
       // Finalize all policies
       const allPolicies = Object.values(policyMap).map(p => {
@@ -316,6 +340,13 @@ export async function GET(request) {
         const netReceived = Math.round((p.totalPaid - p.totalClawback) * 100) / 100;
         const balance = Math.round((p.expectedCommission - totalPaid + totalClawback) * 100) / 100;
         const carrierPaid = p.entries > 0;
+        // Round monthly payments
+        const monthlyPayments = {};
+        if (p.monthlyPayments) {
+          for (const [m, amt] of Object.entries(p.monthlyPayments)) {
+            monthlyPayments[m] = Math.round(amt * 100) / 100;
+          }
+        }
         return {
           ...p,
           totalPaid,
@@ -325,6 +356,7 @@ export async function GET(request) {
           carrierPaid, // true if any commission statement entry exists
           hasChargeback: totalClawback > 0,
           unpaid: ['Active - In Force', 'Advance Released'].includes(p.status) && !carrierPaid && p.premium > 0,
+          monthlyPayments,
         };
       });
 
@@ -355,6 +387,7 @@ export async function GET(request) {
 
       return NextResponse.json({
         policies: allPolicies,
+        months: sortedMonths, // e.g. ['2025-11','2025-12','2026-01',...]
         summary: {
           totalPolicies: allPolicies.length,
           totalPremium: Math.round(totalPremium * 100) / 100,
