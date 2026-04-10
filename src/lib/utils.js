@@ -95,7 +95,7 @@ export function parseFlexDate(raw) {
 }
 
 export function normalizePlacedStatus(raw) {
-  if (!raw) return 'Submitted - Pending';
+  if (!raw) return 'Unknown';
   const lower = raw.toLowerCase().trim();
   if (!lower || lower === 'n/a' || lower === 'na') return 'Unknown';
   if (lower.includes('advance released') || lower.includes('advance')) return 'Advance Released';
@@ -106,7 +106,8 @@ export function normalizePlacedStatus(raw) {
   if (lower.includes('cancelled') || lower.includes('canceled')) return 'Cancelled';
   if (lower.includes('yes') || lower.includes('placed') || lower.includes('approved')) return 'Active - In Force';
   if (/^\d{1,2}\/\d{1,2}/.test(raw)) return 'Active - In Force';
-  return 'Submitted - Pending';
+  if (lower.includes('pending') || lower.includes('submitted')) return 'Submitted - Pending';
+  return 'Unknown';
 }
 
 export function parseDuration(raw) {

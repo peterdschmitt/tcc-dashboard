@@ -1149,21 +1149,21 @@ export default function CommissionStatementsTab() {
                 const STATUS_ORDER = [
                   'Active - In Force', 'Advance Released', 'Submitted - Pending',
                   'Pending', 'Hold Application', 'NeedReqmnt', 'Initial Premium Not Paid',
-                  'Declined', 'Canceled', 'Cancelled', 'Lapsed', '(Carrier Only)', '(No Status)',
+                  'Declined', 'Canceled', 'Cancelled', 'Lapsed', 'Unknown', '(Carrier Only)', '(No Status)',
                 ];
                 const STATUS_ICON = {
                   'Active - In Force': '●', 'Advance Released': '●',
                   'Submitted - Pending': '◐', 'Pending': '◐',
                   'Hold Application': '◯', 'NeedReqmnt': '◯', 'Initial Premium Not Paid': '◯',
                   'Declined': '✗', 'Canceled': '✗', 'Cancelled': '✗', 'Lapsed': '✗',
-                  '(Carrier Only)': '◇', '(No Status)': '?',
+                  'Unknown': '?', '(Carrier Only)': '◇', '(No Status)': '?',
                 };
                 const STATUS_COLOR = {
                   'Active - In Force': C.green, 'Advance Released': C.green,
                   'Submitted - Pending': C.yellow, 'Pending': C.yellow,
                   'Hold Application': C.muted, 'NeedReqmnt': C.muted, 'Initial Premium Not Paid': C.muted,
                   'Declined': C.red, 'Canceled': C.red, 'Cancelled': C.red, 'Lapsed': C.red,
-                  '(Carrier Only)': C.accent, '(No Status)': C.muted,
+                  'Unknown': C.muted, '(Carrier Only)': C.accent, '(No Status)': C.muted,
                 };
 
                 const thStyle = { padding: '6px 10px', fontSize: 9, color: C.muted, textAlign: 'left' };
