@@ -285,6 +285,8 @@ export async function GET(request) {
           product,
           premium,
           agent: sr['Agent'] || '',
+          phone: sr['Phone Number']?.trim() || '',
+          textFriendly: sr['Text Friendly']?.trim() || '',
           status: sr['Policy Status']?.trim() || normalizePlacedStatus(sr['Placed?']) || '',
           submitDate: sr['Application Submitted Date']?.trim() || '',
           effectiveDate: sr['Effective Date']?.trim() || '',

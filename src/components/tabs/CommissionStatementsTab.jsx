@@ -1244,6 +1244,8 @@ export default function CommissionStatementsTab() {
                                 <SortTh label="Agent" field="agent" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Carrier" field="carrier" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Premium" field="premium" {...waterfallSort} onSort={waterfallSort.toggle} style={thRight} />
+                                <SortTh label="Phone" field="phone" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Text" field="textFriendly" {...waterfallSort} onSort={waterfallSort.toggle} style={thCenter} />
                                 <SortTh label="Submitted" field="submitDate" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Effective" field="effectiveDate" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Paid" field="carrierPaid" {...waterfallSort} onSort={waterfallSort.toggle} style={thCenter} />
@@ -1277,6 +1279,10 @@ export default function CommissionStatementsTab() {
                                     <td style={{ padding: '5px 10px', fontSize: 10, color: C.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.agent}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.carrier}</td>
                                     <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text, textAlign: 'right' }}>{fmtDollar(p.premium)}</td>
+                                    <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 9, color: C.muted, whiteSpace: 'nowrap' }}>{p.phone || '—'}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, textAlign: 'center', color: p.textFriendly?.toLowerCase() === 'yes' ? C.green : C.muted }}>
+                                      {p.textFriendly ? (p.textFriendly.toLowerCase() === 'yes' ? '✓' : p.textFriendly) : '—'}
+                                    </td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted }}>{p.submitDate}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted }}>{p.effectiveDate}</td>
                                     <td style={{ padding: '5px 10px', textAlign: 'center', fontSize: 12 }}>
@@ -1322,7 +1328,7 @@ export default function CommissionStatementsTab() {
                                 <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
                                   {fmtDollar(grpPrem)}
                                 </td>
-                                <td colSpan={2}></td>
+                                <td colSpan={4}></td>
                                 <td style={{ padding: '6px 10px', textAlign: 'center', fontSize: 10, color: C.accent }}>{grpPaid}</td>
                                 <td style={{ padding: '6px 10px', fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
                                   {fmtDollar(grp.reduce((s, p) => s + p.expectedCommission, 0))}
