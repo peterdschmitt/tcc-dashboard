@@ -121,7 +121,6 @@ function cleanContent(raw) {
   let lines = raw.split('\n');
 
   // Skip everything before the first real analytical content.
-  // Look for lines that indicate actual report body (not email metadata).
   const bodyMarkers = [
     /executive\s+read/i, /company[\s-]*(wide|level|overall)/i,
     /profitability/i, /campaign\s+performance/i, /agent\s+performance/i,
@@ -129,13 +128,13 @@ function cleanContent(raw) {
     /scope\s*\/?\s*row/i, /^analyzed\s+\d{4}/i,
   ];
   let contentStart = 0;
-  for (let i = 0; i < Math.min(lines.length, 60); i++) {
+  for (let i = 0; i < Math.min(lines.length, 80); i++) {
     const t = lines[i].trim();
     if (bodyMarkers.some(rx => rx.test(t))) { contentStart = i; break; }
   }
   lines = lines.slice(contentStart);
 
-  // Remove noise lines
+  // Remove noise lines (email headers, Gmail artifacts, report metadata)
   return lines.filter(line => {
     const t = line.trim();
     if (!t) return true;
@@ -143,13 +142,23 @@ function cleanContent(raw) {
     if (/^\d+\/\d+$/.test(t)) return false;
     if (/^\d+\/\d+\/\d+,\s+\d+:\d+\s+(AM|PM)\s+Gmail/.test(t)) return false;
     if (/Gmail\s*-\s*Fw:/i.test(t)) return false;
+    if (/^Fw:\s/i.test(t)) return false;
+    if (/^From:\s/i.test(t)) return false;
+    if (/^To:\s/i.test(t)) return false;
+    if (/^Sent:\s/i.test(t)) return false;
+    if (/^Subject:\s/i.test(t)) return false;
+    if (/^Date:\s.*\d{4}/i.test(t)) return false;
     if (t.includes('simpl=msg')) return false;
+    if (t.includes('@converselyai.com') || t.includes('@gmail.com')) return false;
+    if (/^\d+\s+messages?$/i.test(t)) return false;
     if (/^CONVERSELY\.AI$/i.test(t)) return false;
     if (/^Scheduled Report$/i.test(t)) return false;
     if (/^TrueChoice\s*-/i.test(t)) return false;
     if (/^Period:\s/i.test(t)) return false;
     if (/^Run time:/i.test(t)) return false;
     if (/^Generated:/i.test(t)) return false;
+    if (/^Peter\s+Schmitt\s*</i.test(t)) return false;
+    if (/^"?peter\.d\.schmitt/i.test(t)) return false;
     return true;
   }).join('\n');
 }
@@ -217,14 +226,13 @@ function classifyLine(trimmed, prevType) {
 }
 
 function buildReportContent(content) {
-  if (!content) return null;
+  if (!content) return { elements: [], tocEntries: [] };
 
   const cleaned = cleanContent(content);
   const lines = cleaned.split('\n');
 
-  // Build structured elements with proper IDs for section nav
   const elements = [];
-  const tocEntries = []; // Only H1s go in TOC
+  const tocEntries = [];
   let prevType = '';
   let sectionIdx = 0;
 
@@ -233,141 +241,113 @@ function buildReportContent(content) {
     const type = classifyLine(trimmed, prevType);
 
     if (type === 'blank') {
-      if (prevType !== 'blank') elements.push(<div key={i} style={{ height: 8 }} />);
+      if (prevType !== 'blank') elements.push(<div key={i} style={{ height: 16 }} />);
       prevType = type;
       continue;
     }
     prevType = type;
 
-    // --- H1: Major section ---
+    // --- H1: Large bold section header with bottom border ---
     if (type === 'h1') {
       const id = `sec-${sectionIdx++}`;
       const title = trimmed.replace(/\*\*/g, '');
       tocEntries.push({ id, title });
       elements.push(
-        <div key={i} id={id} style={{
-          fontSize: 15, fontWeight: 700, color: C.text, fontFamily: C.sans,
-          marginTop: i === 0 ? 0 : 24, marginBottom: 10, paddingBottom: 8,
-          borderBottom: `2px solid ${C.accent}`,
-          letterSpacing: -0.3,
+        <h2 key={i} id={id} style={{
+          fontSize: 22, fontWeight: 700, color: C.text, fontFamily: C.sans,
+          marginTop: i === 0 ? 0 : 40, marginBottom: 16, paddingBottom: 10,
+          borderBottom: `1px solid ${C.border}`,
+          letterSpacing: -0.3, lineHeight: 1.3,
         }}>
           {title}
-        </div>
+        </h2>
       );
       continue;
     }
 
-    // --- H2: Sub-section (numbered item or named entity) ---
+    // --- H2: Bold sub-heading, numbered or plain ---
     if (type === 'h2') {
       const numMatch = trimmed.match(/^(\d+)\)\s+(.+)/);
-      const title = numMatch ? numMatch[2] : trimmed;
-      const num = numMatch ? numMatch[1] : null;
+      const display = numMatch ? `${numMatch[1]}) ${numMatch[2]}` : trimmed;
+      elements.push(
+        <h3 key={i} style={{
+          fontSize: 18, fontWeight: 700, color: C.text, fontFamily: C.sans,
+          marginTop: 28, marginBottom: 12, lineHeight: 1.35,
+        }}>
+          {display}
+        </h3>
+      );
+      continue;
+    }
+
+    // --- Callout: Bold label with body text ---
+    if (type === 'callout') {
+      let calloutText = trimmed;
+      while (i + 1 < lines.length) {
+        const nextTrimmed = lines[i + 1].trim();
+        const nextType = classifyLine(nextTrimmed, type);
+        if (nextTrimmed && nextType === 'paragraph' && nextTrimmed.length < 120) {
+          calloutText += ' ' + nextTrimmed;
+          i++;
+        } else break;
+      }
+
+      const labelMatch = calloutText.match(/^(Takeaway|Action|Interpretation|Watchout|What this suggests|Key\s+[^:]+|Driver of\s+[^:]+|Likely cause|Note|Risk|Opportunity|⚠)\s*:\s*(.*)/i);
+      elements.push(
+        <p key={i} style={{
+          fontSize: 15, lineHeight: 1.7, margin: '16px 0', color: C.text,
+        }}>
+          {labelMatch ? (
+            <>
+              <strong style={{ fontWeight: 700, textDecoration: 'underline' }}>{labelMatch[1]}:</strong>{' '}
+              <Fmt text={labelMatch[2]} lineKey={i} />
+            </>
+          ) : (
+            <Fmt text={calloutText} lineKey={i} />
+          )}
+        </p>
+      );
+      continue;
+    }
+
+    // --- Bullet: dash-prefixed list item ---
+    if (type === 'bullet') {
+      const bulletText = trimmed.replace(/^[-•]\s+/, '');
+      const colonSplit = bulletText.match(/^(.+?):\s+(.+)/);
       elements.push(
         <div key={i} style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          marginTop: 16, marginBottom: 6,
-          paddingBottom: 4, borderBottom: `1px solid ${C.border}`,
+          display: 'flex', gap: 6, paddingLeft: 4, marginBottom: 4,
+          fontSize: 15, lineHeight: 1.7, color: C.text,
         }}>
-          {num && (
-            <span style={{
-              background: C.accent, color: '#fff', borderRadius: '50%',
-              width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, flexShrink: 0,
-            }}>{num}</span>
-          )}
-          {!num && <span style={{ width: 3, height: 14, background: C.accent, borderRadius: 2, flexShrink: 0 }} />}
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.accent, fontFamily: C.sans }}>
-            {title}
+          <span style={{ flexShrink: 0 }}>-</span>
+          <span>
+            {colonSplit ? (
+              <>
+                <strong style={{ fontWeight: 700 }}>{colonSplit[1]}:</strong>{' '}
+                <Fmt text={colonSplit[2]} lineKey={i} />
+              </>
+            ) : (
+              <Fmt text={bulletText} lineKey={i} />
+            )}
           </span>
         </div>
       );
       continue;
     }
 
-    // --- Callout: Takeaway, Action, Interpretation, Watchout ---
-    if (type === 'callout') {
-      // Determine callout color
-      let borderColor = C.accent;
-      let bgColor = C.accent + '11';
-      if (/^(action|watchout|risk|⚠)/i.test(trimmed)) { borderColor = C.yellow; bgColor = C.yellow + '11'; }
-      if (/^(driver\s+of\s+weak|likely\s+cause)/i.test(trimmed)) { borderColor = C.red; bgColor = C.red + '11'; }
-
-      // Collect consecutive lines that belong to this callout
-      let calloutText = trimmed;
-      while (i + 1 < lines.length) {
-        const nextTrimmed = lines[i + 1].trim();
-        const nextType = classifyLine(nextTrimmed, type);
-        // Continue callout for indented continuation or short follow-on lines
-        if (nextTrimmed && nextType === 'paragraph' && !nextTrimmed.match(/^[A-Z].*\(/) && nextTrimmed.length < 100) {
-          calloutText += ' ' + nextTrimmed;
-          i++;
-        } else break;
-      }
-
-      // Split label from body
-      const labelMatch = calloutText.match(/^(Takeaway|Action|Interpretation|Watchout|What this suggests|Key\s+\w+|Driver of\s+\w+|Likely cause|Note|Risk|Opportunity|⚠)\s*:\s*(.*)/i);
-      elements.push(
-        <div key={i} style={{
-          background: bgColor, borderLeft: `3px solid ${borderColor}`, borderRadius: '0 6px 6px 0',
-          padding: '8px 14px', margin: '8px 0', fontSize: 12, lineHeight: 1.7,
-        }}>
-          {labelMatch ? (
-            <>
-              <span style={{ fontWeight: 700, color: borderColor, textTransform: 'uppercase', fontSize: 10, letterSpacing: 0.5 }}>
-                {labelMatch[1]}
-              </span>
-              <div style={{ marginTop: 2, color: C.text }}><Fmt text={labelMatch[2]} lineKey={i} /></div>
-            </>
-          ) : (
-            <Fmt text={calloutText} lineKey={i} />
-          )}
-        </div>
-      );
-      continue;
-    }
-
-    // --- Bullet ---
-    if (type === 'bullet') {
-      const bulletText = trimmed.replace(/^[-•]\s+/, '');
-      // Check if it's a "Name: detail" pattern for card-style rendering
-      const colonSplit = bulletText.match(/^(.+?):\s+(.+)/);
-      if (colonSplit && colonSplit[1].length < 50) {
-        elements.push(
-          <div key={i} style={{
-            display: 'flex', gap: 10, padding: '5px 12px', marginBottom: 2,
-            background: C.bg, borderRadius: 5, border: `1px solid ${C.border}`,
-          }}>
-            <span style={{ fontWeight: 600, fontSize: 12, color: C.text, minWidth: 80, flexShrink: 0 }}>{colonSplit[1]}</span>
-            <span style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}><Fmt text={colonSplit[2]} lineKey={i} /></span>
-          </div>
-        );
-      } else {
-        elements.push(
-          <div key={i} style={{ display: 'flex', gap: 8, paddingLeft: 8, marginBottom: 3 }}>
-            <span style={{ color: C.accent, flexShrink: 0, fontSize: 8, marginTop: 5 }}>●</span>
-            <span style={{ fontSize: 12, lineHeight: 1.7, color: C.text }}><Fmt text={bulletText} lineKey={i} /></span>
-          </div>
-        );
-      }
-      continue;
-    }
-
-    // --- Metric line (key: value) ---
+    // --- Metric line (key: value) — render as bold inline ---
     if (type === 'metric') {
       const colonIdx = trimmed.indexOf(':');
       if (colonIdx > 0) {
         const label = trimmed.slice(0, colonIdx).trim();
         const value = trimmed.slice(colonIdx + 1).trim();
         elements.push(
-          <div key={i} style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-            padding: '4px 12px', marginBottom: 1,
-            background: elements.length % 2 === 0 ? 'transparent' : C.bg + '60',
-            borderRadius: 4,
+          <p key={i} style={{
+            fontSize: 15, lineHeight: 1.7, margin: '4px 0', color: C.text,
           }}>
-            <span style={{ color: C.muted, fontSize: 12, fontFamily: C.sans }}>{label}</span>
-            <span style={{ fontWeight: 600, fontFamily: C.mono, fontSize: 12 }}><Fmt text={value} lineKey={i} /></span>
-          </div>
+            <strong style={{ fontWeight: 700 }}>{label}:</strong>{' '}
+            <Fmt text={value} lineKey={i} />
+          </p>
         );
         continue;
       }
@@ -375,9 +355,11 @@ function buildReportContent(content) {
 
     // --- Regular paragraph ---
     elements.push(
-      <div key={i} style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 3, color: C.text }}>
+      <p key={i} style={{
+        fontSize: 15, lineHeight: 1.7, margin: '4px 0', color: C.text,
+      }}>
         <Fmt text={trimmed} lineKey={i} />
-      </div>
+      </p>
     );
   }
 
@@ -813,7 +795,7 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
           )}
 
           {/* Report content area */}
-          <div ref={contentScrollRef} style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          <div ref={contentScrollRef} style={{ flex: 1, overflow: 'auto', padding: '20px 28px', fontFamily: C.sans }}>
             {!selectedCategory && !reportLoading && (
               <div style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
