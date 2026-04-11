@@ -195,39 +195,83 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
       const audio = new Audio(url);
       audioRef.current = audio;
 
-      // Barge-through: start listening during playback so user can interrupt by speaking
+      // Barge-through: listen during playback so user can interrupt by speaking
       const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
       let bargeRecognition = null;
+      let bargeTriggered = false;
+
+      const cleanupBarge = () => {
+        if (bargeRecognition) {
+          try { bargeRecognition.abort(); } catch {}
+          bargeRecognition = null;
+        }
+      };
+
       if (SR) {
-        bargeRecognition = new SR();
-        bargeRecognition.continuous = false;
-        bargeRecognition.interimResults = false;
-        bargeRecognition.lang = 'en-US';
-        bargeRecognition.onresult = (e) => {
-          const bargeText = e.results[0]?.[0]?.transcript;
-          if (bargeText && bargeText.trim()) {
-            console.log('[VoiceMode] Barge-through detected:', bargeText);
-            audio.pause();
-            stopAudio();
-            bargeRecognition = null;
-            handleUtterance(bargeText.trim());
-          }
-        };
-        bargeRecognition.onerror = () => {}; // ignore barge errors
-        bargeRecognition.onend = () => {}; // ignore
-        try { bargeRecognition.start(); } catch {}
+        try {
+          bargeRecognition = new SR();
+          bargeRecognition.continuous = true;
+          bargeRecognition.interimResults = true;
+          bargeRecognition.lang = 'en-US';
+
+          bargeRecognition.onresult = (e) => {
+            if (bargeTriggered) return;
+            // Check for any speech — even interim results trigger interrupt
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+              const transcript = e.results[i][0]?.transcript?.trim();
+              if (transcript && transcript.length > 1) {
+                bargeTriggered = true;
+                const finalText = e.results[i].isFinal ? transcript : null;
+                console.log('[VoiceMode] Barge-through:', finalText || '(interrupting)');
+
+                // Stop audio immediately
+                audio.pause();
+                cleanupBarge();
+                stopAudio();
+
+                if (finalText) {
+                  // Got a complete utterance — process it directly
+                  handleUtterance(finalText);
+                } else {
+                  // Partial speech detected — go to listening mode to capture the full utterance
+                  startRecognition();
+                }
+                return;
+              }
+            }
+          };
+
+          bargeRecognition.onerror = (e) => {
+            // no-speech is normal — user hasn't spoken yet
+            if (e.error !== 'no-speech' && e.error !== 'aborted') {
+              console.warn('[VoiceMode] Barge recognition error:', e.error);
+            }
+          };
+
+          bargeRecognition.onend = () => {
+            // Auto-restart barge listener if audio is still playing and we haven't barged
+            if (!bargeTriggered && audioRef.current && !audioRef.current.paused && activeRef.current) {
+              try { bargeRecognition?.start(); } catch {}
+            }
+          };
+
+          bargeRecognition.start();
+        } catch (e) {
+          console.warn('[VoiceMode] Could not start barge listener:', e);
+          bargeRecognition = null;
+        }
       }
 
       audio.onended = () => {
-        if (bargeRecognition) { try { bargeRecognition.abort(); } catch {} }
+        cleanupBarge();
         stopAudio();
-        if (activeRef.current) {
+        if (activeRef.current && !bargeTriggered) {
           startRecognition();
         }
       };
 
       audio.onerror = () => {
-        if (bargeRecognition) { try { bargeRecognition.abort(); } catch {} }
+        cleanupBarge();
         console.warn('[VoiceMode] Audio playback failed, falling back to browser TTS');
         stopAudio();
         speakFallback(text);
