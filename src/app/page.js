@@ -17,9 +17,12 @@ export default function Home() {
   const [voiceTileTarget, setVoiceTileTarget] = useState(null);
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
 
-  // Default to ALL so data shows immediately — uses wide range until we know the real earliest date
-  const [dateRange, setDateRange] = useState({
-    start: '2020-01-01', end: '2030-12-31', preset: 'all'
+  // Default to yesterday
+  const [dateRange, setDateRange] = useState(() => {
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const d = fmt(y);
+    return { start: d, end: d, preset: 'yesterday' };
   });
   const [dataSource, setDataSource] = useState('Sheet1');
 
