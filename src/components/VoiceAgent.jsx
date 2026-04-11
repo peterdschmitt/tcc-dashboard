@@ -349,24 +349,16 @@ export default function VoiceAgent({ activeTab, setActiveTab, applyPreset, setCu
           </div>
         )}
 
-        {voiceModeActive && voiceState === 'speaking' && lastResponseText && (
-          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-            <div style={{
-              maxWidth: '85%', padding: '8px 12px', borderRadius: 12, borderBottomLeftRadius: 4,
-              background: C.card, border: `1px solid ${C.border}`,
-            }}>
-              <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', marginBottom: 6 }}>
-                {[0, 1, 2, 3, 4].map(i => (
-                  <div key={i} style={{
-                    width: 3, borderRadius: 2, background: C.green,
-                    animation: `voiceAgentEq 0.8s ease-in-out ${i * 0.1}s infinite`,
-                  }} />
-                ))}
-                <span style={{ fontSize: 9, color: C.green, marginLeft: 6, fontWeight: 600 }}>Speaking</span>
-              </div>
-              <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.5 }}>
-                {lastResponseText}
-              </p>
+        {voiceModeActive && voiceState === 'speaking' && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
+            <div onClick={interruptSpeaking} style={{ display: 'flex', gap: 3, alignItems: 'flex-end', cursor: 'pointer', padding: '4px 12px' }} title="Tap to interrupt">
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} style={{
+                  width: 3, borderRadius: 2, background: C.green,
+                  animation: `voiceAgentEq 0.8s ease-in-out ${i * 0.1}s infinite`,
+                }} />
+              ))}
+              <span style={{ fontSize: 9, color: C.green, marginLeft: 6, fontWeight: 600 }}>Speaking — tap to interrupt</span>
             </div>
           </div>
         )}
