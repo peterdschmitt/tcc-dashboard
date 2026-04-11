@@ -2,7 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const SILENCE_TIMEOUT_MS = 1500;
+const SILENCE_TIMEOUT_MS = 2000;
+const MIN_CONFIDENCE = 0.65;
+const MIN_TRANSCRIPT_LENGTH = 3;
 
 export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nova' }) {
   const [voiceModeActive, setVoiceModeActive] = useState(false);
@@ -77,19 +79,22 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
       for (let i = 0; i < e.results.length; i++) {
         const result = e.results[i];
         if (result.isFinal) {
-          finalTranscript += result[0].transcript;
+          // Only accept high-confidence results to filter noise
+          if (result[0].confidence >= MIN_CONFIDENCE) {
+            finalTranscript += result[0].transcript;
+          }
         } else {
           interim += result[0].transcript;
         }
       }
       setTranscript(finalTranscript + interim);
 
-      // If we have a final result, start silence timer
-      if (finalTranscript.trim()) {
+      // If we have a final result with enough substance, start silence timer
+      if (finalTranscript.trim().length >= MIN_TRANSCRIPT_LENGTH) {
         silenceTimerRef.current = setTimeout(() => {
           if (!activeRef.current) return;
           const text = finalTranscript.trim();
-          if (text) {
+          if (text.length >= MIN_TRANSCRIPT_LENGTH) {
             stopRecognition();
             handleUtterance(text);
           }
@@ -216,26 +221,21 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
 
           bargeRecognition.onresult = (e) => {
             if (bargeTriggered) return;
-            // Check for any speech — even interim results trigger interrupt
             for (let i = e.resultIndex; i < e.results.length; i++) {
               const transcript = e.results[i][0]?.transcript?.trim();
-              if (transcript && transcript.length > 1) {
-                bargeTriggered = true;
-                const finalText = e.results[i].isFinal ? transcript : null;
-                console.log('[VoiceMode] Barge-through:', finalText || '(interrupting)');
+              const confidence = e.results[i][0]?.confidence || 0;
+              const isFinal = e.results[i].isFinal;
 
-                // Stop audio immediately
+              // For barge: require final result with good confidence and real words
+              // This prevents background noise from triggering interrupts
+              if (isFinal && transcript && transcript.length >= MIN_TRANSCRIPT_LENGTH && confidence >= MIN_CONFIDENCE) {
+                bargeTriggered = true;
+                console.log('[VoiceMode] Barge-through:', transcript, 'confidence:', confidence.toFixed(2));
+
                 audio.pause();
                 cleanupBarge();
                 stopAudio();
-
-                if (finalText) {
-                  // Got a complete utterance — process it directly
-                  handleUtterance(finalText);
-                } else {
-                  // Partial speech detected — go to listening mode to capture the full utterance
-                  startRecognition();
-                }
+                handleUtterance(transcript);
                 return;
               }
             }
