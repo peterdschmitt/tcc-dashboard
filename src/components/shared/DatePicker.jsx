@@ -112,7 +112,7 @@ export default function DatePicker({ value, onChange, style }) {
       {/* Calendar dropdown */}
       {open && (
         <div style={{
-          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 1000,
+          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 1100,
           background: '#fff', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
           padding: 12, width: 280, userSelect: 'none',
         }}>
