@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { google } from 'googleapis';
+import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
 
 export const dynamic = 'force-dynamic';
 
-// --- Google Auth ---
+// --- Google Auth (Drive-only scope for report fetching) ---
 function getGoogleAuth() {
   const scopes = [
     'https://www.googleapis.com/auth/drive.readonly',
@@ -32,6 +33,20 @@ function getOpenAI() {
 // --- In-memory report cache (15 min TTL) ---
 let reportCache = { data: null, ts: 0 };
 const CACHE_TTL = 15 * 60 * 1000;
+
+// --- History config ---
+const HISTORY_TAB = () => process.env.REPORT_HISTORY_TAB || 'Daily Metrics';
+const METRICS_HEADERS = [
+  'Date', 'Total Calls', 'Billable Calls', 'Billable Rate',
+  'Transfers', 'Transfer Rate', 'Apps Submitted', 'Policies Placed',
+  'Close Rate', 'Placement Rate', 'CPA', 'RPC',
+  'Total Premium', 'Gross Adv Revenue', 'Lead Spend', 'Net Revenue',
+  'Avg Premium', 'Top Publisher', 'Top Agent', 'Worst CPA Publisher',
+  'Report Types Available', 'Report Count', 'Generated At',
+];
+
+// Track whether we already archived today (per-process)
+let archivedToday = null;
 
 // --- Report type classification ---
 function classifyReport(title) {
@@ -70,7 +85,6 @@ const CATEGORIES = [
 ];
 
 // --- Tab → relevant report types ---
-// Every tab gets all report types so the analyst always has full context
 const ALL_REPORT_TYPES = ['funnel_analyzer', 'lead_quality', 'volume_capacity', 'sales_execution', 'profitability', 'funnel_health', 'mix_product'];
 const TAB_REPORTS = {
   daily: ALL_REPORT_TYPES,
@@ -84,18 +98,15 @@ const TAB_REPORTS = {
 function extractDateFromTitle(title) {
   if (!title) return null;
 
-  // Pattern: "Report - 2026-04-09" or "Report 2026-04-09"
   const isoMatch = title.match(/(\d{4}-\d{2}-\d{2})/);
   if (isoMatch) return isoMatch[1];
 
-  // Pattern: "Report 04/09/2026" or "Report 4/9/2026"
   const usMatch = title.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (usMatch) {
     const [, m, d, y] = usMatch;
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // Pattern: "Report April 9, 2026" or "Report Apr 9, 2026"
   const months = {
     january: '01', february: '02', march: '03', april: '04',
     may: '05', june: '06', july: '07', august: '08',
@@ -129,13 +140,11 @@ function parseSections(content) {
     if (trimmed.length > 0) {
       let sectionTitle = null;
 
-      // Markdown headers: #, ##, ###
       const mdMatch = trimmed.match(/^#{1,3}\s+(.+)/);
       if (mdMatch) {
         sectionTitle = mdMatch[1].trim();
       }
 
-      // Bold markers: **Section Title** (standalone line)
       if (!sectionTitle) {
         const boldMatch = trimmed.match(/^\*\*(.+?)\*\*$/);
         if (boldMatch) {
@@ -143,7 +152,6 @@ function parseSections(content) {
         }
       }
 
-      // Numbered sections: "1. Executive Summary" or "1) Executive Summary"
       if (!sectionTitle) {
         const numMatch = trimmed.match(/^\d+[.)]\s+(.+)/);
         if (numMatch && trimmed.length < 80) {
@@ -151,25 +159,20 @@ function parseSections(content) {
         }
       }
 
-      // ALL CAPS lines (at least 3 chars, less than 80) that look like headers
       if (!sectionTitle && trimmed.length >= 3 && trimmed.length < 80) {
         const stripped = trimmed.replace(/[^a-zA-Z\s]/g, '').trim();
         if (stripped.length >= 3 && stripped === stripped.toUpperCase() && /[A-Z]/.test(stripped)) {
-          // Make sure it's not just numbers/symbols
           sectionTitle = trimmed;
         }
       }
 
-      // Short lines followed by content (heuristic: line < 80 chars, next non-empty line exists, and line looks like a title)
       if (!sectionTitle && trimmed.length < 80 && trimmed.length >= 3) {
-        // Check if line ends with a colon (common header pattern)
         if (trimmed.endsWith(':') && !trimmed.includes(',')) {
           sectionTitle = trimmed.replace(/:$/, '').trim();
         }
       }
 
       if (sectionTitle) {
-        // Clean up any remaining markdown artifacts
         sectionTitle = sectionTitle.replace(/[#*_]/g, '').trim();
         if (sectionTitle.length > 0) {
           sections.push({
@@ -181,13 +184,239 @@ function parseSections(content) {
       }
     }
 
-    charIndex += line.length + 1; // +1 for newline
+    charIndex += line.length + 1;
   }
 
   return sections;
 }
 
-// --- Fetch file list from Drive folder (metadata only, no content) ---
+// ─── HISTORICAL METRICS ──────────────────────────────────────────
+
+/** Ensure the Daily Metrics tab exists, create with headers if not */
+async function ensureHistoryTab() {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  if (!sheetId) return;
+  const tab = HISTORY_TAB();
+
+  try {
+    const sheets = await getSheetsClient();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: tab } } }] },
+    });
+    // Tab was just created — write headers
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `'${tab}'!A1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [METRICS_HEADERS] },
+    });
+    console.log('[ai-analyst] Created Daily Metrics tab');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) {
+      console.warn('[ai-analyst] ensureHistoryTab error:', e.message);
+    }
+    // Tab already exists — fine
+  }
+}
+
+/** Extract structured metrics from reports using GPT-4o */
+async function extractMetrics(reports) {
+  const reportContent = reports
+    .map((r) => `--- ${r.title} ---\n${r.content}`)
+    .join('\n\n');
+
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a data extraction assistant for TrueChoice Coverage (TCC), a final expense insurance call center.
+Extract key metrics from the provided daily operational reports. Return ONLY a valid JSON object with these exact keys (use null if a metric is not found in the reports):
+
+{
+  "total_calls": <number>,
+  "billable_calls": <number>,
+  "billable_rate": <number, percentage>,
+  "transfers": <number>,
+  "transfer_rate": <number, percentage>,
+  "apps_submitted": <number>,
+  "policies_placed": <number>,
+  "close_rate": <number, percentage>,
+  "placement_rate": <number, percentage>,
+  "cpa": <number, dollars>,
+  "rpc": <number, dollars>,
+  "total_premium": <number, dollars>,
+  "gross_adv_revenue": <number, dollars>,
+  "lead_spend": <number, dollars>,
+  "net_revenue": <number, dollars>,
+  "avg_premium": <number, dollars>,
+  "top_publisher": "<string, name of best performing publisher by volume or revenue>",
+  "top_agent": "<string, name of best performing agent by premium or close rate>",
+  "worst_cpa_publisher": "<string, publisher with highest CPA>"
+}
+
+Rules:
+- Extract numbers as plain numbers (no $ or % signs)
+- For rates/percentages, use the number (e.g., 65 not 0.65)
+- Look across ALL reports provided to find each metric
+- If a metric appears in multiple reports, use the most specific/detailed source
+- Return ONLY the JSON, no explanation or markdown`,
+      },
+      { role: 'user', content: reportContent },
+    ],
+    temperature: 0,
+    max_tokens: 800,
+    response_format: { type: 'json_object' },
+  });
+
+  try {
+    return JSON.parse(completion.choices[0]?.message?.content || '{}');
+  } catch (e) {
+    console.error('[ai-analyst] Failed to parse metrics JSON:', e.message);
+    return {};
+  }
+}
+
+/** Check if today is already archived, if not extract metrics and append */
+async function ensureTodayArchived(reports) {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  if (!sheetId || !reports.length) return;
+
+  // Determine today's date from reports (use the date in the report titles)
+  const reportDate = extractDateFromTitle(reports[0]?.title);
+  if (!reportDate) return;
+
+  // Skip if we already archived this date in this process
+  if (archivedToday === reportDate) return;
+
+  try {
+    // Check if this date already exists in the history tab
+    await ensureHistoryTab();
+    let existing = [];
+    try {
+      existing = await fetchSheet(sheetId, HISTORY_TAB(), 60);
+    } catch (e) {
+      // Tab might be empty or new
+    }
+    if (existing.some(r => r['Date'] === reportDate)) {
+      archivedToday = reportDate;
+      return; // Already archived
+    }
+
+    // Extract metrics from reports
+    console.log(`[ai-analyst] Extracting metrics for ${reportDate}...`);
+    const metrics = await extractMetrics(reports);
+
+    // Build row values
+    const values = {
+      'Date': reportDate,
+      'Total Calls': metrics.total_calls ?? '',
+      'Billable Calls': metrics.billable_calls ?? '',
+      'Billable Rate': metrics.billable_rate ?? '',
+      'Transfers': metrics.transfers ?? '',
+      'Transfer Rate': metrics.transfer_rate ?? '',
+      'Apps Submitted': metrics.apps_submitted ?? '',
+      'Policies Placed': metrics.policies_placed ?? '',
+      'Close Rate': metrics.close_rate ?? '',
+      'Placement Rate': metrics.placement_rate ?? '',
+      'CPA': metrics.cpa ?? '',
+      'RPC': metrics.rpc ?? '',
+      'Total Premium': metrics.total_premium ?? '',
+      'Gross Adv Revenue': metrics.gross_adv_revenue ?? '',
+      'Lead Spend': metrics.lead_spend ?? '',
+      'Net Revenue': metrics.net_revenue ?? '',
+      'Avg Premium': metrics.avg_premium ?? '',
+      'Top Publisher': metrics.top_publisher ?? '',
+      'Top Agent': metrics.top_agent ?? '',
+      'Worst CPA Publisher': metrics.worst_cpa_publisher ?? '',
+      'Report Types Available': reports.map(r => r.type).join(', '),
+      'Report Count': String(reports.length),
+      'Generated At': new Date().toISOString(),
+    };
+
+    await appendRow(sheetId, HISTORY_TAB(), METRICS_HEADERS, values);
+    archivedToday = reportDate;
+    console.log(`[ai-analyst] Archived metrics for ${reportDate}`);
+  } catch (err) {
+    console.error('[ai-analyst] History archive failed:', err.message);
+  }
+}
+
+/** Fetch historical metrics for the last N days */
+async function getHistoryMetrics(daysBack = 30) {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  if (!sheetId) return [];
+
+  try {
+    const rows = await fetchSheet(sheetId, HISTORY_TAB(), 300); // 5-min cache
+    if (!rows.length) return [];
+
+    // Calculate cutoff date
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - daysBack);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+
+    return rows
+      .filter(r => r['Date'] && r['Date'] >= cutoffStr)
+      .sort((a, b) => b['Date'].localeCompare(a['Date']));
+  } catch (e) {
+    console.warn('[ai-analyst] Could not fetch history:', e.message);
+    return [];
+  }
+}
+
+/** Format history metrics as a readable table for the LLM */
+function formatHistoryForContext(rows) {
+  if (!rows.length) return '';
+
+  const metricCols = [
+    'Date', 'Total Calls', 'Billable Calls', 'Billable Rate',
+    'Transfers', 'Transfer Rate', 'Apps Submitted', 'Policies Placed',
+    'Close Rate', 'CPA', 'RPC', 'Total Premium', 'Lead Spend', 'Net Revenue',
+    'Top Publisher', 'Top Agent',
+  ];
+
+  let table = '\n\n--- HISTORICAL DAILY METRICS ---\n';
+  table += metricCols.join(' | ') + '\n';
+  table += metricCols.map(() => '---').join(' | ') + '\n';
+
+  rows.forEach(r => {
+    table += metricCols.map(c => r[c] || '—').join(' | ') + '\n';
+  });
+
+  return table;
+}
+
+/** Detect if a question needs historical context */
+function needsHistoricalContext(question) {
+  const q = question.toLowerCase();
+  const patterns = [
+    /last\s+(week|month|few\s+days|monday|tuesday|wednesday|thursday|friday)/,
+    /compared?\s+to/, /trend/, /historic/, /over\s+(time|the\s+past)/,
+    /previous/, /yesterday/, /week\s+over\s+week/, /day\s+over\s+day/,
+    /month\s+over\s+month/, /changed?\s+since/, /getting\s+(better|worse)/,
+    /improving|declining|dropping|rising|increas|decreas/,
+    /\d+\s+days?\s+ago/, /how\s+(has|have|did|does)/, /progress/,
+    /average|running|cumulative/, /pattern|consistent|volatil/,
+  ];
+  return patterns.some(p => p.test(q));
+}
+
+/** Determine how many days of history to include */
+function getHistoryDays(question) {
+  const q = question.toLowerCase();
+  if (/month|30\s+days/.test(q)) return 30;
+  if (/two\s+weeks|2\s+weeks|14\s+days/.test(q)) return 14;
+  if (/week|7\s+days/.test(q)) return 7;
+  if (/yesterday|1\s+day/.test(q)) return 3;
+  return 7;
+}
+
+// ─── DRIVE ACCESS ────────────────────────────────────────────────
+
+/** Fetch file list from Drive folder (metadata only, no content) */
 async function fetchFileList() {
   const folderId = process.env.AI_REPORTS_FOLDER_ID;
   if (!folderId) return [];
@@ -205,7 +434,7 @@ async function fetchFileList() {
   return listRes.data.files || [];
 }
 
-// --- Fetch a single report by ID ---
+/** Fetch a single report by ID */
 async function fetchSingleReport(docId) {
   const auth = getGoogleAuth();
   const drive = google.drive({ version: 'v3', auth });
@@ -226,10 +455,7 @@ async function fetchSingleReport(docId) {
   };
 }
 
-// --- Extract plain text from a Google Doc via Drive export (no Docs API needed) ---
-// Uses drive.files.export which only requires the Drive API scope
-
-// --- Fetch all reports from Drive folder ---
+/** Fetch all reports from Drive folder */
 async function fetchReports() {
   const now = Date.now();
   if (reportCache.data && now - reportCache.ts < CACHE_TTL) {
@@ -244,7 +470,6 @@ async function fetchReports() {
   const auth = getGoogleAuth();
   const drive = google.drive({ version: 'v3', auth });
 
-  // List Google Docs in the folder
   const listRes = await drive.files.list({
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.document'`,
     fields: 'files(id, name, modifiedTime)',
@@ -254,7 +479,6 @@ async function fetchReports() {
 
   const files = listRes.data.files || [];
 
-  // Fetch content of each doc using Drive export (no Docs API needed)
   const reports = await Promise.all(
     files.map(async (file) => {
       try {
@@ -279,11 +503,18 @@ async function fetchReports() {
 
   const result = reports.filter(Boolean);
   reportCache = { data: result, ts: now };
+
+  // Fire-and-forget: archive today's metrics if not already done
+  ensureTodayArchived(result).catch(err =>
+    console.warn('[ai-analyst] Background archive failed:', err.message)
+  );
+
   return result;
 }
 
-// --- System prompt ---
-function buildSystemPrompt(tab, entity) {
+// ─── SYSTEM PROMPT ───────────────────────────────────────────────
+
+function buildSystemPrompt(tab, entity, hasHistory) {
   let focus = '';
   if (tab && TAB_REPORTS[tab]) {
     const reportNames = {
@@ -303,6 +534,20 @@ function buildSystemPrompt(tab, entity) {
     focus += `\nThe user is specifically looking at: ${entity}. Focus your insights on this entity's performance, trends, and any notable findings from the reports.`;
   }
 
+  let historyInstructions = '';
+  if (hasHistory) {
+    historyInstructions = `
+
+You also have access to a HISTORICAL DAILY METRICS table showing key metrics from previous days. Use this data to:
+- Compare current-day metrics against previous days (e.g., "CPA is $340 today vs $280 yesterday, a 21% increase")
+- Identify trends over time (improving, declining, volatile, stable)
+- Calculate running averages and week-over-week changes
+- Highlight significant deviations from recent patterns
+- Explain what's driving changes by cross-referencing the full report content
+Always clearly distinguish between current-day data and historical trends.
+When discussing trends, cite specific numbers and dates from the metrics table.`;
+  }
+
   return `You are an AI analyst for TrueChoice Coverage (TCC), a final expense insurance call center.
 
 You have access to daily operational reports that cover:
@@ -313,7 +558,7 @@ You have access to daily operational reports that cover:
 - Profitability: revenue, costs, margins, CPA, net revenue by publisher
 - Funnel Health: stage-by-stage funnel drop-off analysis
 - Mix & Product Strategy: carrier and product distribution, placement rates by carrier
-${focus}
+${focus}${historyInstructions}
 
 Guidelines:
 - Be concise and actionable. Use bullet points.
@@ -324,7 +569,8 @@ Guidelines:
 - If report data is limited or unavailable, say so honestly rather than speculating.`;
 }
 
-// --- GET: Pre-analyzed insights, list-reports, get-report ---
+// ─── GET HANDLER ─────────────────────────────────────────────────
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -349,7 +595,6 @@ export async function GET(request) {
         };
       });
 
-      // Collect unique dates sorted descending
       const dateSet = new Set();
       reports.forEach((r) => { if (r.date) dateSet.add(r.date); });
       const dates = Array.from(dateSet).sort((a, b) => b.localeCompare(a));
@@ -387,7 +632,14 @@ export async function GET(request) {
       }
     }
 
-    // --- Default: Pre-analyzed insights (existing behavior) ---
+    // --- Action: get-history ---
+    if (action === 'get-history') {
+      const days = parseInt(searchParams.get('days') || '30');
+      const rows = await getHistoryMetrics(days);
+      return NextResponse.json({ metrics: rows, count: rows.length });
+    }
+
+    // --- Default: Pre-analyzed insights ---
     const tab = searchParams.get('tab') || 'daily';
     const entity = searchParams.get('entity') || null;
     const date = searchParams.get('date') || null;
@@ -401,22 +653,31 @@ export async function GET(request) {
       });
     }
 
-    // Filter to relevant reports for this tab
     const relevantTypes = TAB_REPORTS[tab] || [];
     let relevantReports = reports.filter((r) => relevantTypes.includes(r.type));
-    // Fall back to all reports if no matches
     if (!relevantReports.length) relevantReports = reports;
 
     const reportContext = relevantReports
       .map((r) => `--- ${r.title} (${r.modifiedTime}) ---\n${r.content}`)
       .join('\n\n');
 
-    const systemPrompt = buildSystemPrompt(tab, entity);
+    // Always include recent history for trend-aware insights
+    let historyContext = '';
+    try {
+      const historyRows = await getHistoryMetrics(7);
+      if (historyRows.length > 0) {
+        historyContext = formatHistoryForContext(historyRows);
+      }
+    } catch (e) {
+      console.warn('[ai-analyst] Could not fetch history for insights:', e.message);
+    }
+
+    const systemPrompt = buildSystemPrompt(tab, entity, !!historyContext);
 
     let userMessage = `Based on the following daily reports, provide a brief analytical briefing for the "${tab}" dashboard tab.`;
     if (entity) userMessage += ` Focus specifically on ${entity}.`;
     if (date) userMessage += ` The user is looking at data for ${date}.`;
-    userMessage += `\n\nAlso suggest 3-4 follow-up questions the user might want to ask.\n\nReports:\n${reportContext}`;
+    userMessage += `\n\nAlso suggest 3-4 follow-up questions the user might want to ask.\n\nReports:\n${reportContext}${historyContext}`;
 
     const openai = getOpenAI();
     const completion = await openai.chat.completions.create({
@@ -430,8 +691,6 @@ export async function GET(request) {
     });
 
     const raw = completion.choices[0]?.message?.content || '';
-
-    // Try to parse suggested questions from the response
     const { insights, suggestedQuestions } = parseInsightsAndQuestions(raw);
 
     return NextResponse.json({ insights, suggestedQuestions });
@@ -444,7 +703,8 @@ export async function GET(request) {
   }
 }
 
-// --- POST: Chat with analyst ---
+// ─── POST HANDLER (Chat) ────────────────────────────────────────
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -468,20 +728,33 @@ export async function POST(request) {
         .join('\n\n');
     }
 
-    const systemPrompt = buildSystemPrompt(tab, entity);
+    // Check if question needs historical context
+    let historyContext = '';
+    const wantsHistory = needsHistoricalContext(question);
+    if (wantsHistory) {
+      const days = getHistoryDays(question);
+      const historyRows = await getHistoryMetrics(days);
+      if (historyRows.length > 0) {
+        historyContext = formatHistoryForContext(historyRows);
+      }
+    }
+
+    const systemPrompt = buildSystemPrompt(tab, entity, !!historyContext);
 
     const messages = [
       { role: 'system', content: systemPrompt },
     ];
 
-    if (context) {
+    if (context || historyContext) {
       messages.push({
         role: 'user',
-        content: `Here are the latest operational reports for context:\n\n${context}`,
+        content: `Here are the latest operational reports for context:\n\n${context}${historyContext}`,
       });
       messages.push({
         role: 'assistant',
-        content: 'I have reviewed the reports. What would you like to know?',
+        content: historyContext
+          ? 'I have reviewed the current reports and historical daily metrics. What would you like to know?'
+          : 'I have reviewed the reports. What would you like to know?',
       });
     }
 
@@ -512,9 +785,9 @@ export async function POST(request) {
   }
 }
 
-// --- Parse response into insights + suggested questions ---
+// ─── PARSE RESPONSE ──────────────────────────────────────────────
+
 function parseInsightsAndQuestions(text) {
-  // Look for a section that contains suggested/follow-up questions
   const patterns = [
     /\*{0,2}(?:suggested|follow[- ]?up)\s*questions?\*{0,2}:?\s*\n([\s\S]*?)$/i,
     /\*{0,2}(?:you (?:might|could|may) (?:also )?(?:want to )?ask|questions? to consider)\*{0,2}:?\s*\n([\s\S]*?)$/i,
@@ -528,7 +801,6 @@ function parseInsightsAndQuestions(text) {
     if (match) {
       insights = text.slice(0, match.index).trim();
       const qBlock = match[1].trim();
-      // Extract numbered or bulleted questions
       suggestedQuestions = qBlock
         .split('\n')
         .map((l) => l.replace(/^[\d.\-*•]+\s*/, '').trim())
@@ -537,7 +809,6 @@ function parseInsightsAndQuestions(text) {
     }
   }
 
-  // Limit to 4 questions
   suggestedQuestions = suggestedQuestions.slice(0, 4);
 
   return { insights, suggestedQuestions };
