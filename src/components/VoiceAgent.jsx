@@ -125,12 +125,6 @@ export default function VoiceAgent({ activeTab, setActiveTab, applyPreset, setCu
   const [conversation, setConversation] = useState([]);
   const chatEndRef = useRef(null);
 
-  // Compute live data context, but cache the last valid one so it doesn't go empty during reloads
-  const freshContext = useMemo(() => buildLiveDataContext(policies, calls, pnl, dateRange), [policies, calls, pnl, dateRange]);
-  const cachedContextRef = useRef('');
-  if (freshContext) cachedContextRef.current = freshContext;
-  const liveDataContext = freshContext || cachedContextRef.current;
-
   const handleNavigation = useCallback((nav) => {
     if (nav.tab && setActiveTab) setActiveTab(nav.tab);
     if (nav.datePreset && applyPreset) applyPreset(nav.datePreset);
@@ -139,41 +133,46 @@ export default function VoiceAgent({ activeTab, setActiveTab, applyPreset, setCu
     if (nav.openTile && setVoiceTileTarget) setVoiceTileTarget(nav.openTile);
   }, [setActiveTab, applyPreset, setDataSource, setVoiceDrillTarget, setVoiceTileTarget]);
 
+  // Store dateRange and dataSource in refs so onSend always has current values
+  const dateRangeRef = useRef(dateRange);
+  const dataSourceRef = useRef(dataSource);
+  useEffect(() => { dateRangeRef.current = dateRange; }, [dateRange]);
+  useEffect(() => { dataSourceRef.current = dataSource; }, [dataSource]);
+
   const {
     voiceModeActive, voiceState, transcript: voiceTranscript, lastResponseText,
     toggleVoiceMode, interruptSpeaking, error: voiceError, clearError: clearVoiceError,
   } = useVoiceMode({
     onSend: async (text) => {
-      // Always send live dashboard data so voice numbers match tiles exactly
+      // ALWAYS fetch fresh data from the dashboard API — no closures, no caching
+      // This guarantees the voice numbers match exactly what's in the tiles
+      const dr = dateRangeRef.current;
+      const ds = dataSourceRef.current || 'Sheet1';
+
       const dateChangeWords = /yesterday|today|last\s*(7|seven|30|thirty)|this\s*(week|month)|mtd|wtd/i;
       const impliesDateChange = dateChangeWords.test(text);
 
-      let dataContext = liveDataContext;
+      // Determine target date range
+      const targetRange = impliesDateChange ? getTargetDateRange(text) : { start: dr.start, end: dr.end };
 
-      // For date-change queries, fetch fresh data for the target date range
-      if (impliesDateChange) {
-        try {
-          const targetRange = getTargetDateRange(text);
-          console.log('[VoiceAgent] Date change detected, fetching data for:', targetRange);
-          const freshRes = await fetch(`/api/dashboard?start=${targetRange.start}&end=${targetRange.end}&source=${dataSource || 'Sheet1'}`);
-          if (freshRes.ok) {
-            const freshData = await freshRes.json();
-            dataContext = buildLiveDataContext(
-              freshData.policies || [],
-              freshData.calls || [],
-              freshData.pnl || [],
-              targetRange
-            );
-            console.log('[VoiceAgent] Fresh data context length:', dataContext?.length, 'billable mention:', dataContext?.includes('Billable'));
-          } else {
-            console.warn('[VoiceAgent] Dashboard API returned:', freshRes.status);
-          }
-        } catch (e) {
-          console.warn('[VoiceAgent] Failed to fetch target date data:', e);
+      // Fetch live data directly from the API — zero dependency on React state/closures
+      let dataContext = null;
+      try {
+        const freshRes = await fetch(`/api/dashboard?start=${targetRange.start}&end=${targetRange.end}&source=${ds}`);
+        if (freshRes.ok) {
+          const freshData = await freshRes.json();
+          dataContext = buildLiveDataContext(
+            freshData.policies || [],
+            freshData.calls || [],
+            freshData.pnl || [],
+            targetRange
+          );
         }
+      } catch (e) {
+        console.warn('[VoiceAgent] Failed to fetch dashboard data:', e);
       }
 
-      console.log('[VoiceAgent] Sending to AI with liveData:', dataContext ? 'YES (' + dataContext.length + ' chars)' : 'NO');
+      console.log('[VoiceAgent] Live data:', dataContext ? `YES (${dataContext.length} chars)` : 'NONE — will fall back to reports');
 
       const res = await fetch('/api/ai-analyst', {
         method: 'POST',
