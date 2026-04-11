@@ -66,15 +66,18 @@ const CATEGORIES = [
   { id: 'sales_execution', label: 'Sales Execution', icon: '🎯' },
   { id: 'profitability', label: 'Profitability', icon: '💰' },
   { id: 'funnel_health', label: 'Funnel Health', icon: '🏥' },
+  { id: 'mix_product', label: 'Mix & Product', icon: '🧩' },
 ];
 
 // --- Tab → relevant report types ---
+// Every tab gets all report types so the analyst always has full context
+const ALL_REPORT_TYPES = ['funnel_analyzer', 'lead_quality', 'volume_capacity', 'sales_execution', 'profitability', 'funnel_health', 'mix_product'];
 const TAB_REPORTS = {
-  daily: ['volume_capacity', 'funnel_health', 'funnel_analyzer'],
-  publishers: ['funnel_analyzer', 'lead_quality', 'profitability'],
-  agents: ['sales_execution', 'funnel_analyzer'],
-  carriers: ['mix_product'],
-  pnl: ['profitability'],
+  daily: ALL_REPORT_TYPES,
+  publishers: ALL_REPORT_TYPES,
+  agents: ALL_REPORT_TYPES,
+  carriers: ALL_REPORT_TYPES,
+  pnl: ALL_REPORT_TYPES,
 };
 
 // --- Extract date from report title ---
