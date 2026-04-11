@@ -17,8 +17,18 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
   const silenceTimerRef = useRef(null);
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
-  const activeRef = useRef(false); // mirrors voiceModeActive without stale closure issues
+  const activeRef = useRef(false);
   const stateRef = useRef('idle');
+
+  // Store callbacks in refs so they're never stale in closures
+  const onSendRef = useRef(onSend);
+  const onResponseRef = useRef(onResponse);
+  const onNavigationRef = useRef(onNavigation);
+  const ttsVoiceRef = useRef(ttsVoice);
+  useEffect(() => { onSendRef.current = onSend; }, [onSend]);
+  useEffect(() => { onResponseRef.current = onResponse; }, [onResponse]);
+  useEffect(() => { onNavigationRef.current = onNavigation; }, [onNavigation]);
+  useEffect(() => { ttsVoiceRef.current = ttsVoice; }, [ttsVoice]);
 
   // Keep refs in sync
   useEffect(() => { activeRef.current = voiceModeActive; }, [voiceModeActive]);
@@ -137,23 +147,38 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
     }
   }, [clearSilenceTimer, stopRecognition]);
 
+  const speakFallback = useCallback((text) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      if (activeRef.current) startRecognition();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    u.onend = () => { if (activeRef.current) startRecognition(); };
+    u.onerror = () => { if (activeRef.current) startRecognition(); };
+    setVoiceState('speaking');
+    window.speechSynthesis.speak(u);
+  }, [startRecognition]);
+
   const handleUtterance = useCallback(async (text) => {
     setVoiceState('processing');
     setTranscript(text);
 
     try {
-      // Send to AI analyst
-      const response = await onSend(text);
+      // Use refs to always call the latest callback (prevents stale closure data)
+      const response = await onSendRef.current(text);
       if (!activeRef.current) return;
 
       // Execute navigation commands
-      if (response?.navigation && onNavigation) {
-        onNavigation(response.navigation);
+      if (response?.navigation && onNavigationRef.current) {
+        onNavigationRef.current(response.navigation);
       }
 
       // Notify caller of response
-      if (onResponse) {
-        onResponse({ userText: text, ...response });
+      if (onResponseRef.current) {
+        onResponseRef.current({ userText: text, ...response });
       }
 
       // Play TTS
@@ -172,7 +197,7 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
         speakFallback('Sorry, I encountered an error. Please try again.');
       }
     }
-  }, [onSend, onResponse, onNavigation, startRecognition]);
+  }, [startRecognition, stopAudio]);
 
   const playTTS = useCallback(async (text) => {
     if (!activeRef.current) return;
@@ -187,7 +212,7 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: ttsVoice }),
+        body: JSON.stringify({ text, voice: ttsVoiceRef.current }),
       });
 
       if (!res.ok) throw new Error(`TTS API returned ${res.status}`);
@@ -283,28 +308,7 @@ export function useVoiceMode({ onSend, onResponse, onNavigation, ttsVoice = 'nov
       stopAudio();
       speakFallback(text);
     }
-  }, [ttsVoice, stopAudio, startRecognition]);
-
-  const speakFallback = useCallback((text) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      // No fallback available, just go back to listening
-      if (activeRef.current) startRecognition();
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    u.onend = () => {
-      if (activeRef.current) startRecognition();
-    };
-    u.onerror = () => {
-      if (activeRef.current) startRecognition();
-    };
-    setVoiceState('speaking');
-    window.speechSynthesis.speak(u);
-  }, [startRecognition]);
+  }, [stopAudio, startRecognition, speakFallback, handleUtterance]);
 
   const toggleVoiceMode = useCallback(() => {
     if (voiceModeActive) {
