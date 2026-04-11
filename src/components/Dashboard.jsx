@@ -8,6 +8,7 @@ import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import AiAnalystPane from './AiAnalystPane';
+// VoiceAgent moved to page.js to persist across loading states
 import DatePicker from './shared/DatePicker';
 
 const C = {
@@ -227,7 +228,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
 
   const placed = policies.filter(isPlaced);
 
-  const overlayStyle = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 2000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto' };
+  const vpw = typeof document !== 'undefined' ? parseInt(getComputedStyle(document.documentElement).getPropertyValue('--voice-panel-width') || '0') : 0;
+  const overlayStyle = { position: 'fixed', top: 0, left: 0, bottom: 0, right: vpw, background: 'rgba(0,0,0,0.75)', zIndex: 2000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto' };
   const modalStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20, minWidth: 900, maxWidth: 1400, width: '100%', position: 'relative' };
   const thStyle = { textAlign: 'left', padding: '5px 8px', color: C.muted, fontWeight: 600, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   const tdStyle = (color) => ({ padding: '4px 8px', color: color || C.text, fontSize: 10, fontFamily: C.mono, borderBottom: `1px solid ${C.border}22`, whiteSpace: 'nowrap' });
@@ -1709,8 +1711,14 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
 }
 
 // ─── PUBLISHERS TAB ─────────────────────────────────
-function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies, vaData }) {
+function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies, vaData, voiceDrillTarget, clearVoiceDrill }) {
   const [drill, setDrill] = useState(null);
+  useEffect(() => {
+    if (voiceDrillTarget?.type === 'publisher' && voiceDrillTarget?.name) {
+      setDrill(voiceDrillTarget.name);
+      if (clearVoiceDrill) clearVoiceDrill();
+    }
+  }, [voiceDrillTarget, clearVoiceDrill]);
   const cg = goals?.company || {};
 
   const pubTotals = useMemo(() => {
@@ -1816,8 +1824,14 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
 }
 
 // ─── AGENTS TAB ──────────────────────────────────────
-function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, vaData }) {
+function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, vaData, voiceDrillTarget, clearVoiceDrill }) {
   const [drill, setDrill] = useState(null);
+  useEffect(() => {
+    if (voiceDrillTarget?.type === 'agent' && voiceDrillTarget?.name) {
+      setDrill(voiceDrillTarget.name);
+      if (clearVoiceDrill) clearVoiceDrill();
+    }
+  }, [voiceDrillTarget, clearVoiceDrill]);
   const days = calcDays(dateRange.start, dateRange.end);
   const ag = goals?.agent || {};
   const isSalaried = name => (goals?.agents?.[name]?.commissionType || '').toLowerCase() === 'salary';
@@ -1930,8 +1944,14 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, va
 }
 
 // ─── CARRIERS TAB ────────────────────────────────────
-function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, vaData }) {
+function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, vaData, voiceDrillTarget, clearVoiceDrill }) {
   const [drill, setDrill] = useState(null);
+  useEffect(() => {
+    if (voiceDrillTarget?.type === 'carrier' && voiceDrillTarget?.name) {
+      setDrill(voiceDrillTarget.name);
+      if (clearVoiceDrill) clearVoiceDrill();
+    }
+  }, [voiceDrillTarget, clearVoiceDrill]);
 
   // Group by Carrier + Product + Payout
   const carrierMap = {};
@@ -3238,8 +3258,7 @@ function AgentPerformanceTab({ dateRange, calls, policies }) {
   );
 }
 // ─── MAIN DASHBOARD ──────────────────────────────────
-export default function Dashboard({ data, allTimePolicies, goals, vaData, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource }) {
-  const [activeTab, setActiveTab] = useState('daily');
+export default function Dashboard({ data, allTimePolicies, goals, vaData, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource, activeTab, setActiveTab, voiceDrillTarget, setVoiceDrillTarget, aiPaneOpen, setAiPaneOpen, voiceTileTarget, setVoiceTileTarget, voicePanelOpen }) {
   if (loading || !data) {
     return (
       <div style={{ background: C.bg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.text, fontFamily: C.sans }}>
@@ -3252,8 +3271,19 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
     );
   }
   const { policies = [], calls = [], pnl = [] } = data || {};
+  const voicePanelWidth = voicePanelOpen ? 380 : 0;
+
+  // Set CSS custom property so TileModal can read it
+  useEffect(() => {
+    document.documentElement.style.setProperty('--voice-panel-width', `${voicePanelWidth}px`);
+  }, [voicePanelWidth]);
+
   return (
-    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans }}>
+    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth, transition: 'margin-right 0.2s ease' }}>
+      {/* Voice-triggered tile modal */}
+      {voiceTileTarget && MODAL_CONFIGS_KEYS.includes(voiceTileTarget) && (
+        <TileModal tileKey={voiceTileTarget} policies={policies} calls={calls} pnl={pnl} onClose={() => setVoiceTileTarget(null)} />
+      )}
       {/* White calendar date pickers rendered below */}
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '12px 24px', position: 'sticky', top: 0, zIndex: 50 }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -3301,9 +3331,9 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
       </div>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
         {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
-        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
-        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
-        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
+        {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
+        {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
+        {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
         {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
         {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
         {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
@@ -3313,7 +3343,21 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'commission-statements' && <CommissionStatementsTab />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
       </div>
-      <AiAnalystPane activeTab={activeTab} />
+      <AiAnalystPane
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        applyPreset={applyPreset}
+        setCustomRange={setCustomRange}
+        dataSource={dataSource}
+        setDataSource={setDataSource}
+        dateRange={dateRange}
+        setVoiceDrillTarget={setVoiceDrillTarget}
+        policies={policies}
+        calls={calls}
+        pnl={pnl}
+        goals={goals}
+        onOpenChange={setAiPaneOpen}
+      />
     </div>
   );
 }

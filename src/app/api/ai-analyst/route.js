@@ -728,7 +728,7 @@ async function fetchReports() {
 
 // ─── SYSTEM PROMPT ───────────────────────────────────────────────
 
-function buildSystemPrompt(tab, entity, hasHistory) {
+function buildSystemPrompt(tab, entity, hasHistory, voiceMode = false) {
   let focus = '';
   if (tab && TAB_REPORTS[tab]) {
     const reportNames = {
@@ -788,7 +788,51 @@ Guidelines:
 - Highlight anomalies, risks, and opportunities.
 - Compare performance against goals or historical benchmarks when the data supports it.
 - For suggested questions, generate 3-4 contextually relevant follow-up questions the user might ask next.
-- If report data is limited or unavailable, say so honestly rather than speculating.`;
+- If report data is limited or unavailable, say so honestly rather than speculating.${voiceMode ? `
+
+VOICE MODE — Your response will be spoken aloud via text-to-speech.
+
+FORMAT RULES:
+- Keep responses conversational and concise (2-4 sentences for simple queries, up to 8 for detailed analysis).
+- Do NOT use markdown formatting (no **, no bullet dashes, no headers).
+- Use natural spoken language: say "about 45 percent" not "~45%", say "three hundred forty dollars" not "$340".
+- Use transition phrases like "Looking at that now..." or "Here's what I see..."
+- Do NOT include suggested follow-up questions in voice mode.
+
+NAVIGATION COMMANDS:
+You MUST include a <<<NAV>>> JSON block at the END of your response whenever the user's question implies a time period, tab, data source, or entity. The spoken portion must NOT contain the <<<NAV>>> block.
+
+<<<NAV>>>
+{"tab": null, "datePreset": null, "dataSource": null, "drillDown": null, "openTile": null}
+<<<NAV>>>
+
+Field values (use null for fields that should not change):
+- tab: "daily", "publishers", "agents", "carriers", "combined-policies", "pnl", "agent-perf", "policies-detail", "policy-status", "leads-crm", "retention", "business-health", "commission-statements", "data-diff", "carrier-sync"
+- datePreset: "yesterday", "today", "last7", "last30", "mtd", "wtd", "all"
+- dataSource: "Sheet1" (App Data) or "Merged" (Carrier Data)
+- drillDown: { "type": "agent" | "publisher" | "carrier", "name": "..." }
+- openTile: opens a metric detail modal. Valid values: "apps_submitted", "gross_adv_revenue", "eff_revenue", "total_calls", "billable_calls", "billable_rate", "monthly_premium", "lead_spend", "agent_commission", "net_revenue", "cpa", "rpc", "close_rate", "placement_rate", "premium_cost_ratio", "avg_premium"
+
+IMPORTANT — Always include <<<NAV>>> when:
+- The user mentions a time period: "yesterday" -> datePreset: "yesterday", "last week" -> datePreset: "last7", "this month" -> datePreset: "mtd", "today" -> datePreset: "today", "last 30 days" -> datePreset: "last30"
+- The user mentions a tab or view: "agents", "publishers", "carriers", "P&L", "daily", etc.
+- The user asks about a specific agent, publisher, or carrier by name -> include drillDown
+- The user says "show me", "go to", "switch to", "open", "navigate to"
+- The user asks about a specific metric (CPA, close rate, premium, calls, etc.) -> include openTile to show the detail modal
+
+Examples:
+- "Show me agents" -> tab: "agents"
+- "What happened yesterday?" -> datePreset: "yesterday"
+- "How did we do this month?" -> datePreset: "mtd"
+- "How is Bill doing?" -> tab: "agents", drillDown: { "type": "agent", "name": "Bill" }
+- "Switch to carrier data" -> dataSource: "Merged"
+- "Show me the last 7 days" -> datePreset: "last7"
+- "Tell me about the CPA" -> openTile: "cpa"
+- "What's the close rate?" -> openTile: "close_rate"
+- "Show me lead spend" -> openTile: "lead_spend"
+- "Break down the premium" -> openTile: "monthly_premium"
+- You CAN both navigate AND provide analysis in the same response.
+- Only omit the <<<NAV>>> block for pure analytical questions with no time/entity/tab/metric reference.` : ''}`;
 }
 
 // ─── GET HANDLER ─────────────────────────────────────────────────
@@ -942,51 +986,68 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { question, tab, entity, reportContent } = body;
+    const { question, tab, entity, reportContent, voiceMode, liveData } = body;
 
     if (!question) {
       return NextResponse.json({ error: 'question is required' }, { status: 400 });
     }
 
-    let context = reportContent || '';
-
-    // If no pre-provided content, fetch reports
-    if (!context) {
-      const reports = await fetchReports();
-      const relevantTypes = TAB_REPORTS[tab] || [];
-      let relevantReports = reports.filter((r) => relevantTypes.includes(r.type));
-      if (!relevantReports.length) relevantReports = reports;
-
-      context = relevantReports
-        .map((r) => `--- ${r.title} (${r.modifiedTime}) ---\n${r.content}`)
-        .join('\n\n');
-    }
-
-    // Check if question needs historical context
+    // When live dashboard data is provided, skip reports — use live data as the sole source of truth
+    let context = '';
     let historyContext = '';
-    const wantsHistory = needsHistoricalContext(question);
-    if (wantsHistory) {
-      const days = getHistoryDays(question);
-      const [dailyRows, agentRows, vaRows] = await Promise.all([
-        getHistoryMetrics(days),
-        getAgentHistory(days),
-        getVAHistory(days),
-      ]);
-      if (dailyRows.length || agentRows.length || vaRows.length) {
-        historyContext = formatHistoryForContext(dailyRows, agentRows, vaRows);
+
+    if (!liveData) {
+      context = reportContent || '';
+
+      // If no pre-provided content, fetch reports
+      if (!context) {
+        const reports = await fetchReports();
+        const relevantTypes = TAB_REPORTS[tab] || [];
+        let relevantReports = reports.filter((r) => relevantTypes.includes(r.type));
+        if (!relevantReports.length) relevantReports = reports;
+
+        context = relevantReports
+          .map((r) => `--- ${r.title} (${r.modifiedTime}) ---\n${r.content}`)
+          .join('\n\n');
+      }
+
+      // Check if question needs historical context
+      const wantsHistory = needsHistoricalContext(question);
+      if (wantsHistory) {
+        const days = getHistoryDays(question);
+        const [dailyRows, agentRows, vaRows] = await Promise.all([
+          getHistoryMetrics(days),
+          getAgentHistory(days),
+          getVAHistory(days),
+        ]);
+        if (dailyRows.length || agentRows.length || vaRows.length) {
+          historyContext = formatHistoryForContext(dailyRows, agentRows, vaRows);
+        }
       }
     }
 
-    const systemPrompt = buildSystemPrompt(tab, entity, !!historyContext);
+    const systemPrompt = buildSystemPrompt(tab, entity, !!historyContext, voiceMode);
 
     const messages = [
       { role: 'system', content: systemPrompt },
     ];
 
+    // Inject live dashboard data first (highest priority — these are the exact numbers on screen)
+    if (liveData) {
+      messages.push({
+        role: 'user',
+        content: liveData,
+      });
+      messages.push({
+        role: 'assistant',
+        content: 'I can see the live dashboard data. I will use ONLY these exact numbers in my responses — no other source.',
+      });
+    }
+
     if (context || historyContext) {
       messages.push({
         role: 'user',
-        content: `Here are the latest operational reports for context:\n\n${context}${historyContext}`,
+        content: `Here are the latest operational reports for additional context:\n\n${context}${historyContext}`,
       });
       messages.push({
         role: 'assistant',
@@ -998,7 +1059,7 @@ export async function POST(request) {
 
     messages.push({
       role: 'user',
-      content: `${question}\n\nAlso suggest 3-4 relevant follow-up questions.`,
+      content: voiceMode ? question : `${question}\n\nAlso suggest 3-4 relevant follow-up questions.`,
     });
 
     const openai = getOpenAI();
@@ -1006,10 +1067,16 @@ export async function POST(request) {
       model: 'gpt-4o',
       messages,
       temperature: 0.4,
-      max_tokens: 1500,
+      max_tokens: voiceMode ? 800 : 1500,
     });
 
     const raw = completion.choices[0]?.message?.content || '';
+
+    if (voiceMode) {
+      const { spokenText, navigation } = parseNavigationCommands(raw);
+      return NextResponse.json({ answer: spokenText, spokenText, navigation });
+    }
+
     const { insights: answer, suggestedQuestions: suggestedFollowUps } =
       parseInsightsAndQuestions(raw);
 
@@ -1021,6 +1088,32 @@ export async function POST(request) {
       { status: 500 }
     );
   }
+}
+
+// ─── PARSE NAVIGATION (VOICE MODE) ──────────────────────────────
+
+function parseNavigationCommands(text) {
+  const navMatch = text.match(/<<<NAV>>>([\s\S]*?)<<<NAV>>>/);
+  let navigation = null;
+  let spokenText = text;
+
+  if (navMatch) {
+    spokenText = text.replace(/<<<NAV>>>[\s\S]*?<<<NAV>>>/, '').trim();
+    try {
+      const parsed = JSON.parse(navMatch[1].trim());
+      navigation = {};
+      if (parsed.tab) navigation.tab = parsed.tab;
+      if (parsed.datePreset) navigation.datePreset = parsed.datePreset;
+      if (parsed.dataSource) navigation.dataSource = parsed.dataSource;
+      if (parsed.drillDown) navigation.drillDown = parsed.drillDown;
+      if (parsed.openTile) navigation.openTile = parsed.openTile;
+      if (Object.keys(navigation).length === 0) navigation = null;
+    } catch (e) {
+      console.warn('[ai-analyst] Failed to parse navigation JSON:', e.message);
+    }
+  }
+
+  return { spokenText, navigation };
 }
 
 // ─── PARSE RESPONSE ──────────────────────────────────────────────

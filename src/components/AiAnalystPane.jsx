@@ -1,6 +1,55 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useVoiceMode } from '@/hooks/useVoiceMode';
+
+const isPlacedPolicy = p => ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(p.placed);
+
+function getTargetDateRange(text) {
+  const today = new Date();
+  const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const lower = text.toLowerCase();
+  if (lower.includes('yesterday')) { const y = new Date(); y.setDate(y.getDate() - 1); return { start: fmt(y), end: fmt(y) }; }
+  if (lower.includes('today')) return { start: fmt(today), end: fmt(today) };
+  if (/last\s*(7|seven)/.test(lower)) { const s = new Date(); s.setDate(s.getDate() - 6); return { start: fmt(s), end: fmt(today) }; }
+  if (/last\s*(30|thirty)/.test(lower)) { const s = new Date(); s.setDate(s.getDate() - 29); return { start: fmt(s), end: fmt(today) }; }
+  if (lower.includes('this month') || lower.includes('mtd')) return { start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), end: fmt(today) };
+  if (lower.includes('this week') || lower.includes('wtd')) { const day = today.getDay(); const s = new Date(today); s.setDate(today.getDate() - (day === 0 ? 6 : day - 1)); return { start: fmt(s), end: fmt(today) }; }
+  return { start: fmt(today), end: fmt(today) };
+}
+
+function buildLiveDataContext(policies, calls, pnl, dateRange) {
+  if (!policies?.length && !calls?.length) return '';
+  const placed = (policies || []).filter(isPlacedPolicy);
+  const totalPremium = (policies || []).reduce((s, p) => s + (p.premium || 0), 0);
+  const totalLeadSpend = (pnl || []).reduce((s, p) => s + (p.leadSpend || 0), 0);
+  const totalGAR = (policies || []).reduce((s, p) => s + (p.grossAdvancedRevenue || 0), 0);
+  const totalComm = (policies || []).reduce((s, p) => s + (p.commission || 0), 0);
+  const billable = (calls || []).filter(c => c.isBillable).length;
+  const totalCalls = (calls || []).length;
+  const apps = (policies || []).length;
+  const cpa = apps > 0 ? totalLeadSpend / apps : 0;
+  const closeRate = billable > 0 ? apps / billable * 100 : 0;
+  const placementRate = apps > 0 ? placed.length / apps * 100 : 0;
+  const avgPremium = apps > 0 ? totalPremium / apps : 0;
+  const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
+  const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
+  const netRevenue = totalGAR - totalLeadSpend - totalComm;
+  const premCost = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
+  const agentMap = {};
+  (policies || []).forEach(p => {
+    if (!agentMap[p.agent]) agentMap[p.agent] = { apps: 0, placed: 0, premium: 0 };
+    agentMap[p.agent].apps++;
+    if (isPlacedPolicy(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium || 0; }
+  });
+  const agentSummary = Object.entries(agentMap).map(([name, a]) => `${name}: ${a.apps} apps, ${a.placed} placed, $${a.premium.toFixed(0)} premium`).join('\n  ');
+  const pubSummary = (pnl || []).map(p => {
+    const pubRpc = p.totalCalls > 0 ? (p.leadSpend / p.totalCalls) : 0;
+    const pubBillRate = p.totalCalls > 0 ? (p.billableCalls / p.totalCalls * 100) : 0;
+    return `${p.campaign} (${p.vendor || ''}): ${p.totalCalls} calls, ${p.billableCalls} billable (${pubBillRate.toFixed(1)}%), $${p.leadSpend.toFixed(2)} spend, RPC $${pubRpc.toFixed(2)}, ${p.placedCount} placed`;
+  }).join('\n  ');
+  return `\nLIVE DASHBOARD DATA (${dateRange?.start || ''} to ${dateRange?.end || ''}):\nThese are the exact numbers currently displayed. USE THESE NUMBERS, not report data.\n\nSUMMARY: Apps: ${apps}, Placed: ${placed.length}, Calls: ${totalCalls}, Billable: ${billable} (${billableRate.toFixed(1)}%), Premium: $${totalPremium.toFixed(2)}, GAR: $${totalGAR.toFixed(0)}, Lead Spend: $${totalLeadSpend.toFixed(0)}, Commission: $${totalComm.toFixed(0)}, Net Revenue: $${netRevenue.toFixed(0)}, CPA: $${cpa.toFixed(2)}, RPC: $${rpc.toFixed(2)}, Close Rate: ${closeRate.toFixed(1)}%, Placement Rate: ${placementRate.toFixed(1)}%, Premium:Cost: ${premCost.toFixed(2)}x, Avg Premium: $${avgPremium.toFixed(2)}\n\nAGENTS:\n  ${agentSummary || 'No agent data'}\n\nPUBLISHERS:\n  ${pubSummary || 'No publisher data'}`;
+}
 
 const C = {
   bg: '#080b10',
@@ -367,7 +416,8 @@ function buildReportContent(content) {
 }
 
 
-export default function AiAnalystPane({ activeTab, activeEntity }) {
+export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, applyPreset, setCustomRange, dataSource, setDataSource, dateRange, setVoiceDrillTarget, policies: dashPolicies, calls: dashCalls, pnl: dashPnl, goals: dashGoals, onOpenChange }) {
+  const liveDataContext = useMemo(() => buildLiveDataContext(dashPolicies, dashCalls, dashPnl, dateRange), [dashPolicies, dashCalls, dashPnl, dateRange]);
   const [open, setOpen] = useState(false);
   const [paneHeight, setPaneHeight] = useState(0);
   const [splitRatio, setSplitRatio] = useState(DEFAULT_SPLIT);
@@ -401,6 +451,51 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
   const contentScrollRef = useRef(null);
   const dragStartRef = useRef({ y: 0, height: 0 });
 
+  // Voice navigation handler
+  const handleNavigation = useCallback((nav) => {
+    console.log('[VoiceNav] Executing navigation:', nav);
+    if (nav.tab && setActiveTab) { console.log('[VoiceNav] Switching tab to:', nav.tab); setActiveTab(nav.tab); }
+    if (nav.datePreset && applyPreset) { console.log('[VoiceNav] Applying preset:', nav.datePreset); applyPreset(nav.datePreset); }
+    if (nav.dataSource && setDataSource) { console.log('[VoiceNav] Switching data source:', nav.dataSource); setDataSource(nav.dataSource); }
+    if (nav.drillDown && setVoiceDrillTarget) { console.log('[VoiceNav] Drilling down:', nav.drillDown); setVoiceDrillTarget(nav.drillDown); }
+  }, [setActiveTab, applyPreset, setDataSource, setVoiceDrillTarget]);
+
+  // Voice mode hook
+  const {
+    voiceModeActive, voiceState, transcript: voiceTranscript, lastResponseText,
+    toggleVoiceMode, interruptSpeaking, error: voiceError, clearError: clearVoiceError,
+  } = useVoiceMode({
+    onSend: async (text) => {
+      // AI pane is open — use reports as the data source, not live tile data
+      const res = await fetch('/api/ai-analyst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: text,
+          tab: activeTab || 'daily',
+          entity: activeEntity,
+          reportContent: reportContent || undefined,
+          voiceMode: true,
+          liveData: null,
+        }),
+      });
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      return await res.json();
+    },
+    onResponse: (response) => {
+      // Cancel any browser TTS before adding messages (prevents dual voice)
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setMessages(prev => [...prev,
+        { role: 'user', content: response.userText },
+        { role: 'assistant', content: response.answer || response.spokenText || '' },
+      ]);
+    },
+    onNavigation: handleNavigation,
+    ttsVoice: 'nova',
+  });
+
   // Inject keyframes
   useEffect(() => {
     const styleId = 'ai-analyst-keyframes';
@@ -412,6 +507,8 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
       @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
       @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      @keyframes voicePulse { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(91,159,255,0.4); } 50% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(91,159,255,0); } }
+      @keyframes eqBar { 0%, 100% { height: 4px; } 50% { height: 20px; } }
     `;
     document.head.appendChild(style);
     return () => { const el = document.getElementById(styleId); if (el) el.remove(); };
@@ -484,9 +581,19 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
 
-  // TTS
+  // When voice mode activates, kill browser TTS
   useEffect(() => {
-    if (!ttsEnabled || messages.length === 0) return;
+    if (voiceModeActive) {
+      setTtsEnabled(false);
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    }
+  }, [voiceModeActive]);
+
+  // TTS (browser-based, only when voice mode is OFF)
+  useEffect(() => {
+    if (!ttsEnabled || voiceModeActive || messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role === 'assistant' && typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
@@ -494,7 +601,7 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
       u.rate = 1.0; u.pitch = 1.0;
       window.speechSynthesis.speak(u);
     }
-  }, [messages, ttsEnabled]);
+  }, [messages, ttsEnabled, voiceModeActive]);
 
   const sendMessage = useCallback(async (text) => {
     const question = text || input;
@@ -512,6 +619,7 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
           tab: activeTab || 'daily',
           entity: activeEntity || undefined,
           reportContent: reportContent || undefined,
+          liveData: liveDataContext,
         }),
       });
       if (res.ok) {
@@ -614,7 +722,7 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
   // ---------- TOGGLE BUTTON (top-right, always visible) ----------
   const toggleButton = (
     <button
-      onClick={() => setOpen(!open)}
+      onClick={() => { const next = !open; setOpen(next); if (onOpenChange) onOpenChange(next); }}
       style={{
         background: open ? C.accent : C.surface,
         border: `1px solid ${open ? C.accent : C.border}`,
@@ -740,7 +848,7 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
               </select>
             )}
             <button
-              onClick={() => { setOpen(false); }}
+              onClick={() => { setOpen(false); if (onOpenChange) onOpenChange(false); }}
               style={{
                 background: 'none', border: 'none', color: C.muted, fontSize: 16,
                 cursor: 'pointer', padding: '4px 8px', borderRadius: 4,
@@ -909,75 +1017,175 @@ export default function AiAnalystPane({ activeTab, activeEntity }) {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Input bar */}
-          <div style={{
-            padding: '8px 12px', borderTop: `1px solid ${C.border}`,
-            display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0,
-          }}>
-            <button
-              onClick={toggleTts}
-              style={{
-                background: ttsEnabled ? C.accent : 'transparent',
-                border: `1px solid ${ttsEnabled ? C.accent : C.border}`,
-                color: ttsEnabled ? '#fff' : C.muted,
-                borderRadius: '50%', width: 30, height: 30,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', fontSize: 13, flexShrink: 0, transition: 'all 0.2s',
-              }}
-              title={ttsEnabled ? 'Disable TTS' : 'Enable TTS'}
-            >
-              {ttsEnabled ? '🔊' : '🔇'}
-            </button>
+          {/* Input bar — switches between text mode and voice mode */}
+          {voiceModeActive ? (
+            /* ── Voice Mode UI ── */
+            <div style={{
+              padding: '12px', borderTop: `1px solid ${C.border}`, flexShrink: 0,
+            }}>
+              {/* Voice error display */}
+              {voiceError && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  padding: '8px 12px', marginBottom: 8, background: '#2e0a0a',
+                  borderRadius: 8, border: '1px solid #f8717133',
+                }}>
+                  <span style={{ color: C.red, fontSize: 11 }}>
+                    {voiceError === 'no-mic-permission' ? 'Microphone access required. Please allow mic access and try again.'
+                      : voiceError === 'browser-unsupported' ? 'Voice mode requires Chrome, Edge, or Safari.'
+                      : 'Voice error occurred.'}
+                  </span>
+                  <button onClick={() => { clearVoiceError(); toggleVoiceMode(); }} style={{
+                    background: C.red, border: 'none', color: '#fff', borderRadius: 4,
+                    padding: '3px 8px', fontSize: 10, cursor: 'pointer', fontWeight: 600,
+                  }}>Retry</button>
+                </div>
+              )}
 
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about the reports..."
-              style={{
-                flex: 1, background: C.bg, border: `1px solid ${C.border}`,
-                color: C.text, borderRadius: 20, padding: '8px 16px',
-                fontSize: 12, fontFamily: C.mono, outline: 'none',
-                transition: 'border-color 0.2s',
-              }}
-              onFocus={e => e.target.style.borderColor = C.accent}
-              onBlur={e => e.target.style.borderColor = C.border}
-            />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                {/* State indicator */}
+                {voiceState === 'listening' && (
+                  <>
+                    <div style={{
+                      width: 56, height: 56, borderRadius: '50%', background: `${C.accent}22`,
+                      border: `2px solid ${C.accent}`, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', fontSize: 24, animation: 'voicePulse 2s ease-in-out infinite',
+                    }}>🎤</div>
+                    <span style={{ fontSize: 10, color: C.accent, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Listening...</span>
+                    {voiceTranscript && (
+                      <p style={{ fontSize: 11, color: C.muted, fontStyle: 'italic', margin: 0, textAlign: 'center', maxWidth: '90%' }}>
+                        "{voiceTranscript}"
+                      </p>
+                    )}
+                  </>
+                )}
 
-            <button
-              onClick={toggleListening}
-              style={{
-                background: isListening ? '#ef4444' : 'transparent',
-                border: `1px solid ${isListening ? '#ef4444' : C.border}`,
-                color: isListening ? '#fff' : C.muted,
-                borderRadius: '50%', width: 30, height: 30,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', fontSize: 13, flexShrink: 0, transition: 'all 0.2s',
-                animation: isListening ? 'pulse 1.2s infinite' : 'none',
-              }}
-              title={isListening ? 'Stop listening' : 'Voice input'}
-            >
-              🎤
-            </button>
+                {voiceState === 'processing' && (
+                  <>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', height: 32, justifyContent: 'center' }}>
+                      {[0, 1, 2].map(i => (
+                        <div key={i} style={{
+                          width: 8, height: 8, borderRadius: '50%', background: C.accent,
+                          animation: `typingDot 1.4s ease-in-out ${i * 0.2}s infinite`,
+                        }} />
+                      ))}
+                    </div>
+                    <span style={{ fontSize: 10, color: C.yellow, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Thinking...</span>
+                    {voiceTranscript && (
+                      <p style={{ fontSize: 11, color: C.muted, fontStyle: 'italic', margin: '4px 0 0', textAlign: 'center', maxWidth: '90%' }}>
+                        You said: "{voiceTranscript}"
+                      </p>
+                    )}
+                  </>
+                )}
 
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim()}
-              style={{
-                background: input.trim() ? C.accent : C.border,
-                border: 'none', color: input.trim() ? '#fff' : C.muted,
-                borderRadius: '50%', width: 30, height: 30,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: input.trim() ? 'pointer' : 'default',
-                fontSize: 14, flexShrink: 0, transition: 'all 0.2s',
-              }}
-              title="Send"
-            >
-              ➤
-            </button>
-          </div>
+                {voiceState === 'speaking' && (
+                  <>
+                    <div
+                      onClick={interruptSpeaking}
+                      style={{
+                        display: 'flex', gap: 3, alignItems: 'flex-end', height: 32,
+                        justifyContent: 'center', cursor: 'pointer', paddingBottom: 4,
+                      }}
+                      title="Click to interrupt and speak"
+                    >
+                      {[0, 1, 2, 3, 4, 5, 6].map(i => (
+                        <div key={i} style={{
+                          width: 4, borderRadius: 2, background: C.green,
+                          animation: `eqBar 0.8s ease-in-out ${i * 0.1}s infinite`,
+                        }} />
+                      ))}
+                    </div>
+                    {lastResponseText && (
+                      <div style={{
+                        maxHeight: 120, overflowY: 'auto', padding: '8px 12px',
+                        background: `${C.card}`, borderRadius: 8, border: `1px solid ${C.border}`,
+                        width: '100%', marginTop: 4,
+                      }}>
+                        <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.5, fontFamily: C.sans }}>
+                          {lastResponseText}
+                        </p>
+                      </div>
+                    )}
+                    <span style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 }}>tap or speak to interrupt</span>
+                  </>
+                )}
+
+                {/* Stop voice mode button */}
+                <button
+                  onClick={toggleVoiceMode}
+                  style={{
+                    background: '#ef4444', border: '2px solid #ef4444', color: '#fff',
+                    borderRadius: 20, padding: '8px 18px', fontSize: 13, cursor: 'pointer',
+                    fontWeight: 700, transition: 'all 0.2s', marginTop: 8,
+                    boxShadow: '0 0 12px #ef444444',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                  onMouseEnter={e => { e.target.style.boxShadow = '0 0 20px #ef444488'; }}
+                  onMouseLeave={e => { e.target.style.boxShadow = '0 0 12px #ef444444'; }}
+                >
+                  ⏹ Stop Voice Mode
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* ── Text Mode UI ── */
+            <div style={{
+              padding: '8px 12px', borderTop: `1px solid ${C.border}`,
+              display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0,
+            }}>
+              <button
+                onClick={toggleVoiceMode}
+                style={{
+                  background: C.accent,
+                  border: `2px solid ${C.accent}`,
+                  color: '#fff',
+                  borderRadius: 20, padding: '8px 18px',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  cursor: 'pointer', fontSize: 13, fontWeight: 700, flexShrink: 0, transition: 'all 0.2s',
+                  boxShadow: `0 0 12px ${C.accent}44`,
+                }}
+                title="Start Voice Mode"
+                onMouseEnter={e => { e.target.style.boxShadow = `0 0 20px ${C.accent}88`; }}
+                onMouseLeave={e => { e.target.style.boxShadow = `0 0 12px ${C.accent}44`; }}
+              >
+                🎙 Voice Mode
+              </button>
+
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask about the reports..."
+                style={{
+                  flex: 1, background: C.bg, border: `1px solid ${C.border}`,
+                  color: C.text, borderRadius: 20, padding: '8px 16px',
+                  fontSize: 12, fontFamily: C.mono, outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+                onFocus={e => e.target.style.borderColor = C.accent}
+                onBlur={e => e.target.style.borderColor = C.border}
+              />
+
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim()}
+                style={{
+                  background: input.trim() ? C.accent : C.border,
+                  border: 'none', color: input.trim() ? '#fff' : C.muted,
+                  borderRadius: '50%', width: 30, height: 30,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: input.trim() ? 'pointer' : 'default',
+                  fontSize: 14, flexShrink: 0, transition: 'all 0.2s',
+                }}
+                title="Send"
+              >
+                ➤
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

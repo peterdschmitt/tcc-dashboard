@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Dashboard from '@/components/Dashboard';
+import VoiceAgent from '@/components/VoiceAgent';
 
 export default function Home() {
   const [data, setData] = useState(null);
@@ -10,6 +11,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [earliestDate, setEarliestDate] = useState(null);
+  const [activeTab, setActiveTab] = useState('daily');
+  const [voiceDrillTarget, setVoiceDrillTarget] = useState(null);
+  const [aiPaneOpen, setAiPaneOpen] = useState(false);
+  const [voiceTileTarget, setVoiceTileTarget] = useState(null);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
 
   // Default to ALL so data shows immediately — uses wide range until we know the real earliest date
   const [dateRange, setDateRange] = useState({
@@ -128,18 +134,50 @@ export default function Home() {
     );
   }
 
+  const policies = data?.policies || [];
+  const calls = data?.calls || [];
+  const pnl = data?.pnl || [];
+
   return (
-    <Dashboard
-      data={data}
-      allTimePolicies={allTimePolicies}
-      goals={goals}
-      vaData={vaData}
-      loading={loading}
-      dateRange={dateRange}
-      applyPreset={applyPreset}
-      setCustomRange={setCustomRange}
-      dataSource={dataSource}
-      setDataSource={setDataSource}
-    />
+    <>
+      <Dashboard
+        data={data}
+        allTimePolicies={allTimePolicies}
+        goals={goals}
+        vaData={vaData}
+        loading={loading}
+        dateRange={dateRange}
+        applyPreset={applyPreset}
+        setCustomRange={setCustomRange}
+        dataSource={dataSource}
+        setDataSource={setDataSource}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        voiceDrillTarget={voiceDrillTarget}
+        setVoiceDrillTarget={setVoiceDrillTarget}
+        aiPaneOpen={aiPaneOpen}
+        setAiPaneOpen={setAiPaneOpen}
+        voiceTileTarget={voiceTileTarget}
+        setVoiceTileTarget={setVoiceTileTarget}
+        voicePanelOpen={voicePanelOpen}
+      />
+      <VoiceAgent
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        applyPreset={applyPreset}
+        setCustomRange={setCustomRange}
+        dataSource={dataSource}
+        setDataSource={setDataSource}
+        dateRange={dateRange}
+        setVoiceDrillTarget={setVoiceDrillTarget}
+        policies={policies}
+        calls={calls}
+        pnl={pnl}
+        goals={goals}
+        aiPaneOpen={aiPaneOpen}
+        setVoiceTileTarget={setVoiceTileTarget}
+        onPanelOpenChange={setVoicePanelOpen}
+      />
+    </>
   );
 }
