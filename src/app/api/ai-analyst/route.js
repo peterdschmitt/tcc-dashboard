@@ -36,6 +36,9 @@ const CACHE_TTL = 15 * 60 * 1000;
 
 // --- History config ---
 const HISTORY_TAB = () => process.env.REPORT_HISTORY_TAB || 'Daily Metrics';
+const AGENT_METRICS_TAB = () => process.env.AGENT_METRICS_TAB || 'Agent Metrics';
+const VA_METRICS_TAB = () => process.env.VA_METRICS_TAB || 'VA Metrics';
+
 const METRICS_HEADERS = [
   'Date', 'Total Calls', 'Billable Calls', 'Billable Rate',
   'Transfers', 'Transfer Rate', 'Apps Submitted', 'Policies Placed',
@@ -43,6 +46,21 @@ const METRICS_HEADERS = [
   'Total Premium', 'Gross Adv Revenue', 'Lead Spend', 'Net Revenue',
   'Avg Premium', 'Top Publisher', 'Top Agent', 'Worst CPA Publisher',
   'Report Types Available', 'Report Count', 'Generated At',
+];
+
+const AGENT_METRICS_HEADERS = [
+  'Date', 'Agent', 'Apps Submitted', 'Policies Placed', 'Total Premium',
+  'Avg Premium', 'Close Rate', 'Placement Rate', 'CPA',
+  'Total Calls', 'Billable Calls', 'Commission', 'Notes', 'Generated At',
+];
+
+const VA_METRICS_HEADERS = [
+  'Date', 'Total VA Calls', 'Transfers', 'Transfer Rate',
+  'VA Sales', 'VA Conversion Rate', 'Billable Calls',
+  'Intent Confirmation Rate', 'DOB Collection Rate',
+  'Budget Qualification Rate', 'Transfer Confirmation Rate',
+  'Top Campaign', 'Top Campaign Transfers', 'Top Campaign Transfer Rate',
+  'By Campaign JSON', 'Generated At',
 ];
 
 // Track whether we already archived today (per-process)
@@ -192,32 +210,13 @@ function parseSections(content) {
 
 // ─── HISTORICAL METRICS ──────────────────────────────────────────
 
-/** Ensure the Daily Metrics tab exists, create with headers if not */
-async function ensureHistoryTab() {
-  const sheetId = process.env.GOALS_SHEET_ID;
-  if (!sheetId) return;
-  const tab = HISTORY_TAB();
-
-  try {
-    const sheets = await getSheetsClient();
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title: tab } } }] },
-    });
-    // Tab was just created — write headers
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: sheetId,
-      range: `'${tab}'!A1`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [METRICS_HEADERS] },
-    });
-    console.log('[ai-analyst] Created Daily Metrics tab');
-  } catch (e) {
-    if (!e.message?.includes('already exists')) {
-      console.warn('[ai-analyst] ensureHistoryTab error:', e.message);
-    }
-    // Tab already exists — fine
-  }
+/** Ensure all history tabs exist */
+async function ensureHistoryTabs() {
+  await Promise.all([
+    ensureTab(HISTORY_TAB(), METRICS_HEADERS),
+    ensureTab(AGENT_METRICS_TAB(), AGENT_METRICS_HEADERS),
+    ensureTab(VA_METRICS_TAB(), VA_METRICS_HEADERS),
+  ]);
 }
 
 /** Extract structured metrics from reports using GPT-4o */
@@ -279,6 +278,112 @@ Rules:
   }
 }
 
+/** Extract per-agent metrics from reports using GPT-4o */
+async function extractAgentMetrics(reports) {
+  // Focus on Sales Execution / Agent Performance reports
+  const agentReports = reports.filter(r =>
+    r.type === 'sales_execution' || r.type === 'funnel_analyzer'
+  );
+  if (!agentReports.length) return [];
+
+  const reportContent = agentReports
+    .map((r) => `--- ${r.title} ---\n${r.content}`)
+    .join('\n\n');
+
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a data extraction assistant for TrueChoice Coverage (TCC), a final expense insurance call center.
+Extract PER-AGENT metrics from the provided reports. Return ONLY a valid JSON object:
+
+{
+  "agents": [
+    {
+      "name": "<agent name>",
+      "apps_submitted": <number or null>,
+      "policies_placed": <number or null>,
+      "total_premium": <number, dollars or null>,
+      "avg_premium": <number, dollars or null>,
+      "close_rate": <number, percentage or null>,
+      "placement_rate": <number, percentage or null>,
+      "cpa": <number, dollars or null>,
+      "total_calls": <number or null>,
+      "billable_calls": <number or null>,
+      "commission": <number, dollars or null>,
+      "notes": "<brief performance note, e.g. 'top closer', 'high CPA', 'new agent'>"
+    }
+  ]
+}
+
+Rules:
+- Include EVERY agent mentioned in the reports
+- Extract numbers as plain numbers (no $ or % signs)
+- For rates/percentages, use the number (e.g., 65 not 0.65)
+- If a metric is not available for an agent, use null
+- The "notes" field should be a brief observation about that agent's performance
+- Return ONLY the JSON, no explanation or markdown`,
+      },
+      { role: 'user', content: reportContent },
+    ],
+    temperature: 0,
+    max_tokens: 2000,
+    response_format: { type: 'json_object' },
+  });
+
+  try {
+    const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    return result.agents || [];
+  } catch (e) {
+    console.error('[ai-analyst] Failed to parse agent metrics JSON:', e.message);
+    return [];
+  }
+}
+
+/** Fetch VA metrics from the virtual-agent API (internal call) */
+async function fetchVAMetrics(reportDate) {
+  try {
+    // Use the same date range as the report
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:' + (process.env.PORT || 3003);
+    const res = await fetch(`${baseUrl}/api/virtual-agent?start=${reportDate}&end=${reportDate}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data;
+  } catch (e) {
+    console.warn('[ai-analyst] Could not fetch VA metrics:', e.message);
+    return null;
+  }
+}
+
+/** Ensure a tab exists with the given headers */
+async function ensureTab(tabName, headers) {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  if (!sheetId) return;
+
+  try {
+    const sheets = await getSheetsClient();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: tabName } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `'${tabName}'!A1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [headers] },
+    });
+    console.log(`[ai-analyst] Created ${tabName} tab`);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) {
+      console.warn(`[ai-analyst] ensureTab(${tabName}) error:`, e.message);
+    }
+  }
+}
+
 /** Check if today is already archived, if not extract metrics and append */
 async function ensureTodayArchived(reports) {
   const sheetId = process.env.GOALS_SHEET_ID;
@@ -292,68 +397,142 @@ async function ensureTodayArchived(reports) {
   if (archivedToday === reportDate) return;
 
   try {
-    // Check if this date already exists in the history tab
-    await ensureHistoryTab();
-    let existing = [];
+    await ensureHistoryTabs();
+
+    // Check which tabs already have this date
+    let dailyExists = false, agentExists = false, vaExists = false;
     try {
-      existing = await fetchSheet(sheetId, HISTORY_TAB(), 60);
-    } catch (e) {
-      // Tab might be empty or new
-    }
-    if (existing.some(r => r['Date'] === reportDate)) {
+      const [dailyRows, agentRows, vaRows] = await Promise.all([
+        fetchSheet(sheetId, HISTORY_TAB(), 60).catch(() => []),
+        fetchSheet(sheetId, AGENT_METRICS_TAB(), 60).catch(() => []),
+        fetchSheet(sheetId, VA_METRICS_TAB(), 60).catch(() => []),
+      ]);
+      dailyExists = dailyRows.some(r => r['Date'] === reportDate);
+      agentExists = agentRows.some(r => r['Date'] === reportDate);
+      vaExists = vaRows.some(r => r['Date'] === reportDate);
+    } catch (e) { /* tabs might not exist yet */ }
+
+    if (dailyExists && agentExists && vaExists) {
       archivedToday = reportDate;
-      return; // Already archived
+      return; // All already archived
     }
 
-    // Extract metrics from reports
-    console.log(`[ai-analyst] Extracting metrics for ${reportDate}...`);
-    const metrics = await extractMetrics(reports);
+    const now = new Date().toISOString();
 
-    // Build row values
-    const values = {
-      'Date': reportDate,
-      'Total Calls': metrics.total_calls ?? '',
-      'Billable Calls': metrics.billable_calls ?? '',
-      'Billable Rate': metrics.billable_rate ?? '',
-      'Transfers': metrics.transfers ?? '',
-      'Transfer Rate': metrics.transfer_rate ?? '',
-      'Apps Submitted': metrics.apps_submitted ?? '',
-      'Policies Placed': metrics.policies_placed ?? '',
-      'Close Rate': metrics.close_rate ?? '',
-      'Placement Rate': metrics.placement_rate ?? '',
-      'CPA': metrics.cpa ?? '',
-      'RPC': metrics.rpc ?? '',
-      'Total Premium': metrics.total_premium ?? '',
-      'Gross Adv Revenue': metrics.gross_adv_revenue ?? '',
-      'Lead Spend': metrics.lead_spend ?? '',
-      'Net Revenue': metrics.net_revenue ?? '',
-      'Avg Premium': metrics.avg_premium ?? '',
-      'Top Publisher': metrics.top_publisher ?? '',
-      'Top Agent': metrics.top_agent ?? '',
-      'Worst CPA Publisher': metrics.worst_cpa_publisher ?? '',
-      'Report Types Available': reports.map(r => r.type).join(', '),
-      'Report Count': String(reports.length),
-      'Generated At': new Date().toISOString(),
-    };
+    // --- 1. Extract aggregate daily metrics ---
+    if (!dailyExists) {
+      console.log(`[ai-analyst] Extracting daily metrics for ${reportDate}...`);
+      const metrics = await extractMetrics(reports);
+      const values = {
+        'Date': reportDate,
+        'Total Calls': metrics.total_calls ?? '',
+        'Billable Calls': metrics.billable_calls ?? '',
+        'Billable Rate': metrics.billable_rate ?? '',
+        'Transfers': metrics.transfers ?? '',
+        'Transfer Rate': metrics.transfer_rate ?? '',
+        'Apps Submitted': metrics.apps_submitted ?? '',
+        'Policies Placed': metrics.policies_placed ?? '',
+        'Close Rate': metrics.close_rate ?? '',
+        'Placement Rate': metrics.placement_rate ?? '',
+        'CPA': metrics.cpa ?? '',
+        'RPC': metrics.rpc ?? '',
+        'Total Premium': metrics.total_premium ?? '',
+        'Gross Adv Revenue': metrics.gross_adv_revenue ?? '',
+        'Lead Spend': metrics.lead_spend ?? '',
+        'Net Revenue': metrics.net_revenue ?? '',
+        'Avg Premium': metrics.avg_premium ?? '',
+        'Top Publisher': metrics.top_publisher ?? '',
+        'Top Agent': metrics.top_agent ?? '',
+        'Worst CPA Publisher': metrics.worst_cpa_publisher ?? '',
+        'Report Types Available': reports.map(r => r.type).join(', '),
+        'Report Count': String(reports.length),
+        'Generated At': now,
+      };
+      await appendRow(sheetId, HISTORY_TAB(), METRICS_HEADERS, values);
+      console.log(`[ai-analyst] Archived daily metrics for ${reportDate}`);
+    }
 
-    await appendRow(sheetId, HISTORY_TAB(), METRICS_HEADERS, values);
+    // --- 2. Extract per-agent metrics ---
+    if (!agentExists) {
+      try {
+        console.log(`[ai-analyst] Extracting agent metrics for ${reportDate}...`);
+        const agents = await extractAgentMetrics(reports);
+        if (agents.length > 0) {
+          const sheets = await getSheetsClient();
+          const agentRows = agents.map(a => AGENT_METRICS_HEADERS.map(h => {
+            const map = {
+              'Date': reportDate, 'Agent': a.name || '',
+              'Apps Submitted': a.apps_submitted ?? '', 'Policies Placed': a.policies_placed ?? '',
+              'Total Premium': a.total_premium ?? '', 'Avg Premium': a.avg_premium ?? '',
+              'Close Rate': a.close_rate ?? '', 'Placement Rate': a.placement_rate ?? '',
+              'CPA': a.cpa ?? '', 'Total Calls': a.total_calls ?? '',
+              'Billable Calls': a.billable_calls ?? '', 'Commission': a.commission ?? '',
+              'Notes': a.notes || '', 'Generated At': now,
+            };
+            return map[h] ?? '';
+          }));
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: sheetId, range: AGENT_METRICS_TAB(),
+            valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
+            requestBody: { values: agentRows },
+          });
+          console.log(`[ai-analyst] Archived ${agents.length} agent rows for ${reportDate}`);
+        }
+      } catch (e) {
+        console.warn('[ai-analyst] Agent metrics archive failed:', e.message);
+      }
+    }
+
+    // --- 3. Archive VA metrics ---
+    if (!vaExists) {
+      try {
+        const vaData = await fetchVAMetrics(reportDate);
+        if (vaData && vaData.meta && vaData.meta.totalCalls > 0) {
+          const m = vaData.meta;
+          let topCamp = '', topCampTransfers = 0, topCampRate = 0;
+          if (m.byCampaign) {
+            Object.entries(m.byCampaign).forEach(([camp, data]) => {
+              if (data.transfers > topCampTransfers) {
+                topCamp = camp; topCampTransfers = data.transfers;
+                topCampRate = data.calls > 0 ? (data.transfers / data.calls * 100) : 0;
+              }
+            });
+          }
+          const vaValues = {
+            'Date': reportDate, 'Total VA Calls': m.totalCalls ?? '',
+            'Transfers': m.transfers ?? '', 'Transfer Rate': m.transferRate?.toFixed(1) ?? '',
+            'VA Sales': '', 'VA Conversion Rate': '', 'Billable Calls': m.billableCalls ?? '',
+            'Intent Confirmation Rate': m.screening?.intentConfirmation?.toFixed(1) ?? '',
+            'DOB Collection Rate': m.screening?.collectDob?.toFixed(1) ?? '',
+            'Budget Qualification Rate': m.screening?.budgetQualification?.toFixed(1) ?? '',
+            'Transfer Confirmation Rate': m.screening?.transferConfirmation?.toFixed(1) ?? '',
+            'Top Campaign': topCamp, 'Top Campaign Transfers': String(topCampTransfers),
+            'Top Campaign Transfer Rate': topCampRate.toFixed(1),
+            'By Campaign JSON': JSON.stringify(m.byCampaign || {}), 'Generated At': now,
+          };
+          await appendRow(sheetId, VA_METRICS_TAB(), VA_METRICS_HEADERS, vaValues);
+          console.log(`[ai-analyst] Archived VA metrics for ${reportDate}`);
+        }
+      } catch (e) {
+        console.warn('[ai-analyst] VA metrics archive failed:', e.message);
+      }
+    }
+
     archivedToday = reportDate;
-    console.log(`[ai-analyst] Archived metrics for ${reportDate}`);
   } catch (err) {
     console.error('[ai-analyst] History archive failed:', err.message);
   }
 }
 
-/** Fetch historical metrics for the last N days */
-async function getHistoryMetrics(daysBack = 30) {
+/** Fetch historical rows from a given tab for the last N days */
+async function getHistoryFromTab(tabFn, daysBack = 30) {
   const sheetId = process.env.GOALS_SHEET_ID;
   if (!sheetId) return [];
 
   try {
-    const rows = await fetchSheet(sheetId, HISTORY_TAB(), 300); // 5-min cache
+    const rows = await fetchSheet(sheetId, tabFn(), 300); // 5-min cache
     if (!rows.length) return [];
 
-    // Calculate cutoff date
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - daysBack);
     const cutoffStr = cutoff.toISOString().split('T')[0];
@@ -362,31 +541,66 @@ async function getHistoryMetrics(daysBack = 30) {
       .filter(r => r['Date'] && r['Date'] >= cutoffStr)
       .sort((a, b) => b['Date'].localeCompare(a['Date']));
   } catch (e) {
-    console.warn('[ai-analyst] Could not fetch history:', e.message);
     return [];
   }
 }
 
-/** Format history metrics as a readable table for the LLM */
-function formatHistoryForContext(rows) {
+/** Fetch historical daily metrics */
+async function getHistoryMetrics(daysBack = 30) {
+  return getHistoryFromTab(HISTORY_TAB, daysBack);
+}
+
+/** Fetch historical agent metrics */
+async function getAgentHistory(daysBack = 30) {
+  return getHistoryFromTab(AGENT_METRICS_TAB, daysBack);
+}
+
+/** Fetch historical VA metrics */
+async function getVAHistory(daysBack = 30) {
+  return getHistoryFromTab(VA_METRICS_TAB, daysBack);
+}
+
+/** Format a set of rows as a markdown table */
+function formatTable(title, cols, rows) {
   if (!rows.length) return '';
-
-  const metricCols = [
-    'Date', 'Total Calls', 'Billable Calls', 'Billable Rate',
-    'Transfers', 'Transfer Rate', 'Apps Submitted', 'Policies Placed',
-    'Close Rate', 'CPA', 'RPC', 'Total Premium', 'Lead Spend', 'Net Revenue',
-    'Top Publisher', 'Top Agent',
-  ];
-
-  let table = '\n\n--- HISTORICAL DAILY METRICS ---\n';
-  table += metricCols.join(' | ') + '\n';
-  table += metricCols.map(() => '---').join(' | ') + '\n';
-
+  let table = `\n\n--- ${title} ---\n`;
+  table += cols.join(' | ') + '\n';
+  table += cols.map(() => '---').join(' | ') + '\n';
   rows.forEach(r => {
-    table += metricCols.map(c => r[c] || '—').join(' | ') + '\n';
+    table += cols.map(c => r[c] || '—').join(' | ') + '\n';
   });
-
   return table;
+}
+
+/** Format all history data for the LLM context */
+function formatHistoryForContext(dailyRows, agentRows, vaRows) {
+  let context = '';
+
+  if (dailyRows?.length) {
+    context += formatTable('HISTORICAL DAILY METRICS', [
+      'Date', 'Total Calls', 'Billable Calls', 'Billable Rate',
+      'Transfers', 'Transfer Rate', 'Apps Submitted', 'Policies Placed',
+      'Close Rate', 'CPA', 'RPC', 'Total Premium', 'Lead Spend', 'Net Revenue',
+      'Top Publisher', 'Top Agent',
+    ], dailyRows);
+  }
+
+  if (agentRows?.length) {
+    context += formatTable('HISTORICAL AGENT PERFORMANCE', [
+      'Date', 'Agent', 'Apps Submitted', 'Policies Placed', 'Total Premium',
+      'Close Rate', 'CPA', 'Total Calls', 'Notes',
+    ], agentRows);
+  }
+
+  if (vaRows?.length) {
+    context += formatTable('HISTORICAL VIRTUAL AGENT METRICS', [
+      'Date', 'Total VA Calls', 'Transfers', 'Transfer Rate',
+      'Intent Confirmation Rate', 'DOB Collection Rate',
+      'Budget Qualification Rate', 'Top Campaign', 'Top Campaign Transfer Rate',
+    ], vaRows);
+  }
+
+  return context;
 }
 
 /** Detect if a question needs historical context */
@@ -538,14 +752,22 @@ function buildSystemPrompt(tab, entity, hasHistory) {
   if (hasHistory) {
     historyInstructions = `
 
-You also have access to a HISTORICAL DAILY METRICS table showing key metrics from previous days. Use this data to:
+You also have access to HISTORICAL DATA TABLES from previous days:
+
+1. DAILY METRICS: Aggregate business metrics (calls, CPA, premium, close rate, etc.) per day
+2. AGENT PERFORMANCE: Per-agent metrics (apps, premium, close rate, CPA) per day — track individual agent trends
+3. VIRTUAL AGENT (VA) METRICS: VA screener performance (calls, transfers, transfer rate, screening step completion) per day
+
+Use this historical data to:
 - Compare current-day metrics against previous days (e.g., "CPA is $340 today vs $280 yesterday, a 21% increase")
+- Track individual agent performance trends (e.g., "Kari's close rate has improved from 35% to 42% this week")
+- Monitor VA screener effectiveness (e.g., "Transfer rate dropped from 50% to 38%, suggesting lead quality issues")
 - Identify trends over time (improving, declining, volatile, stable)
 - Calculate running averages and week-over-week changes
 - Highlight significant deviations from recent patterns
-- Explain what's driving changes by cross-referencing the full report content
+- Cross-reference agent performance with VA data to understand the full funnel
 Always clearly distinguish between current-day data and historical trends.
-When discussing trends, cite specific numbers and dates from the metrics table.`;
+When discussing trends, cite specific numbers and dates from the tables.`;
   }
 
   return `You are an AI analyst for TrueChoice Coverage (TCC), a final expense insurance call center.
@@ -635,8 +857,16 @@ export async function GET(request) {
     // --- Action: get-history ---
     if (action === 'get-history') {
       const days = parseInt(searchParams.get('days') || '30');
-      const rows = await getHistoryMetrics(days);
-      return NextResponse.json({ metrics: rows, count: rows.length });
+      const [dailyRows, agentRows, vaRows] = await Promise.all([
+        getHistoryMetrics(days),
+        getAgentHistory(days),
+        getVAHistory(days),
+      ]);
+      return NextResponse.json({
+        daily: { metrics: dailyRows, count: dailyRows.length },
+        agents: { metrics: agentRows, count: agentRows.length },
+        va: { metrics: vaRows, count: vaRows.length },
+      });
     }
 
     // --- Default: Pre-analyzed insights ---
@@ -664,9 +894,13 @@ export async function GET(request) {
     // Always include recent history for trend-aware insights
     let historyContext = '';
     try {
-      const historyRows = await getHistoryMetrics(7);
-      if (historyRows.length > 0) {
-        historyContext = formatHistoryForContext(historyRows);
+      const [dailyRows, agentRows, vaRows] = await Promise.all([
+        getHistoryMetrics(7),
+        getAgentHistory(7),
+        getVAHistory(7),
+      ]);
+      if (dailyRows.length || agentRows.length || vaRows.length) {
+        historyContext = formatHistoryForContext(dailyRows, agentRows, vaRows);
       }
     } catch (e) {
       console.warn('[ai-analyst] Could not fetch history for insights:', e.message);
@@ -733,9 +967,13 @@ export async function POST(request) {
     const wantsHistory = needsHistoricalContext(question);
     if (wantsHistory) {
       const days = getHistoryDays(question);
-      const historyRows = await getHistoryMetrics(days);
-      if (historyRows.length > 0) {
-        historyContext = formatHistoryForContext(historyRows);
+      const [dailyRows, agentRows, vaRows] = await Promise.all([
+        getHistoryMetrics(days),
+        getAgentHistory(days),
+        getVAHistory(days),
+      ]);
+      if (dailyRows.length || agentRows.length || vaRows.length) {
+        historyContext = formatHistoryForContext(dailyRows, agentRows, vaRows);
       }
     }
 
