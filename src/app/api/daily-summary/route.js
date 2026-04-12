@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
+import { fetchSheet } from '@/lib/sheets';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
 const isPlaced = p => PLACED_STATUSES.includes(p.placed);
@@ -104,16 +106,24 @@ export async function GET(request) {
 
     const byCampaign = {};
     pnl.forEach(p => {
+      const salesCount = p.appCount || 0;
+      const prem = p.totalPremium || 0;
+      const gar = p.grossAdvancedRevenue || 0;
+      const comm = p.totalCommission || 0;
       byCampaign[p.campaign] = {
         vendor: p.vendor,
         calls: p.totalCalls,
         billable: p.billableCalls,
         billableRate: p.totalCalls > 0 ? (p.billableCalls / p.totalCalls * 100) : 0,
         spend: p.leadSpend,
-        placed: p.placedCount,
-        premium: p.totalPremium,
+        sales: salesCount,
+        premium: prem,
+        gar,
+        commission: comm,
+        netRevenue: gar - (p.leadSpend || 0) - comm,
         rpc: p.totalCalls > 0 ? p.leadSpend / p.totalCalls : 0,
-        cpa: p.placedCount > 0 ? p.leadSpend / p.placedCount : 0,
+        cpa: salesCount > 0 ? p.leadSpend / salesCount : 0,
+        closeRate: p.billableCalls > 0 ? (salesCount / p.billableCalls * 100) : 0,
       };
     });
 
@@ -184,16 +194,37 @@ export async function GET(request) {
       const dayVA = vaCalls.filter(c => c.date === d);
       const dayVATransfers = dayVA.filter(c => c.transferConfirmation).length;
 
+      const dayPrem = dayPolicies.reduce((s, p) => s + (p.premium || 0), 0);
+
+      // Agent availability & talk time for this day
+      const dayPerf = agentPerf.filter(a => a.date === d);
+      const totalLoggedIn = dayPerf.reduce((s, a) => s + (a.loggedIn || 0), 0);
+      const totalAvailable = dayPerf.reduce((s, a) => s + (a.available || 0), 0);
+      const totalTalkTime = dayPerf.reduce((s, a) => s + (a.talkTime || 0), 0);
+      const agentCount = dayPerf.length;
+
       dailyOverview[d] = {
+        agentCount,
+        availPct: totalLoggedIn > 0 ? (totalAvailable / totalLoggedIn * 100) : 0,
+        talkTimeSec: totalTalkTime,
+        loggedInSec: totalLoggedIn,
+        salesPerAgent: agentCount > 0 ? dayPolicies.length / agentCount : 0,
         calls: dayCalls.length,
         sales: dayPolicies.length,
         billables: dayBillable,
+        billableRate: dayCalls.length > 0 ? (dayBillable / dayCalls.length * 100) : 0,
+        premium: dayPrem,
+        spend: daySpend,
         gar: dayGAR,
+        commission: dayComm,
         nar: dayGAR - daySpend - dayComm,
         cpa: dayPolicies.length > 0 ? daySpend / dayPolicies.length : 0,
         rpc: dayCalls.length > 0 ? daySpend / dayCalls.length : 0,
+        closeRate: dayBillable > 0 ? (dayPolicies.length / dayBillable * 100) : 0,
+        vaCalls: dayVA.length,
         vaTransfers: dayVATransfers,
-        vaSales: dayVA.filter(c => c.disposition?.toLowerCase().includes('transfer')).length,
+        vaTransferRate: dayVA.length > 0 ? (dayVATransfers / dayVA.length * 100) : 0,
+        avgPremium: dayPolicies.length > 0 ? dayPrem / dayPolicies.length : 0,
       };
     });
 
@@ -209,7 +240,7 @@ export async function GET(request) {
     });
     // Add call/billable data per carrier via the pnl agent breakdown
     const byCarrier = Object.entries(carrierMap).map(([name, c]) => ({
-      carrier: name, sales: c.sales, placed: c.placed, premium: c.premium, gar: c.gar,
+      carrier: name, sales: c.sales, premium: c.premium, gar: c.gar, commission: c.commission,
       cpa: c.sales > 0 ? totalLeadSpend * (c.sales / apps) / c.sales : 0,
       rpc: totalCalls > 0 ? totalLeadSpend * (c.sales / apps) / totalCalls : 0,
       conversionRate: billable > 0 ? c.sales / billable * 100 : 0,
@@ -231,32 +262,151 @@ export async function GET(request) {
 
     // ─── BUILD NARRATIVE CONTEXT ───
     const liveContext = `DAILY SUMMARY DATA for ${date}:
-SALES: ${apps} apps submitted, ${placed.length} placed
-FINANCIALS: CPA $${cpa.toFixed(2)}, GAR $${totalGAR.toFixed(0)}, Net Revenue $${netRevenue.toFixed(0)}, Lead Spend $${totalLeadSpend.toFixed(0)}, Commission $${totalComm.toFixed(0)}, Avg Premium $${avgPremium.toFixed(2)}
-CALLS: ${totalCalls} total, ${billable} billable (${billableRate.toFixed(1)}%)
-AGENTS: ${Object.entries(byAgent).map(([n, a]) => `${n}: ${a.apps} apps, ${a.placed} placed, $${a.premium.toFixed(0)} premium`).join('; ')}
-PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls, ${c.billable} billable, $${c.spend.toFixed(0)} spend, RPC $${c.rpc.toFixed(2)}`).join('; ')}
+SALES: ${apps} apps submitted
+FINANCIALS: CPA $${cpa.toFixed(2)}, GAR $${totalGAR.toFixed(0)}, Net Revenue $${netRevenue.toFixed(0)}, Lead Spend $${totalLeadSpend.toFixed(0)}, Commission $${totalComm.toFixed(0)}, Avg Premium $${avgPremium.toFixed(2)}, Prem:Cost ${premCost.toFixed(2)}x
+CALLS: ${totalCalls} total, ${billable} billable (${billableRate.toFixed(1)}%), Close Rate ${closeRate.toFixed(1)}%
+AGENTS: ${Object.entries(byAgent).map(([n, a]) => `${n}: ${a.apps} apps, $${a.premium.toFixed(0)} premium, $${a.gar.toFixed(0)} GAR, $${a.commission.toFixed(0)} commission`).join('; ')}
+PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls, ${c.billable} billable (${c.billableRate.toFixed(1)}%), $${c.spend.toFixed(0)} spend, RPC $${c.rpc.toFixed(2)}, CPA $${c.cpa.toFixed(0)}, ${c.placed || 0} sales, $${(c.premium || 0).toFixed(0)} premium, $${(c.gar || 0).toFixed(0)} GAR`).join('; ')}
+CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toFixed(0)} premium, $${c.gar.toFixed(0)} GAR, Conv ${c.conversionRate.toFixed(1)}%`).join('; ')}
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
-${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}`).join('; ') : ''}`;
+${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}`;
 
-    // ─── GENERATE AI NARRATIVE ───
-    let narrative = '';
+    // ─── LOAD AI ANALYSIS RULES ───
+    let aiRules = {};
     try {
-      const aiRes = await fetch(`${baseUrl}/api/ai-analyst`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: mode === 'weekly'
-            ? `Give me a complete executive summary of last week's performance (${startDate} to ${endDate}). Cover total sales, top agents, financials, call activity trends across the week, agent performance patterns, and flag any concerns or improvements. Compare early vs late week if notable. Be thorough but conversational.`
-            : `Give me a complete executive summary of yesterday's performance. Cover sales, financials, call activity, agent performance, and flag any concerns. Be thorough but conversational.`,
-          tab: 'daily',
-          voiceMode: true,
-          liveData: liveContext,
-        }),
+      const rulesRaw = await fetchSheet(
+        process.env.GOALS_SHEET_ID,
+        process.env.AI_RULES_TAB || 'AI Analysis Rules', 1800
+      );
+      rulesRaw.forEach(r => {
+        const table = (r['Table'] || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if (table) {
+          aiRules[table] = {
+            focusOn: (r['Focus On'] || '').trim(),
+            ignore: (r['Ignore'] || '').trim(),
+            context: (r['Context'] || '').trim(),
+          };
+        }
       });
-      if (aiRes.ok) {
-        const aiData = await aiRes.json();
-        narrative = aiData.spokenText || aiData.answer || '';
+    } catch (e) { /* no rules tab yet — use defaults */ }
+
+    // Map table keys to rule keys (flexible matching)
+    const ruleMap = {
+      dailyOverview: aiRules['daily_overview'] || aiRules['dailyoverview'] || aiRules['daily'] || {},
+      publishers: aiRules['publisher_performance'] || aiRules['publishers'] || aiRules['publisher'] || {},
+      carriers: aiRules['carrier_breakdown'] || aiRules['carriers'] || aiRules['carrier'] || {},
+      agents: aiRules['agent_activity'] || aiRules['agents'] || aiRules['agent'] || {},
+      pipeline: aiRules['policy_status_pipeline'] || aiRules['pipeline'] || aiRules['policy_pipeline'] || aiRules['policy_status'] || {},
+    };
+
+    // Build per-table rule instructions
+    function buildRulePrompt(key, defaultFocus) {
+      const rule = ruleMap[key] || {};
+      let prompt = '';
+      if (rule.focusOn) prompt += `FOCUS ON: ${rule.focusOn}\n`;
+      else if (defaultFocus) prompt += `FOCUS ON: ${defaultFocus}\n`;
+      if (rule.ignore) prompt += `IGNORE: ${rule.ignore}\n`;
+      if (rule.context) prompt += `CONTEXT: ${rule.context}\n`;
+      return prompt;
+    }
+
+    // Build thresholds string from company goals
+    const thresholds = Object.entries(cg)
+      .filter(([_, v]) => v > 0)
+      .map(([k, v]) => {
+        const meta = cm[k] || {};
+        const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const dir = meta.lower ? '↓ lower is better' : '↑ higher is better';
+        return `${label}: ${v} (${dir})`;
+      })
+      .join(', ');
+
+    // ─── GENERATE AI NARRATIVE + TABLE SUMMARIES ───
+    // Call OpenAI directly to get structured JSON — bypasses ai-analyst
+    // which mangles JSON through parseInsightsAndQuestions
+    let narrative = '';
+    let tableSummaries = {};
+    try {
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        temperature: 0.4,
+        max_tokens: 2000,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a senior insurance call center performance analyst. Your job is to uncover WHAT DRIVES the highest sales, GAR, and Net Revenue — not just describe the numbers.
+
+ALWAYS answer the question: "WHY did the best days/agents/publishers perform well, and what can we replicate?"
+
+COMPANY GOAL THRESHOLDS:
+${thresholds || 'No thresholds configured'}
+Sales per Agent goal: 2.5/day. Commission goal: 30% of GAR.
+
+ANALYSIS RULES:
+- Do NOT just restate numbers. Identify CAUSES and CORRELATIONS.
+- When a day had high sales, explain what was different (more agents? better availability? specific publisher producing? specific carrier converting?).
+- When a day was weak, explain what broke down (low availability? expensive leads with no conversions? specific publisher underperforming?).
+- Compare the best vs worst and explain the gap.
+- Be specific: cite actual numbers AND goals when relevant.
+- Do NOT mention "policies placed" or "placement rate."
+- Return ONLY valid JSON — no markdown, no code fences, no extra text.`,
+          },
+          {
+            role: 'user',
+            content: `Analyze this ${mode === 'weekly' ? 'weekly' : 'daily'} performance data. Focus on uncovering what DRIVES the highest sales, GAR, and NAR.
+
+${liveContext}
+
+For each section, follow the analysis rules AND answer the driving question.
+
+DAILY OVERVIEW — What made the best day(s) the best? What broke down on weak days? Correlate agent availability, talk time, billable calls, and conversion rate to sales output. 3-4 sentences.
+${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Identify the best and worst days and explain WHY.')}
+
+PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? 3-4 sentences.
+${buildRulePrompt('publishers', 'Identify which publishers drive sales vs which just drive spend. Calculate effective ROI. Flag any with high spend and zero sales.')}
+
+CARRIER BREAKDOWN — Which carriers convert best? Which generate the most GAR per sale? Are we leaning on the right carriers? 2-3 sentences.
+${buildRulePrompt('carriers', 'Identify which carriers produce the best economics (highest GAR, best conversion). Flag carriers with poor conversion rates.')}
+
+AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? 3-4 sentences.
+${buildRulePrompt('agents', 'Rank agents by productivity (sales per hour available). Correlate talk time and availability to output. Flag agents with high availability but low sales.')}
+
+POLICY STATUS PIPELINE — What does the status mix tell us about lead quality and agent effectiveness? 2-3 sentences.
+${buildRulePrompt('pipeline', 'Analyze the ratio of statuses. High declined = quality issue. High pending = either new or stalled.')}
+
+Return ONLY a JSON object:
+{
+  "executive": "3-4 sentence executive summary focused on what drove the best results and what held us back. Be specific and actionable.",
+  "dailyOverview": "3-4 sentences answering: what drove the best day vs the worst day?",
+  "publishers": "3-4 sentences on publisher ROI — who produces vs who burns cash.",
+  "carriers": "2-3 sentences on carrier economics and conversion.",
+  "agents": "3-4 sentences on agent productivity — who converts and why.",
+  "pipeline": "2-3 sentences on what the status mix reveals."
+}`,
+          },
+        ],
+      });
+
+      const rawText = completion.choices[0]?.message?.content || '';
+      try {
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          narrative = parsed.executive || '';
+          tableSummaries = {
+            dailyOverview: parsed.dailyOverview || '',
+            publishers: parsed.publishers || '',
+            carriers: parsed.carriers || '',
+            agents: parsed.agents || '',
+            pipeline: parsed.pipeline || '',
+          };
+        } else {
+          narrative = rawText;
+        }
+      } catch (parseErr) {
+        console.warn('[daily-summary] JSON parse failed, using raw text:', parseErr.message);
+        narrative = rawText;
       }
     } catch (e) {
       console.warn('[daily-summary] AI narrative generation failed:', e.message);
@@ -288,6 +438,7 @@ ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail 
       agentPerf,
       alerts: allAlerts,
       narrative,
+      tableSummaries,
       // Table data
       dailyOverview,
       byCarrier,

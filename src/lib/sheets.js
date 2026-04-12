@@ -293,6 +293,35 @@ export async function ensureAgentsExist(sheetId, tabName, agentNames, existingRo
   console.log(`[sheets] Added ${missing.length} new agent(s) to ${tabName}:`, missing.join(', '));
 }
 
+/** Create a new tab with headers if it doesn't exist */
+export async function ensureTabExists(sheetId, tabName, headers = []) {
+  const sheets = await getSheetsClient();
+  try {
+    // Check if tab exists by trying to read it
+    await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `${tabName}!A1` });
+    return false; // already exists
+  } catch (e) {
+    // Tab doesn't exist — create it
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: tabName } } }],
+      },
+    });
+    // Write headers if provided
+    if (headers.length > 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${tabName}!A1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [headers] },
+      });
+    }
+    console.log(`[sheets] Created new tab "${tabName}" with headers: ${headers.join(', ')}`);
+    return true; // created
+  }
+}
+
 export function invalidateCache(sheetId, tabName) {
   delete cache[`${sheetId}:${tabName}`];
 }

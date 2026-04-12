@@ -13,6 +13,12 @@ const C = {
 const fmt = (n, d = 0) => n != null && !isNaN(n) ? n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—';
 const fmtD = (n, d = 0) => n != null && !isNaN(n) ? (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—';
 const fmtP = n => n != null && !isNaN(n) ? n.toFixed(1) + '%' : '—';
+const fmtTime = sec => {
+  if (!sec) return '0:00';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
 
 function KPI({ label, value, color }) {
   return (
@@ -79,6 +85,7 @@ function getWeekRange() {
 }
 
 export default function DailySummaryPage({ dateRange }) {
+  const [briefView, setBriefView] = useState('daily'); // 'daily' | 'weekly'
   const [data, setData] = useState(null);
   const [weekData, setWeekData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -136,135 +143,154 @@ export default function DailySummaryPage({ dateRange }) {
 
   if (!data) return null;
 
-  const { sales, financials, calls, agentPerf, alerts, narrative } = data;
+  const { sales, financials, calls, agentPerf, alerts, narrative, tableSummaries: ts } = data;
+
+  const toggleBtnStyle = (active) => ({
+    padding: '7px 20px',
+    fontSize: 12,
+    fontWeight: 600,
+    border: 'none',
+    borderRadius: 6,
+    cursor: 'pointer',
+    background: active ? C.accent : C.surface,
+    color: active ? '#fff' : C.muted,
+    transition: 'all 0.2s',
+  });
+
+  const aiInsightStyle = { margin: '0 0 12px', padding: '10px 14px', background: `${C.accent}0a`, border: `1px solid ${C.accent}22`, borderRadius: 6, fontSize: 12, color: C.muted, lineHeight: 1.6, fontStyle: 'italic' };
+
+  // Pick which dataset to render based on toggle
+  const isWeekly = briefView === 'weekly';
+  const viewData = isWeekly ? weekData : data;
+  const viewSales = isWeekly ? (weekData?.sales || {}) : sales;
+  const viewFinancials = isWeekly ? (weekData?.financials || {}) : financials;
+  const viewCalls = isWeekly ? (weekData?.calls || {}) : calls;
+  const viewAlerts = isWeekly ? (weekData?.alerts || []) : (alerts || []);
+  const viewPerf = isWeekly ? (weekData?.agentPerf || []) : (agentPerf || []);
+  const viewNarrative = isWeekly ? weekData?.narrative : narrative;
+  const viewTS = isWeekly ? (weekData?.tableSummaries || {}) : (ts || {});
+  // Filter out "Policies Placed" alerts — placed is irrelevant for daily/weekly reviews
+  const filteredAlerts = viewAlerts.filter(a => a.metric !== 'Policies Placed' && a.metric !== 'Placement Rate');
 
   return (
     <div style={{ fontFamily: C.sans }}>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.text }}>Daily Summary — {data.date}</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted }}>
-          {sales.total} apps · {fmt(calls.total)} calls · {fmtD(financials.leadSpend)} spend · Generated {new Date(data.generatedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })}
-        </p>
+      {/* Toggle + Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.text }}>
+            {isWeekly ? `Week in Review — ${weekData?.startDate || ''} to ${weekData?.endDate || ''}` : `Daily Summary — ${data.date}`}
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: C.muted }}>
+            {isWeekly
+              ? weekData ? `${viewSales.total || 0} apps · ${fmt(viewCalls.total)} calls · ${fmtD(viewFinancials.leadSpend)} spend` : 'Loading...'
+              : `${sales.total} apps · ${fmt(calls.total)} calls · ${fmtD(financials.leadSpend)} spend · Generated ${new Date(data.generatedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })}`
+            }
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 6, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 4 }}>
+          <button style={toggleBtnStyle(briefView === 'daily')} onClick={() => setBriefView('daily')}>Daily</button>
+          <button style={toggleBtnStyle(briefView === 'weekly')} onClick={() => setBriefView('weekly')}>Week in Review</button>
+        </div>
       </div>
 
-      {/* AI Narrative */}
-      {narrative && (
-        <Section title="Executive Summary">
-          <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.7 }}>{narrative}</p>
+      {/* Weekly loading state */}
+      {isWeekly && weekLoading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60, color: C.muted }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ width: 32, height: 32, border: `3px solid ${C.border}`, borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+            <p style={{ fontSize: 12 }}>Loading weekly summary...</p>
+          </div>
+        </div>
+      )}
+
+      {isWeekly && !weekLoading && !weekData && (
+        <div style={{ padding: 40, textAlign: 'center', color: C.muted, fontSize: 13 }}>No weekly data available.</div>
+      )}
+
+      {/* ─── SHARED CONTENT (renders for both views) ─── */}
+      {(!isWeekly || (isWeekly && weekData && !weekLoading)) && (
+      <>
+      {/* AI Executive Summary */}
+      {viewNarrative && (
+        <Section title={isWeekly ? "Weekly Executive Summary" : "Executive Summary"}>
+          <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.7 }}>{viewNarrative}</p>
         </Section>
       )}
 
-      {/* KPI Row */}
+      {/* KPI Row — NO "Placed" (irrelevant for daily/weekly performance reviews) */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <KPI label="Apps" value={fmt(sales.total)} />
-        <KPI label="Placed" value={fmt(sales.placed)} color={sales.placed > 0 ? C.green : C.red} />
-        <KPI label="CPA" value={fmtD(financials.cpa)} />
-        <KPI label="Gross Revenue" value={fmtD(financials.gar)} color={C.green} />
-        <KPI label="Net Revenue" value={fmtD(financials.netRevenue)} color={financials.netRevenue >= 0 ? C.green : C.red} />
-        <KPI label="Lead Spend" value={fmtD(financials.leadSpend)} color={C.yellow} />
-        <KPI label="Close Rate" value={fmtP(financials.closeRate)} />
-        <KPI label="Billable Rate" value={fmtP(financials.billableRate)} />
+        <KPI label="Apps Submitted" value={fmt(viewSales.total)} />
+        <KPI label="Total Calls" value={fmt(viewCalls.total)} />
+        <KPI label="Billable Calls" value={fmt(viewCalls.billable)} />
+        <KPI label="Billable Rate" value={fmtP(viewFinancials.billableRate)} />
+        <KPI label="CPA" value={fmtD(viewFinancials.cpa)} />
+        <KPI label="Gross Revenue" value={fmtD(viewFinancials.gar)} color={C.green} />
+        <KPI label="Net Revenue" value={fmtD(viewFinancials.netRevenue)} color={viewFinancials.netRevenue >= 0 ? C.green : C.red} />
+        <KPI label="Lead Spend" value={fmtD(viewFinancials.leadSpend)} color={C.yellow} />
+        <KPI label="Close Rate" value={fmtP(viewFinancials.closeRate)} />
+        <KPI label="Avg Premium" value={fmtD(viewFinancials.avgPremium)} />
+        <KPI label="Prem:Cost" value={viewFinancials.premCost > 0 ? viewFinancials.premCost.toFixed(2) + 'x' : '—'} />
+        <KPI label="RPC" value={fmtD(viewFinancials.rpc, 2)} />
       </div>
 
-      {/* Alerts */}
-      {alerts && alerts.length > 0 && (
-        <Section title={`Alerts (${alerts.length})`} color={C.red}>
-          <Table
-            headers={[
-              { label: 'Status' }, { label: 'Metric' }, { label: 'Agent' },
-              { label: 'Actual', align: 'center' }, { label: 'Goal', align: 'center' },
-            ]}
-            rows={alerts.map(a => [
-              { value: a.status === 'red' ? '🔴 RED' : '🟡 YELLOW', color: a.status === 'red' ? C.red : C.yellow },
-              { value: a.metric },
-              { value: a.agent || '—', color: C.muted },
-              { value: typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual, color: a.status === 'red' ? C.red : C.yellow },
-              { value: a.goal, color: C.muted },
-            ])}
-          />
-        </Section>
-      )}
-
-      {/* Sales by Agent */}
-      <Section title="Sales by Agent">
-        <Table
-          headers={[
-            { label: 'Agent' }, { label: 'Apps', align: 'center' }, { label: 'Placed', align: 'center' },
-            { label: 'Premium', align: 'right' }, { label: 'GAR', align: 'right' },
-          ]}
-          rows={Object.entries(sales.byAgent || {}).map(([name, a]) => [
-            { value: name },
-            { value: fmt(a.apps) },
-            { value: fmt(a.placed), color: a.placed > 0 ? C.green : C.muted },
-            { value: fmtD(a.premium), color: C.green },
-            { value: fmtD(a.gar), color: C.accent },
-          ])}
-        />
-      </Section>
-
-      {/* Calls by Campaign */}
-      <Section title="Calls by Campaign">
-        <Table
-          headers={[
-            { label: 'Campaign' }, { label: 'Vendor' }, { label: 'Calls', align: 'center' },
-            { label: 'Billable', align: 'center' }, { label: 'Bill %', align: 'center' },
-            { label: 'Spend', align: 'right' }, { label: 'RPC', align: 'right' },
-          ]}
-          rows={Object.entries(sales.byCampaign || {}).sort((a, b) => b[1].calls - a[1].calls).map(([name, c]) => [
-            { value: name },
-            { value: c.vendor || '—', color: C.muted },
-            { value: fmt(c.calls) },
-            { value: fmt(c.billable), color: c.billable > 0 ? C.green : C.muted },
-            { value: fmtP(c.billableRate), color: c.billableRate > 15 ? C.green : C.red },
-            { value: fmtD(c.spend), color: C.yellow },
-            { value: fmtD(c.rpc, 2) },
-          ])}
-        />
-      </Section>
-
-      {/* Agent Dialer Performance */}
-      {agentPerf && agentPerf.length > 0 && (
-        <Section title="Agent Dialer Performance">
-          <Table
-            headers={[
-              { label: 'Agent' }, { label: 'Avail %', align: 'center' }, { label: 'Pause %', align: 'center' },
-              { label: 'Logged In', align: 'center' }, { label: 'Talk Time', align: 'center' },
-              { label: 'Dials', align: 'center' }, { label: 'Connects', align: 'center' },
-            ]}
-            rows={agentPerf.map(a => [
-              { value: a.rep },
-              { value: fmtP(a.availPct), color: (a.availPct || 0) >= 70 ? C.green : C.red },
-              { value: fmtP(a.pausePct), color: (a.pausePct || 0) <= 30 ? C.green : C.red },
-              { value: a.loggedInStr || '—' },
-              { value: a.talkTimeStr || '—' },
-              { value: fmt(a.dialed) },
-              { value: fmt(a.connects) },
-            ])}
-          />
-        </Section>
-      )}
-
-      {/* ─── TABLE 1: DAILY OVERVIEW ─── */}
-      {data.dailyOverview && Object.keys(data.dailyOverview).length > 0 && (
+      {/* ─── TABLE 1: DAILY OVERVIEW (ordered by importance, color-coded to thresholds) ─── */}
+      {(viewData?.dailyOverview || data.dailyOverview) && Object.keys(viewData?.dailyOverview || data.dailyOverview || {}).length > 0 && (
         <Section title="Daily Overview">
+          {viewTS.dailyOverview && <p style={aiInsightStyle}>{viewTS.dailyOverview}</p>}
           {(() => {
-            const dates = Object.keys(data.dailyOverview).sort();
+            const ov = viewData?.dailyOverview || data.dailyOverview;
+            const dates = Object.keys(ov).sort();
+            const numDays = dates.length || 1;
             const dayNames = dates.map(d => {
               const dt = new Date(d + 'T12:00:00');
               return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
             });
+
+            // Threshold color: green ≥100%, yellow 80-99%, red <80%
+            // For "lower is better": invert (goal/actual)
+            const thresholdColor = (val, goal, lower) => {
+              if (!goal || val == null) return C.text;
+              const ratio = lower ? (val === 0 ? 2 : goal / val) : val / goal;
+              if (ratio >= 1) return C.green;
+              if (ratio >= 0.8) return C.yellow;
+              return C.red;
+            };
+
+            // Ordered by importance — Availability → Sales → Conversion → Calls → Revenue → Cost → VA
             const metrics = [
-              { key: 'calls', label: 'Calls', format: fmt },
-              { key: 'sales', label: 'Sales', format: fmt },
-              { key: 'billables', label: 'Billables', format: fmt },
-              { key: 'gar', label: 'GAR', format: v => fmtD(v) },
-              { key: 'nar', label: 'NAR', format: v => fmtD(v), color: v => v >= 0 ? C.green : C.red },
-              { key: 'cpa', label: 'CPA', format: v => fmtD(v) },
-              { key: 'rpc', label: 'RPC', format: v => fmtD(v, 2) },
-              { key: 'vaTransfers', label: 'VA Transfers', format: fmt },
-              { key: 'vaSales', label: 'VA Sales', format: fmt },
+              // ─ AGENT AVAILABILITY (foundation of everything) ─
+              { key: 'agentCount', label: 'Agents Logged In', format: fmt, section: 'availability' },
+              { key: 'availPct', label: 'Avg Availability', format: fmtP, goal: 70, isAvg: true, section: 'availability' },
+              { key: 'talkTimeSec', label: 'Total Talk Time', format: fmtTime, section: 'availability' },
+              { key: 'loggedInSec', label: 'Total Logged In', format: fmtTime, section: 'availability' },
+              // ─ SALES & CONVERSION ─
+              { key: 'salesPerAgent', label: 'Sales per Agent', format: v => v != null ? v.toFixed(1) : '—', goal: 2.5, isAvg: true, section: 'sales' },
+              { key: 'sales', label: 'Sales (Apps)', format: fmt, goal: 5, section: 'sales' },
+              { key: 'billables', label: 'Billable Calls', format: fmt, goal: 35, section: 'sales' },
+              { key: 'closeRate', label: 'Conversion Rate', format: fmtP, goal: 22.5, isAvg: true, section: 'sales' },
+              // ─ CALLS ─
+              { key: 'calls', label: 'Total Calls', format: fmt, goal: 50, section: 'calls' },
+              { key: 'billableRate', label: 'Billable Rate', format: fmtP, goal: 65, isAvg: true, section: 'calls' },
+              // ─ REVENUE ─
+              { key: 'premium', label: 'Premium', format: v => fmtD(v), goal: 500, section: 'revenue' },
+              { key: 'gar', label: 'Gross Adv Revenue', format: v => fmtD(v), goal: 4000, section: 'revenue' },
+              { key: 'commission', label: 'Commission', format: v => fmtD(v), goal: 1200, section: 'revenue' },
+              { key: 'nar', label: 'Net Revenue', format: v => fmtD(v), goal: 2000, section: 'revenue' },
+              // ─ COST EFFICIENCY (lower is better) ─
+              { key: 'spend', label: 'Lead Spend', format: v => fmtD(v), goal: 1500, lower: true, section: 'cost' },
+              { key: 'cpa', label: 'CPA', format: v => fmtD(v), goal: 200, lower: true, isAvg: true, section: 'cost' },
+              { key: 'rpc', label: 'RPC', format: v => fmtD(v, 2), goal: 35, lower: true, isAvg: true, section: 'cost' },
+              { key: 'avgPremium', label: 'Avg Premium', format: v => fmtD(v), goal: 70, isAvg: true, section: 'cost' },
+              // ─ VIRTUAL AGENT ─
+              { key: 'vaCalls', label: 'VA Calls', format: fmt, goal: 100, section: 'va' },
+              { key: 'vaTransfers', label: 'VA Transfers', format: fmt, section: 'va' },
+              { key: 'vaTransferRate', label: 'VA Transfer Rate', format: fmtP, goal: 30, isAvg: true, section: 'va' },
             ];
+
+            // Section divider labels
+            const sectionLabels = { availability: 'Agent Availability', sales: 'Sales & Conversion', calls: 'Call Volume', revenue: 'Revenue', cost: 'Cost Efficiency', va: 'Virtual Agent' };
+            let lastSection = '';
+
             return (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -274,26 +300,62 @@ export default function DailySummaryPage({ dateRange }) {
                       {dayNames.map((d, i) => (
                         <th key={i} style={{ padding: '6px 10px', color: C.accent, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>{d}</th>
                       ))}
-                      <th style={{ padding: '6px 10px', color: C.text, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>Total</th>
+                      <th style={{ padding: '6px 10px', color: C.text, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>{dates.length > 1 ? 'Total/Avg' : 'Total'}</th>
+                      <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>Goal</th>
                     </tr>
                   </thead>
                   <tbody>
                     {metrics.map(m => {
-                      const vals = dates.map(d => data.dailyOverview[d]?.[m.key] || 0);
+                      const vals = dates.map(d => ov[d]?.[m.key] || 0);
                       const total = vals.reduce((s, v) => s + v, 0);
-                      const avg = m.key === 'cpa' || m.key === 'rpc' ? total / (dates.length || 1) : total;
-                      return (
-                        <tr key={m.key}>
-                          <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>{m.label}</td>
-                          {vals.map((v, i) => (
-                            <td key={i} style={{ padding: '5px 10px', color: m.color ? m.color(v) : C.text, fontSize: 11, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>
-                              {m.format(v)}
+                      const summary = m.isAvg ? total / numDays : total;
+                      // For weekly total/avg comparison, scale goal accordingly
+                      const goalCompare = m.isAvg ? m.goal : (m.goal ? m.goal * numDays : null);
+
+                      // Section divider row
+                      let divider = null;
+                      if (m.section !== lastSection) {
+                        lastSection = m.section;
+                        divider = (
+                          <tr key={m.section + '-div'}>
+                            <td colSpan={dates.length + 3} style={{ padding: '8px 10px 4px', fontSize: 8, fontWeight: 700, color: C.accent, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}44` }}>
+                              {sectionLabels[m.section]}
                             </td>
-                          ))}
-                          <td style={{ padding: '5px 10px', color: C.accent, fontSize: 11, fontFamily: C.mono, textAlign: 'center', fontWeight: 700, borderBottom: `1px solid ${C.border}22` }}>
-                            {m.key === 'cpa' || m.key === 'rpc' ? m.format(avg) : m.format(total)}
-                          </td>
-                        </tr>
+                          </tr>
+                        );
+                      }
+
+                      return (
+                        <React.Fragment key={m.key}>
+                          {divider}
+                          <tr>
+                            <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>
+                              {m.label}
+                              {m.lower && <span style={{ fontSize: 8, color: C.muted, marginLeft: 4 }}>↓</span>}
+                            </td>
+                            {vals.map((v, i) => (
+                              <td key={i} style={{
+                                padding: '5px 10px',
+                                color: m.goal ? thresholdColor(v, m.goal, m.lower) : C.text,
+                                fontSize: 11, fontFamily: C.mono, textAlign: 'center',
+                                borderBottom: `1px solid ${C.border}22`,
+                              }}>
+                                {m.format(v)}
+                              </td>
+                            ))}
+                            <td style={{
+                              padding: '5px 10px',
+                              color: goalCompare ? thresholdColor(summary, goalCompare, m.lower) : C.accent,
+                              fontSize: 11, fontFamily: C.mono, textAlign: 'center', fontWeight: 700,
+                              borderBottom: `1px solid ${C.border}22`,
+                            }}>
+                              {m.format(summary)}
+                            </td>
+                            <td style={{ padding: '5px 10px', color: C.muted, fontSize: 10, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>
+                              {m.goal ? (m.key === 'closeRate' || m.key === 'billableRate' || m.key === 'vaTransferRate' ? m.goal + '%' : m.key === 'avgPremium' || m.key === 'cpa' || m.key === 'rpc' || m.key === 'spend' || m.key === 'premium' || m.key === 'gar' || m.key === 'commission' || m.key === 'nar' ? '$' + m.goal.toLocaleString() : m.goal) : '—'}
+                            </td>
+                          </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -304,56 +366,99 @@ export default function DailySummaryPage({ dateRange }) {
         </Section>
       )}
 
-      {/* ─── TABLE 2: PUBLISHER PERFORMANCE (already exists as Calls by Campaign above) ─── */}
+      {/* ─── TABLE 2: PUBLISHER PERFORMANCE ─── */}
+      <Section title={isWeekly ? "Weekly Publisher Performance" : "Publisher Performance"}>
+        {viewTS.publishers && <p style={aiInsightStyle}>{viewTS.publishers}</p>}
+        <Table
+          headers={[
+            { label: 'Campaign' }, { label: 'Vendor' }, { label: 'Calls', align: 'center' },
+            { label: 'Billable', align: 'center' }, { label: 'Bill %', align: 'center' },
+            { label: 'Sales', align: 'center' }, { label: 'Close %', align: 'center' },
+            { label: 'Spend', align: 'right' }, { label: 'CPA', align: 'right' },
+            { label: 'RPC', align: 'right' }, { label: 'Premium', align: 'right' },
+            { label: 'GAR', align: 'right' }, { label: 'Net Rev', align: 'right' },
+          ]}
+          rows={Object.entries(viewSales.byCampaign || {}).sort((a, b) => b[1].calls - a[1].calls).map(([name, c]) => [
+            { value: name },
+            { value: c.vendor || '—', color: C.muted },
+            { value: fmt(c.calls) },
+            { value: fmt(c.billable), color: c.billable > 0 ? C.green : C.muted },
+            { value: fmtP(c.billableRate), color: c.billableRate > 15 ? C.green : C.red },
+            { value: fmt(c.sales || 0) },
+            { value: fmtP(c.closeRate || 0) },
+            { value: fmtD(c.spend), color: C.yellow },
+            { value: fmtD(c.cpa || 0) },
+            { value: fmtD(c.rpc, 2) },
+            { value: fmtD(c.premium || 0), color: C.green },
+            { value: fmtD(c.gar || 0), color: C.accent },
+            { value: fmtD(c.netRevenue || 0), color: (c.netRevenue || 0) >= 0 ? C.green : C.red },
+          ])}
+        />
+      </Section>
 
       {/* ─── TABLE 3: CARRIER BREAKDOWN ─── */}
-      {data.byCarrier && data.byCarrier.length > 0 && (
-        <Section title="Carrier Breakdown">
+      {(viewData?.byCarrier || data.byCarrier) && (viewData?.byCarrier || data.byCarrier).length > 0 && (
+        <Section title={isWeekly ? "Weekly Carrier Breakdown" : "Carrier Breakdown"}>
+          {viewTS.carriers && <p style={aiInsightStyle}>{viewTS.carriers}</p>}
           <Table
             headers={[
               { label: 'Carrier' }, { label: 'Sales', align: 'center' },
-              { label: 'CPA', align: 'right' }, { label: 'RPC', align: 'right' },
-              { label: 'Conv %', align: 'center' }, { label: 'Prem:Cost', align: 'center' },
-              { label: 'GAR', align: 'right' },
+              { label: 'Premium', align: 'right' }, { label: 'Commission', align: 'right' },
+              { label: 'GAR', align: 'right' }, { label: 'CPA', align: 'right' },
+              { label: 'RPC', align: 'right' }, { label: 'Conv %', align: 'center' },
+              { label: 'Prem:Cost', align: 'center' },
             ]}
-            rows={data.byCarrier.map(c => [
+            rows={(viewData?.byCarrier || data.byCarrier).map(c => [
               { value: c.carrier },
               { value: fmt(c.sales) },
+              { value: fmtD(c.premium), color: C.green },
+              { value: fmtD(c.commission || 0) },
+              { value: fmtD(c.gar), color: C.accent },
               { value: fmtD(c.cpa) },
               { value: fmtD(c.rpc, 2) },
               { value: fmtP(c.conversionRate) },
               { value: c.premCost > 0 ? c.premCost.toFixed(2) + 'x' : '—' },
-              { value: fmtD(c.gar), color: C.green },
             ])}
           />
         </Section>
       )}
 
-      {/* ─── TABLE 4: AGENT ACTIVITY (enhanced version of existing dialer table) ─── */}
+      {/* ─── TABLE 4: AGENT ACTIVITY ─── */}
       {(() => {
         // Merge agent sales data with dialer data
-        const agentActivity = Object.entries(sales.byAgent || {}).map(([name, a]) => {
-          const dialer = (agentPerf || []).find(d => d.rep === name || name.includes(d.rep?.split(' ')[0] || '___'));
+        const agentActivity = Object.entries(viewSales.byAgent || {}).map(([name, a]) => {
+          const dialer = viewPerf.find(d => d.rep === name || name.includes(d.rep?.split(' ')[0] || '___'));
           return {
-            name, sales: a.apps, placed: a.placed,
-            calls: dialer?.dialed || 0,
+            name, sales: a.apps,
+            premium: a.premium || 0, gar: a.gar || 0, commission: a.commission || 0,
+            calls: dialer?.dialed || 0, connects: dialer?.connects || 0,
+            availPct: dialer?.availPct, loggedIn: dialer?.loggedInStr || '—',
             talkTime: dialer?.talkTimeStr || '—',
             pauseTime: dialer?.pausedStr || dialer?.pauseTimeStr || '—',
             pausePct: dialer?.pausePct,
           };
         });
         return agentActivity.length > 0 ? (
-          <Section title="Agent Activity">
+          <Section title={isWeekly ? "Weekly Agent Activity" : "Agent Activity"}>
+            {viewTS.agents && <p style={aiInsightStyle}>{viewTS.agents}</p>}
             <Table
               headers={[
-                { label: 'Agent' }, { label: 'Sales', align: 'center' },
-                { label: 'Calls', align: 'center' }, { label: 'Talk Time', align: 'center' },
-                { label: 'Pause Time', align: 'center' }, { label: 'Pause %', align: 'center' },
+                { label: 'Agent' }, { label: 'Apps', align: 'center' },
+                { label: 'Premium', align: 'right' }, { label: 'GAR', align: 'right' },
+                { label: 'Dials', align: 'center' }, { label: 'Connects', align: 'center' },
+                { label: 'Avail %', align: 'center' }, { label: 'Logged In', align: 'center' },
+                { label: 'Talk Time', align: 'center' }, { label: 'Pause Time', align: 'center' },
+                { label: 'Pause %', align: 'center' },
               ]}
               rows={agentActivity.map(a => [
                 { value: a.name },
                 { value: fmt(a.sales) },
+                { value: fmtD(a.premium), color: C.green },
+                { value: fmtD(a.gar), color: C.accent },
                 { value: fmt(a.calls) },
+                { value: fmt(a.connects) },
+                { value: a.availPct != null ? fmtP(a.availPct) : '—', color: a.availPct != null ? ((a.availPct) >= 70 ? C.green : C.red) : C.muted },
+                { value: a.loggedIn },
                 { value: a.talkTime },
                 { value: a.pauseTime },
                 { value: a.pausePct != null ? fmtP(a.pausePct) : '—', color: a.pausePct != null ? ((a.pausePct) <= 30 ? C.green : C.red) : C.muted },
@@ -364,10 +469,11 @@ export default function DailySummaryPage({ dateRange }) {
       })()}
 
       {/* ─── TABLE 5: POLICY STATUS PIPELINE ─── */}
-      {data.statusPipeline && data.statusPipeline.statuses?.length > 0 && (
+      {(viewData?.statusPipeline || data.statusPipeline) && (viewData?.statusPipeline || data.statusPipeline).statuses?.length > 0 && (
         <Section title="Policy Status Pipeline">
+          {viewTS.pipeline && <p style={aiInsightStyle}>{viewTS.pipeline}</p>}
           {(() => {
-            const { byDate, statuses } = data.statusPipeline;
+            const { byDate, statuses } = viewData?.statusPipeline || data.statusPipeline;
             const dates = Object.keys(byDate || {}).sort();
             return (
               <div style={{ overflowX: 'auto' }}>
@@ -433,111 +539,27 @@ export default function DailySummaryPage({ dateRange }) {
         </Section>
       )}
 
-      {/* ─── WEEK IN REVIEW ─── */}
-      <div style={{ marginTop: 32, borderTop: `2px solid ${C.accent}`, paddingTop: 24 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700, color: C.accent }}>Week in Review</h2>
-        {weekLoading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 0', color: C.muted }}>
-            <div style={{ width: 16, height: 16, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-            <span style={{ fontSize: 12 }}>Loading weekly summary...</span>
-          </div>
-        )}
-        {weekData && !weekLoading && (() => {
-          const ws = weekData.sales || {};
-          const wf = weekData.financials || {};
-          const wc = weekData.calls || {};
-          const wa = weekData.alerts || [];
-          const wPerf = weekData.agentPerf || [];
-          return (
-            <>
-              <p style={{ margin: '0 0 16px', fontSize: 11, color: C.muted }}>
-                {weekData.startDate} to {weekData.endDate} &middot; {ws.total} apps &middot; {fmt(wc.total)} calls &middot; {fmtD(wf.leadSpend)} spend
-              </p>
+      {/* ─── ALERTS (bottom) ─── */}
+      {filteredAlerts.length > 0 && (
+        <Section title={`${isWeekly ? 'Weekly ' : ''}Alerts (${filteredAlerts.length})`} color={C.red}>
+          <Table
+            headers={[
+              { label: 'Status' }, { label: 'Metric' }, { label: 'Agent' },
+              { label: 'Actual', align: 'center' }, { label: 'Goal', align: 'center' },
+            ]}
+            rows={filteredAlerts.map(a => [
+              { value: a.status === 'red' ? '🔴 RED' : '🟡 YELLOW', color: a.status === 'red' ? C.red : C.yellow },
+              { value: a.metric },
+              { value: a.agent || '—', color: C.muted },
+              { value: typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual, color: a.status === 'red' ? C.red : C.yellow },
+              { value: a.goal, color: C.muted },
+            ])}
+          />
+        </Section>
+      )}
 
-              {weekData.narrative && (
-                <Section title="Weekly Executive Summary">
-                  <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.7 }}>{weekData.narrative}</p>
-                </Section>
-              )}
-
-              {/* Weekly KPIs */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                <KPI label="Apps" value={fmt(ws.total)} />
-                <KPI label="Placed" value={fmt(ws.placed)} color={ws.placed > 0 ? C.green : C.red} />
-                <KPI label="CPA" value={fmtD(wf.cpa)} />
-                <KPI label="Gross Revenue" value={fmtD(wf.gar)} color={C.green} />
-                <KPI label="Net Revenue" value={fmtD(wf.netRevenue)} color={wf.netRevenue >= 0 ? C.green : C.red} />
-                <KPI label="Lead Spend" value={fmtD(wf.leadSpend)} color={C.yellow} />
-                <KPI label="Close Rate" value={fmtP(wf.closeRate)} />
-                <KPI label="Avg Premium" value={fmtD(wf.avgPremium)} />
-              </div>
-
-              {/* Weekly Alerts */}
-              {wa.length > 0 && (
-                <Section title={`Weekly Alerts (${wa.length})`} color={C.red}>
-                  <Table
-                    headers={[{ label: 'Status' }, { label: 'Metric' }, { label: 'Agent' }, { label: 'Actual', align: 'center' }, { label: 'Goal', align: 'center' }]}
-                    rows={wa.map(a => [
-                      { value: a.status === 'red' ? '🔴 RED' : '🟡 YELLOW', color: a.status === 'red' ? C.red : C.yellow },
-                      { value: a.metric },
-                      { value: a.agent || '—', color: C.muted },
-                      { value: typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual, color: a.status === 'red' ? C.red : C.yellow },
-                      { value: a.goal, color: C.muted },
-                    ])}
-                  />
-                </Section>
-              )}
-
-              {/* Weekly Sales by Agent */}
-              <Section title="Weekly Sales by Agent">
-                <Table
-                  headers={[{ label: 'Agent' }, { label: 'Apps', align: 'center' }, { label: 'Placed', align: 'center' }, { label: 'Premium', align: 'right' }, { label: 'GAR', align: 'right' }]}
-                  rows={Object.entries(ws.byAgent || {}).map(([name, a]) => [
-                    { value: name },
-                    { value: fmt(a.apps) },
-                    { value: fmt(a.placed), color: a.placed > 0 ? C.green : C.muted },
-                    { value: fmtD(a.premium), color: C.green },
-                    { value: fmtD(a.gar), color: C.accent },
-                  ])}
-                />
-              </Section>
-
-              {/* Weekly Calls by Campaign */}
-              <Section title="Weekly Calls by Campaign">
-                <Table
-                  headers={[{ label: 'Campaign' }, { label: 'Vendor' }, { label: 'Calls', align: 'center' }, { label: 'Billable', align: 'center' }, { label: 'Bill %', align: 'center' }, { label: 'Spend', align: 'right' }, { label: 'RPC', align: 'right' }]}
-                  rows={Object.entries(ws.byCampaign || {}).sort((a, b) => b[1].calls - a[1].calls).map(([name, c]) => [
-                    { value: name },
-                    { value: c.vendor || '—', color: C.muted },
-                    { value: fmt(c.calls) },
-                    { value: fmt(c.billable), color: c.billable > 0 ? C.green : C.muted },
-                    { value: fmtP(c.billableRate), color: c.billableRate > 15 ? C.green : C.red },
-                    { value: fmtD(c.spend), color: C.yellow },
-                    { value: fmtD(c.rpc, 2) },
-                  ])}
-                />
-              </Section>
-
-              {/* Weekly Agent Dialer */}
-              {wPerf.length > 0 && (
-                <Section title="Weekly Agent Dialer">
-                  <Table
-                    headers={[{ label: 'Agent' }, { label: 'Avail %', align: 'center' }, { label: 'Pause %', align: 'center' }, { label: 'Logged In', align: 'center' }, { label: 'Dials', align: 'center' }, { label: 'Connects', align: 'center' }]}
-                    rows={wPerf.map(a => [
-                      { value: a.rep },
-                      { value: fmtP(a.availPct), color: (a.availPct || 0) >= 70 ? C.green : C.red },
-                      { value: fmtP(a.pausePct), color: (a.pausePct || 0) <= 30 ? C.green : C.red },
-                      { value: a.loggedInStr || '—' },
-                      { value: fmt(a.dialed) },
-                      { value: fmt(a.connects) },
-                    ])}
-                  />
-                </Section>
-              )}
-            </>
-          );
-        })()}
-      </div>
+      </>
+      )}
     </div>
   );
 }

@@ -23,13 +23,22 @@ export async function GET(request) {
       salesRaw = await fetchSheet(process.env.SALES_SHEET_ID, 'Sheet1');
     }
 
-    const [callsRaw, commRaw, pricingRaw, agentGoalsRaw, agentPayoutRaw] = await Promise.all([
+    const [callsRaw, commRaw, pricingRaw, agentGoalsRaw, agentPayoutRaw, excludedAgentsRaw] = await Promise.all([
       fetchSheet(process.env.CALLLOGS_SHEET_ID, process.env.CALLLOGS_TAB_NAME || 'Report'),
       fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600), // Commission rates rarely change — 1hr cache
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.GOALS_PRICING_TAB || 'Publisher Pricing', 3600), // Pricing rarely changes — 1hr cache
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals', 1800).catch(() => []), // Agent goals — 30min cache
       fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_PAYOUT_TAB || 'Agent Payout Rates', 3600).catch(() => []), // Agent payout multipliers — 1hr cache
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.EXCLUDED_AGENTS_TAB || 'Excluded Agents', 1800).catch(() => []), // Excluded agents — 30min cache
     ]);
+
+    // Build excluded agents set (case-insensitive)
+    const excludedAgents = new Set(
+      excludedAgentsRaw
+        .map(r => (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (excludedAgents.size > 0) console.log('[dashboard] Excluded agents:', [...excludedAgents].join(', '));
 
     // Log commission sheet columns so we can see what's available
     if (commRaw.length > 0) {
@@ -254,6 +263,12 @@ export async function GET(request) {
 
     if (startDate) { policies = policies.filter(p => p.submitDate >= startDate); calls = calls.filter(c => c.date >= startDate); }
     if (endDate) { policies = policies.filter(p => p.submitDate <= endDate); calls = calls.filter(c => c.date <= endDate); }
+
+    // Exclude agents from all calculations
+    if (excludedAgents.size > 0) {
+      policies = policies.filter(p => !excludedAgents.has((p.agent || '').toLowerCase()));
+      calls = calls.filter(c => !excludedAgents.has((c.rep || '').toLowerCase()));
+    }
 
     const pnlByPublisher = {};
     calls.forEach(c => {

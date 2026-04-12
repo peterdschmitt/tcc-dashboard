@@ -83,6 +83,20 @@ export async function GET(request) {
     if (startDate) rows = rows.filter(r => r.date >= startDate);
     if (endDate) rows = rows.filter(r => r.date <= endDate);
 
+    // Exclude agents
+    try {
+      const excludedRaw = await fetchSheet(
+        process.env.GOALS_SHEET_ID,
+        process.env.EXCLUDED_AGENTS_TAB || 'Excluded Agents', 1800
+      );
+      const excludedSet = new Set(
+        excludedRaw.map(r => (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim().toLowerCase()).filter(Boolean)
+      );
+      if (excludedSet.size > 0) {
+        rows = rows.filter(r => !excludedSet.has((r.rep || '').toLowerCase()));
+      }
+    } catch (e) { /* no exclusion tab yet — that's ok */ }
+
     // Aggregate by agent
     const byAgent = {};
     rows.forEach(r => {

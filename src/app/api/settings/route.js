@@ -1,5 +1,5 @@
 export const dynamic = 'force-dynamic';
-import { readRawSheet, appendRow, updateRow, deleteRow, invalidateCache } from '@/lib/sheets';
+import { readRawSheet, appendRow, updateRow, deleteRow, invalidateCache, ensureTabExists } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
 
 // Map section names to sheet IDs and tab names
@@ -25,6 +25,14 @@ function getSheetConfig(section) {
       sheetId: process.env.GOALS_SHEET_ID,
       tabName: process.env.AGENT_PAYOUT_TAB || 'Agent Payout Rates',
     },
+    excludedAgents: {
+      sheetId: process.env.GOALS_SHEET_ID,
+      tabName: process.env.EXCLUDED_AGENTS_TAB || 'Excluded Agents',
+    },
+    aiRules: {
+      sheetId: process.env.GOALS_SHEET_ID,
+      tabName: process.env.AI_RULES_TAB || 'AI Analysis Rules',
+    },
   };
   return configs[section];
 }
@@ -38,14 +46,30 @@ export async function GET(request) {
     if (section === 'all') {
       // Load all sections at once
       const results = {};
-      for (const sec of ['pricing', 'companyGoals', 'agentGoals', 'commission', 'agentPayout']) {
+      for (const sec of ['pricing', 'companyGoals', 'agentGoals', 'commission', 'agentPayout', 'excludedAgents', 'aiRules']) {
         try {
           const cfg = getSheetConfig(sec);
           const { headers, data } = await readRawSheet(cfg.sheetId, cfg.tabName);
           results[sec] = { headers, rows: data };
         } catch (err) {
-          console.log(`[settings] Could not load ${sec}: ${err.message}`);
-          results[sec] = { headers: [], rows: [], error: err.message };
+          // Auto-create tabs that don't exist yet
+          const autoCreateTabs = {
+            excludedAgents: ['Agent Name', 'Reason'],
+            aiRules: ['Table', 'Focus On', 'Ignore', 'Context'],
+          };
+          if (autoCreateTabs[sec] && err.message?.includes('Unable to parse range')) {
+            try {
+              const cfg = getSheetConfig(sec);
+              await ensureTabExists(cfg.sheetId, cfg.tabName, autoCreateTabs[sec]);
+              results[sec] = { headers: autoCreateTabs[sec], rows: [] };
+            } catch (createErr) {
+              console.log(`[settings] Could not auto-create ${sec}: ${createErr.message}`);
+              results[sec] = { headers: [], rows: [], error: createErr.message };
+            }
+          } else {
+            console.log(`[settings] Could not load ${sec}: ${err.message}`);
+            results[sec] = { headers: [], rows: [], error: err.message };
+          }
         }
       }
       return NextResponse.json(results);
@@ -54,8 +78,21 @@ export async function GET(request) {
     const cfg = getSheetConfig(section);
     if (!cfg) return NextResponse.json({ error: 'Unknown section: ' + section }, { status: 400 });
 
-    const { headers, data } = await readRawSheet(cfg.sheetId, cfg.tabName);
-    return NextResponse.json({ headers, rows: data });
+    try {
+      const { headers, data } = await readRawSheet(cfg.sheetId, cfg.tabName);
+      return NextResponse.json({ headers, rows: data });
+    } catch (readErr) {
+      // Auto-create tabs that don't exist yet
+      const autoCreateTabs = {
+        excludedAgents: ['Agent Name', 'Reason'],
+        aiRules: ['Table', 'Focus On', 'Ignore', 'Context'],
+      };
+      if (autoCreateTabs[section] && readErr.message?.includes('Unable to parse range')) {
+        await ensureTabExists(cfg.sheetId, cfg.tabName, autoCreateTabs[section]);
+        return NextResponse.json({ headers: autoCreateTabs[section], rows: [] });
+      }
+      throw readErr;
+    }
   } catch (error) {
     console.error('[settings] GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -72,8 +109,22 @@ export async function POST(request) {
     if (!cfg) return NextResponse.json({ error: 'Unknown section: ' + section }, { status: 400 });
 
     if (action === 'add') {
-      // Read current headers to know column order
-      const { headers } = await readRawSheet(cfg.sheetId, cfg.tabName);
+      // Auto-create tab if needed (especially for excludedAgents)
+      let headers;
+      const autoCreateTabs = {
+        excludedAgents: ['Agent Name', 'Reason'],
+        aiRules: ['Table', 'Focus On', 'Ignore', 'Context'],
+      };
+      try {
+        ({ headers } = await readRawSheet(cfg.sheetId, cfg.tabName));
+      } catch (e) {
+        if (autoCreateTabs[section]) {
+          await ensureTabExists(cfg.sheetId, cfg.tabName, autoCreateTabs[section]);
+          headers = autoCreateTabs[section];
+        } else {
+          throw e;
+        }
+      }
       await appendRow(cfg.sheetId, cfg.tabName, headers, rowData);
       return NextResponse.json({ success: true, action: 'added' });
     }

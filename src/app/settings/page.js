@@ -374,6 +374,8 @@ export default function SettingsPage() {
     { id: 'agentGoals', label: 'Agent Daily Goals', icon: '👤', description: 'Per-agent performance targets' },
     { id: 'commission', label: 'Commission Rates', icon: '💰', description: 'Carrier/product commission schedule' },
     { id: 'effectuation', label: 'Effectuation Rate', icon: '📊', description: 'Expected effectuation rate applied to Gross Adv Revenue' },
+    { id: 'excludedAgents', label: 'Excluded Agents', icon: '🚫', description: 'Agents excluded from all dashboard calculations and reports' },
+    { id: 'aiRules', label: 'AI Analysis Rules', icon: '🧠', description: 'Tell the AI what to focus on, ignore, and understand for each summary table' },
   ];
 
   const currentTab = tabs.find(t => t.id === activeTab);
@@ -573,6 +575,14 @@ function TabSetupHelper({ section }) {
     commission: {
       headers: ['Carrier', 'Product', 'Age Range', 'Commission Rate', 'Advance Length'],
       example: ['American Amicable', 'Senior Choice', '50-70', '135%', '9'],
+    },
+    excludedAgents: {
+      headers: ['Agent Name', 'Reason'],
+      example: ['Jon Maso', 'Test/QA agent — not a real rep'],
+    },
+    aiRules: {
+      headers: ['Table', 'Focus On', 'Ignore', 'Context'],
+      example: ['Publisher Performance', 'Billable rate differences, CPA outliers, publishers with spend but zero sales', 'Zero-cost sources (LIFE, Referral, Health) — free leads', 'HIW and BCL are our primary paid sources'],
     },
   };
 
