@@ -66,10 +66,11 @@ export async function GET(request) {
     const baseUrl = getBaseUrl();
 
     // Fetch all data in parallel
-    const [dashRes, perfRes, goalsRes] = await Promise.all([
+    const [dashRes, perfRes, goalsRes, vaRes] = await Promise.all([
       fetch(`${baseUrl}/api/dashboard?start=${startDate}&end=${endDate}&source=${source}`),
       fetch(`${baseUrl}/api/agent-performance?start=${startDate}&end=${endDate}`).catch(() => null),
       fetch(`${baseUrl}/api/goals`),
+      fetch(`${baseUrl}/api/virtual-agent?start=${startDate}&end=${endDate}`).catch(() => null),
     ]);
 
     if (!dashRes.ok) throw new Error(`Dashboard API: ${dashRes.status}`);
@@ -78,6 +79,8 @@ export async function GET(request) {
     const dashData = await dashRes.json();
     const goalsData = await goalsRes.json();
     const perfData = perfRes?.ok ? await perfRes.json() : null;
+    const vaData = vaRes?.ok ? await vaRes.json() : null;
+    const vaCalls = vaData?.calls || [];
 
     const policies = dashData.policies || [];
     const calls = dashData.calls || [];
@@ -163,6 +166,69 @@ export async function GET(request) {
 
     const allAlerts = [...companyAlerts, ...agentAlerts];
 
+    // ─── TABLE 1: DAILY OVERVIEW (metrics x days) ───
+    const allDates = [...new Set([...calls.map(c => c.date), ...policies.map(p => p.submitDate)])].filter(Boolean).sort();
+    const dailyOverview = {};
+    allDates.forEach(d => {
+      const dayCalls = calls.filter(c => c.date === d);
+      const dayPolicies = policies.filter(p => p.submitDate === d);
+      const dayPlaced = dayPolicies.filter(isPlaced);
+      const dayBillable = dayCalls.filter(c => c.isBillable).length;
+      const daySpend = pnl.reduce((s, p) => {
+        const pubCalls = dayCalls.filter(c => c.campaign === p.campaign);
+        const pubBillable = pubCalls.filter(c => c.isBillable).length;
+        return s + pubBillable * (p.pricePerCall || 0);
+      }, 0);
+      const dayGAR = dayPolicies.reduce((s, p) => s + (p.grossAdvancedRevenue || 0), 0);
+      const dayComm = dayPolicies.reduce((s, p) => s + (p.commission || 0), 0);
+      const dayVA = vaCalls.filter(c => c.date === d);
+      const dayVATransfers = dayVA.filter(c => c.transferConfirmation).length;
+
+      dailyOverview[d] = {
+        calls: dayCalls.length,
+        sales: dayPolicies.length,
+        billables: dayBillable,
+        gar: dayGAR,
+        nar: dayGAR - daySpend - dayComm,
+        cpa: dayPolicies.length > 0 ? daySpend / dayPolicies.length : 0,
+        rpc: dayCalls.length > 0 ? daySpend / dayCalls.length : 0,
+        vaTransfers: dayVATransfers,
+        vaSales: dayVA.filter(c => c.disposition?.toLowerCase().includes('transfer')).length,
+      };
+    });
+
+    // ─── TABLE 3: CARRIER BREAKDOWN ───
+    const carrierMap = {};
+    policies.forEach(p => {
+      const c = p.carrier || 'Unknown';
+      if (!carrierMap[c]) carrierMap[c] = { sales: 0, placed: 0, premium: 0, gar: 0, commission: 0 };
+      carrierMap[c].sales++;
+      carrierMap[c].gar += p.grossAdvancedRevenue || 0;
+      carrierMap[c].commission += p.commission || 0;
+      if (isPlaced(p)) { carrierMap[c].placed++; carrierMap[c].premium += p.premium || 0; }
+    });
+    // Add call/billable data per carrier via the pnl agent breakdown
+    const byCarrier = Object.entries(carrierMap).map(([name, c]) => ({
+      carrier: name, sales: c.sales, placed: c.placed, premium: c.premium, gar: c.gar,
+      cpa: c.sales > 0 ? totalLeadSpend * (c.sales / apps) / c.sales : 0,
+      rpc: totalCalls > 0 ? totalLeadSpend * (c.sales / apps) / totalCalls : 0,
+      conversionRate: billable > 0 ? c.sales / billable * 100 : 0,
+      premCost: totalLeadSpend > 0 ? c.premium / (totalLeadSpend * (c.sales / apps || 1)) : 0,
+    }));
+
+    // ─── TABLE 5: POLICY STATUS PIPELINE ───
+    const statusGroups = {};
+    policies.forEach(p => {
+      const d = p.submitDate || 'Unknown';
+      const status = p.placed || p.outcome || 'Unknown';
+      if (!statusGroups[d]) statusGroups[d] = {};
+      if (!statusGroups[d][status]) statusGroups[d][status] = { count: 0, amount: 0 };
+      statusGroups[d][status].count++;
+      statusGroups[d][status].amount += p.premium || 0;
+    });
+    // Get all unique statuses
+    const allStatuses = [...new Set(policies.map(p => p.placed || p.outcome || 'Unknown'))].sort();
+
     // ─── BUILD NARRATIVE CONTEXT ───
     const liveContext = `DAILY SUMMARY DATA for ${date}:
 SALES: ${apps} apps submitted, ${placed.length} placed
@@ -222,6 +288,15 @@ ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail 
       agentPerf,
       alerts: allAlerts,
       narrative,
+      // Table data
+      dailyOverview,
+      byCarrier,
+      statusPipeline: { byDate: statusGroups, statuses: allStatuses },
+      vaStats: {
+        totalCalls: vaCalls.length,
+        transfers: vaCalls.filter(c => c.transferConfirmation).length,
+        transferRate: vaCalls.length > 0 ? vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length * 100 : 0,
+      },
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {

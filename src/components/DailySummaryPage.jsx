@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -242,6 +242,194 @@ export default function DailySummaryPage({ dateRange }) {
               { value: fmt(a.connects) },
             ])}
           />
+        </Section>
+      )}
+
+      {/* ─── TABLE 1: DAILY OVERVIEW ─── */}
+      {data.dailyOverview && Object.keys(data.dailyOverview).length > 0 && (
+        <Section title="Daily Overview">
+          {(() => {
+            const dates = Object.keys(data.dailyOverview).sort();
+            const dayNames = dates.map(d => {
+              const dt = new Date(d + 'T12:00:00');
+              return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            });
+            const metrics = [
+              { key: 'calls', label: 'Calls', format: fmt },
+              { key: 'sales', label: 'Sales', format: fmt },
+              { key: 'billables', label: 'Billables', format: fmt },
+              { key: 'gar', label: 'GAR', format: v => fmtD(v) },
+              { key: 'nar', label: 'NAR', format: v => fmtD(v), color: v => v >= 0 ? C.green : C.red },
+              { key: 'cpa', label: 'CPA', format: v => fmtD(v) },
+              { key: 'rpc', label: 'RPC', format: v => fmtD(v, 2) },
+              { key: 'vaTransfers', label: 'VA Transfers', format: fmt },
+              { key: 'vaSales', label: 'VA Sales', format: fmt },
+            ];
+            return (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>Metric</th>
+                      {dayNames.map((d, i) => (
+                        <th key={i} style={{ padding: '6px 10px', color: C.accent, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>{d}</th>
+                      ))}
+                      <th style={{ padding: '6px 10px', color: C.text, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metrics.map(m => {
+                      const vals = dates.map(d => data.dailyOverview[d]?.[m.key] || 0);
+                      const total = vals.reduce((s, v) => s + v, 0);
+                      const avg = m.key === 'cpa' || m.key === 'rpc' ? total / (dates.length || 1) : total;
+                      return (
+                        <tr key={m.key}>
+                          <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>{m.label}</td>
+                          {vals.map((v, i) => (
+                            <td key={i} style={{ padding: '5px 10px', color: m.color ? m.color(v) : C.text, fontSize: 11, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>
+                              {m.format(v)}
+                            </td>
+                          ))}
+                          <td style={{ padding: '5px 10px', color: C.accent, fontSize: 11, fontFamily: C.mono, textAlign: 'center', fontWeight: 700, borderBottom: `1px solid ${C.border}22` }}>
+                            {m.key === 'cpa' || m.key === 'rpc' ? m.format(avg) : m.format(total)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </Section>
+      )}
+
+      {/* ─── TABLE 2: PUBLISHER PERFORMANCE (already exists as Calls by Campaign above) ─── */}
+
+      {/* ─── TABLE 3: CARRIER BREAKDOWN ─── */}
+      {data.byCarrier && data.byCarrier.length > 0 && (
+        <Section title="Carrier Breakdown">
+          <Table
+            headers={[
+              { label: 'Carrier' }, { label: 'Sales', align: 'center' },
+              { label: 'CPA', align: 'right' }, { label: 'RPC', align: 'right' },
+              { label: 'Conv %', align: 'center' }, { label: 'Prem:Cost', align: 'center' },
+              { label: 'GAR', align: 'right' },
+            ]}
+            rows={data.byCarrier.map(c => [
+              { value: c.carrier },
+              { value: fmt(c.sales) },
+              { value: fmtD(c.cpa) },
+              { value: fmtD(c.rpc, 2) },
+              { value: fmtP(c.conversionRate) },
+              { value: c.premCost > 0 ? c.premCost.toFixed(2) + 'x' : '—' },
+              { value: fmtD(c.gar), color: C.green },
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* ─── TABLE 4: AGENT ACTIVITY (enhanced version of existing dialer table) ─── */}
+      {(() => {
+        // Merge agent sales data with dialer data
+        const agentActivity = Object.entries(sales.byAgent || {}).map(([name, a]) => {
+          const dialer = (agentPerf || []).find(d => d.rep === name || name.includes(d.rep?.split(' ')[0] || '___'));
+          return {
+            name, sales: a.apps, placed: a.placed,
+            calls: dialer?.dialed || 0,
+            talkTime: dialer?.talkTimeStr || '—',
+            pauseTime: dialer?.pausedStr || dialer?.pauseTimeStr || '—',
+            pausePct: dialer?.pausePct,
+          };
+        });
+        return agentActivity.length > 0 ? (
+          <Section title="Agent Activity">
+            <Table
+              headers={[
+                { label: 'Agent' }, { label: 'Sales', align: 'center' },
+                { label: 'Calls', align: 'center' }, { label: 'Talk Time', align: 'center' },
+                { label: 'Pause Time', align: 'center' }, { label: 'Pause %', align: 'center' },
+              ]}
+              rows={agentActivity.map(a => [
+                { value: a.name },
+                { value: fmt(a.sales) },
+                { value: fmt(a.calls) },
+                { value: a.talkTime },
+                { value: a.pauseTime },
+                { value: a.pausePct != null ? fmtP(a.pausePct) : '—', color: a.pausePct != null ? ((a.pausePct) <= 30 ? C.green : C.red) : C.muted },
+              ])}
+            />
+          </Section>
+        ) : null;
+      })()}
+
+      {/* ─── TABLE 5: POLICY STATUS PIPELINE ─── */}
+      {data.statusPipeline && data.statusPipeline.statuses?.length > 0 && (
+        <Section title="Policy Status Pipeline">
+          {(() => {
+            const { byDate, statuses } = data.statusPipeline;
+            const dates = Object.keys(byDate || {}).sort();
+            return (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>Date</th>
+                      {statuses.map(s => (
+                        <th key={s} colSpan={2} style={{ padding: '6px 8px', color: C.accent, fontSize: 8, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, borderLeft: `1px solid ${C.border}33` }}>
+                          {s.length > 20 ? s.substring(0, 18) + '..' : s}
+                        </th>
+                      ))}
+                    </tr>
+                    <tr>
+                      <th style={{ padding: '3px 10px', borderBottom: `1px solid ${C.border}` }}></th>
+                      {statuses.map(s => (
+                        <React.Fragment key={s + '-sub'}>
+                          <th style={{ padding: '3px 6px', color: C.muted, fontSize: 8, textAlign: 'center', borderBottom: `1px solid ${C.border}`, borderLeft: `1px solid ${C.border}33` }}>Count</th>
+                          <th style={{ padding: '3px 6px', color: C.muted, fontSize: 8, textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>$</th>
+                        </React.Fragment>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dates.map(d => {
+                      const dayName = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                      return (
+                        <tr key={d}>
+                          <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>{dayName}</td>
+                          {statuses.map(s => {
+                            const cell = byDate[d]?.[s] || { count: 0, amount: 0 };
+                            return (
+                              <React.Fragment key={s}>
+                                <td style={{ padding: '5px 6px', color: cell.count > 0 ? C.text : C.muted, fontSize: 10, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22`, borderLeft: `1px solid ${C.border}33` }}>{cell.count || '—'}</td>
+                                <td style={{ padding: '5px 6px', color: cell.amount > 0 ? C.green : C.muted, fontSize: 10, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>{cell.amount > 0 ? fmtD(cell.amount) : '—'}</td>
+                              </React.Fragment>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                    {/* Totals row */}
+                    <tr>
+                      <td style={{ padding: '5px 10px', color: C.accent, fontSize: 11, fontWeight: 700, borderTop: `1px solid ${C.border}` }}>TOTAL</td>
+                      {statuses.map(s => {
+                        const total = dates.reduce((acc, d) => {
+                          const cell = byDate[d]?.[s] || { count: 0, amount: 0 };
+                          return { count: acc.count + cell.count, amount: acc.amount + cell.amount };
+                        }, { count: 0, amount: 0 });
+                        return (
+                          <React.Fragment key={s + '-total'}>
+                            <td style={{ padding: '5px 6px', color: C.accent, fontSize: 10, fontFamily: C.mono, textAlign: 'center', fontWeight: 700, borderTop: `1px solid ${C.border}`, borderLeft: `1px solid ${C.border}33` }}>{total.count}</td>
+                            <td style={{ padding: '5px 6px', color: C.green, fontSize: 10, fontFamily: C.mono, textAlign: 'center', fontWeight: 700, borderTop: `1px solid ${C.border}` }}>{total.amount > 0 ? fmtD(total.amount) : '—'}</td>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </Section>
       )}
 
