@@ -57,15 +57,25 @@ function Table({ headers, rows }) {
 function getWeekRange() {
   const now = new Date();
   const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const day = et.getDay(); // 0=Sun
-  // Last Monday
-  const mon = new Date(et);
-  mon.setDate(et.getDate() - (day === 0 ? 6 : day - 1));
-  // Last Friday (or today if mid-week)
-  const fri = new Date(mon);
-  fri.setDate(mon.getDate() + Math.min(4, (day === 0 ? -2 : day - 1)));
+  const day = et.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
   const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  return { start: fmt(mon), end: fmt(fri) };
+
+  // Find the most recent completed Mon-Fri work week
+  // If today is Sat(6) or Sun(0), show this past Mon-Fri
+  // If today is Mon-Fri, show last week's Mon-Fri
+  const lastFri = new Date(et);
+  if (day === 6) {
+    lastFri.setDate(et.getDate() - 1); // yesterday = Friday
+  } else if (day === 0) {
+    lastFri.setDate(et.getDate() - 2); // 2 days ago = Friday
+  } else {
+    // Mon-Fri: go back to last Friday
+    lastFri.setDate(et.getDate() - day - 2);
+  }
+  const lastMon = new Date(lastFri);
+  lastMon.setDate(lastFri.getDate() - 4); // Monday = Friday - 4
+
+  return { start: fmt(lastMon), end: fmt(lastFri) };
 }
 
 export default function DailySummaryPage({ dateRange }) {
