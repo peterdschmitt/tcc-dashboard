@@ -198,10 +198,39 @@ export default function VoiceAgent({ activeTab, setActiveTab, applyPreset, setCu
     ttsVoice: 'nova',
   });
 
+  const [briefingLoaded, setBriefingLoaded] = useState(false);
+
   // Auto-expand when voice mode activates
   useEffect(() => {
     if (voiceModeActive) setExpanded(true);
   }, [voiceModeActive]);
+
+  // Morning briefing: when voice mode activates for the first time today, read the daily summary
+  useEffect(() => {
+    if (!voiceModeActive || briefingLoaded) return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const lastBriefing = typeof localStorage !== 'undefined' ? localStorage.getItem('tcc-last-briefing-date') : null;
+    if (lastBriefing === today) { setBriefingLoaded(true); return; }
+
+    // Fetch and speak the daily summary narrative
+    (async () => {
+      try {
+        const res = await fetch('/api/daily-summary');
+        if (!res.ok) return;
+        const summary = await res.json();
+        if (summary.narrative) {
+          setBriefingLoaded(true);
+          if (typeof localStorage !== 'undefined') localStorage.setItem('tcc-last-briefing-date', today);
+          setConversation(prev => [...prev,
+            { role: 'user', text: 'Good morning, give me the daily briefing' },
+            { role: 'assistant', text: summary.narrative },
+          ]);
+        }
+      } catch (e) {
+        console.warn('[VoiceAgent] Morning briefing failed:', e);
+      }
+    })();
+  }, [voiceModeActive, briefingLoaded]);
 
   // Auto-scroll conversation
   useEffect(() => {

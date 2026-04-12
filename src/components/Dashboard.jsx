@@ -8,6 +8,7 @@ import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import AiAnalystPane from './AiAnalystPane';
+import DailySummaryPage from './DailySummaryPage';
 // VoiceAgent moved to page.js to persist across loading states
 import DatePicker from './shared/DatePicker';
 
@@ -21,6 +22,7 @@ const C = {
 };
 
 const TABS = [
+  { id: 'daily-brief', label: 'Daily Brief' },
   { id: 'daily', label: 'Daily Activity' },
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
@@ -3330,6 +3332,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         </div>
       </div>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
+        {activeTab === 'daily-brief' && <DailySummaryPage dateRange={dateRange} />}
         {activeTab === 'daily' && <DailyActivityTab policies={policies} calls={calls} pnl={pnl} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}
         {activeTab === 'publishers' && <PublishersTab pnl={pnl} policies={policies} goals={goals} calls={calls} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
