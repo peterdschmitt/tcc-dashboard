@@ -11,7 +11,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [earliestDate, setEarliestDate] = useState(null);
-  const [activeTab, setActiveTab] = useState('daily-brief');
+  const [activeTab, setActiveTab] = useState('daily');
   const [voiceDrillTarget, setVoiceDrillTarget] = useState(null);
   const [aiPaneOpen, setAiPaneOpen] = useState(false);
   const [voiceTileTarget, setVoiceTileTarget] = useState(null);

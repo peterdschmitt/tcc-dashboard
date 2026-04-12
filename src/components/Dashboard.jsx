@@ -22,8 +22,8 @@ const C = {
 };
 
 const TABS = [
-  { id: 'daily-brief', label: 'Daily Brief' },
   { id: 'daily', label: 'Daily Activity' },
+  { id: 'daily-brief', label: 'Daily Brief' },
   { id: 'publishers', label: 'Publishers' },
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
