@@ -54,9 +54,25 @@ function Table({ headers, rows }) {
   );
 }
 
+function getWeekRange() {
+  const now = new Date();
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay(); // 0=Sun
+  // Last Monday
+  const mon = new Date(et);
+  mon.setDate(et.getDate() - (day === 0 ? 6 : day - 1));
+  // Last Friday (or today if mid-week)
+  const fri = new Date(mon);
+  fri.setDate(mon.getDate() + Math.min(4, (day === 0 ? -2 : day - 1)));
+  const fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  return { start: fmt(mon), end: fmt(fri) };
+}
+
 export default function DailySummaryPage({ dateRange }) {
   const [data, setData] = useState(null);
+  const [weekData, setWeekData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [weekLoading, setWeekLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -75,6 +91,22 @@ export default function DailySummaryPage({ dateRange }) {
     }
     load();
   }, [dateRange]);
+
+  // Fetch week in review
+  useEffect(() => {
+    async function loadWeek() {
+      setWeekLoading(true);
+      try {
+        const wr = getWeekRange();
+        const res = await fetch(`/api/daily-summary?start=${wr.start}&end=${wr.end}&mode=weekly`);
+        if (res.ok) setWeekData(await res.json());
+      } catch (e) {
+        console.warn('Week summary failed:', e);
+      }
+      setWeekLoading(false);
+    }
+    loadWeek();
+  }, []);
 
   if (loading) {
     return (
@@ -202,6 +234,112 @@ export default function DailySummaryPage({ dateRange }) {
           />
         </Section>
       )}
+
+      {/* ─── WEEK IN REVIEW ─── */}
+      <div style={{ marginTop: 32, borderTop: `2px solid ${C.accent}`, paddingTop: 24 }}>
+        <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700, color: C.accent }}>Week in Review</h2>
+        {weekLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 0', color: C.muted }}>
+            <div style={{ width: 16, height: 16, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+            <span style={{ fontSize: 12 }}>Loading weekly summary...</span>
+          </div>
+        )}
+        {weekData && !weekLoading && (() => {
+          const ws = weekData.sales || {};
+          const wf = weekData.financials || {};
+          const wc = weekData.calls || {};
+          const wa = weekData.alerts || [];
+          const wPerf = weekData.agentPerf || [];
+          return (
+            <>
+              <p style={{ margin: '0 0 16px', fontSize: 11, color: C.muted }}>
+                {weekData.startDate} to {weekData.endDate} &middot; {ws.total} apps &middot; {fmt(wc.total)} calls &middot; {fmtD(wf.leadSpend)} spend
+              </p>
+
+              {weekData.narrative && (
+                <Section title="Weekly Executive Summary">
+                  <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.7 }}>{weekData.narrative}</p>
+                </Section>
+              )}
+
+              {/* Weekly KPIs */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <KPI label="Apps" value={fmt(ws.total)} />
+                <KPI label="Placed" value={fmt(ws.placed)} color={ws.placed > 0 ? C.green : C.red} />
+                <KPI label="CPA" value={fmtD(wf.cpa)} />
+                <KPI label="Gross Revenue" value={fmtD(wf.gar)} color={C.green} />
+                <KPI label="Net Revenue" value={fmtD(wf.netRevenue)} color={wf.netRevenue >= 0 ? C.green : C.red} />
+                <KPI label="Lead Spend" value={fmtD(wf.leadSpend)} color={C.yellow} />
+                <KPI label="Close Rate" value={fmtP(wf.closeRate)} />
+                <KPI label="Avg Premium" value={fmtD(wf.avgPremium)} />
+              </div>
+
+              {/* Weekly Alerts */}
+              {wa.length > 0 && (
+                <Section title={`Weekly Alerts (${wa.length})`} color={C.red}>
+                  <Table
+                    headers={[{ label: 'Status' }, { label: 'Metric' }, { label: 'Agent' }, { label: 'Actual', align: 'center' }, { label: 'Goal', align: 'center' }]}
+                    rows={wa.map(a => [
+                      { value: a.status === 'red' ? '🔴 RED' : '🟡 YELLOW', color: a.status === 'red' ? C.red : C.yellow },
+                      { value: a.metric },
+                      { value: a.agent || '—', color: C.muted },
+                      { value: typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual, color: a.status === 'red' ? C.red : C.yellow },
+                      { value: a.goal, color: C.muted },
+                    ])}
+                  />
+                </Section>
+              )}
+
+              {/* Weekly Sales by Agent */}
+              <Section title="Weekly Sales by Agent">
+                <Table
+                  headers={[{ label: 'Agent' }, { label: 'Apps', align: 'center' }, { label: 'Placed', align: 'center' }, { label: 'Premium', align: 'right' }, { label: 'GAR', align: 'right' }]}
+                  rows={Object.entries(ws.byAgent || {}).map(([name, a]) => [
+                    { value: name },
+                    { value: fmt(a.apps) },
+                    { value: fmt(a.placed), color: a.placed > 0 ? C.green : C.muted },
+                    { value: fmtD(a.premium), color: C.green },
+                    { value: fmtD(a.gar), color: C.accent },
+                  ])}
+                />
+              </Section>
+
+              {/* Weekly Calls by Campaign */}
+              <Section title="Weekly Calls by Campaign">
+                <Table
+                  headers={[{ label: 'Campaign' }, { label: 'Vendor' }, { label: 'Calls', align: 'center' }, { label: 'Billable', align: 'center' }, { label: 'Bill %', align: 'center' }, { label: 'Spend', align: 'right' }, { label: 'RPC', align: 'right' }]}
+                  rows={Object.entries(ws.byCampaign || {}).sort((a, b) => b[1].calls - a[1].calls).map(([name, c]) => [
+                    { value: name },
+                    { value: c.vendor || '—', color: C.muted },
+                    { value: fmt(c.calls) },
+                    { value: fmt(c.billable), color: c.billable > 0 ? C.green : C.muted },
+                    { value: fmtP(c.billableRate), color: c.billableRate > 15 ? C.green : C.red },
+                    { value: fmtD(c.spend), color: C.yellow },
+                    { value: fmtD(c.rpc, 2) },
+                  ])}
+                />
+              </Section>
+
+              {/* Weekly Agent Dialer */}
+              {wPerf.length > 0 && (
+                <Section title="Weekly Agent Dialer">
+                  <Table
+                    headers={[{ label: 'Agent' }, { label: 'Avail %', align: 'center' }, { label: 'Pause %', align: 'center' }, { label: 'Logged In', align: 'center' }, { label: 'Dials', align: 'center' }, { label: 'Connects', align: 'center' }]}
+                    rows={wPerf.map(a => [
+                      { value: a.rep },
+                      { value: fmtP(a.availPct), color: (a.availPct || 0) >= 70 ? C.green : C.red },
+                      { value: fmtP(a.pausePct), color: (a.pausePct || 0) <= 30 ? C.green : C.red },
+                      { value: a.loggedInStr || '—' },
+                      { value: fmt(a.dialed) },
+                      { value: fmt(a.connects) },
+                    ])}
+                  />
+                </Section>
+              )}
+            </>
+          );
+        })()}
+      </div>
     </div>
   );
 }
