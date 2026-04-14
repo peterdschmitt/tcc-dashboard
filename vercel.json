@@ -1,5 +1,11 @@
 {
   "functions": {
+    "src/app/api/dashboard/route.js": {
+      "maxDuration": 60
+    },
+    "src/app/api/virtual-agent/route.js": {
+      "maxDuration": 60
+    },
     "src/app/api/commission-statements/upload/route.js": {
       "maxDuration": 60
     },
