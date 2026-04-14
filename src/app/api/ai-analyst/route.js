@@ -346,9 +346,11 @@ Rules:
 async function fetchVAMetrics(reportDate) {
   try {
     // Use the same date range as the report
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:' + (process.env.PORT || 3003);
+    const baseUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'http://localhost:' + (process.env.PORT || 3003);
     const res = await fetch(`${baseUrl}/api/virtual-agent?start=${reportDate}&end=${reportDate}`);
     if (!res.ok) return null;
     const data = await res.json();

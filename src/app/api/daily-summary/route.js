@@ -6,9 +6,10 @@ const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - P
 const isPlaced = p => PLACED_STATUSES.includes(p.placed);
 
 function getBaseUrl() {
-  return process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:' + (process.env.PORT || 3003);
+  // Use production domain instead of VERCEL_URL (deployment-specific URLs get 401 from deployment protection)
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return 'http://localhost:' + (process.env.PORT || 3003);
 }
 
 function getYesterday() {
