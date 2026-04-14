@@ -66,6 +66,7 @@ export async function GET(request) {
     const mode = searchParams.get('mode') || (startDate !== endDate ? 'weekly' : 'daily');
     const source = searchParams.get('source') || process.env.SALES_TAB_NAME || 'Sheet1';
     const baseUrl = getBaseUrl();
+    console.log('[daily-summary] baseUrl:', baseUrl);
 
     // Fetch all data in parallel
     const [dashRes, perfRes, goalsRes, vaRes] = await Promise.all([
@@ -75,8 +76,16 @@ export async function GET(request) {
       fetch(`${baseUrl}/api/virtual-agent?start=${startDate}&end=${endDate}`).catch(() => null),
     ]);
 
-    if (!dashRes.ok) throw new Error(`Dashboard API: ${dashRes.status}`);
-    if (!goalsRes.ok) throw new Error(`Goals API: ${goalsRes.status}`);
+    if (!dashRes.ok) {
+      const body = await dashRes.text().catch(() => '(no body)');
+      console.error(`[daily-summary] Dashboard failed: status=${dashRes.status}, url=${baseUrl}/api/dashboard, body=${body.slice(0, 500)}`);
+      throw new Error(`Dashboard API: ${dashRes.status}`);
+    }
+    if (!goalsRes.ok) {
+      const body = await goalsRes.text().catch(() => '(no body)');
+      console.error(`[daily-summary] Goals failed: status=${goalsRes.status}, body=${body.slice(0, 500)}`);
+      throw new Error(`Goals API: ${goalsRes.status}`);
+    }
 
     const dashData = await dashRes.json();
     const goalsData = await goalsRes.json();
