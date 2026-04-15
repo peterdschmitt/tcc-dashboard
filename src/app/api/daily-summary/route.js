@@ -106,11 +106,11 @@ export async function GET(request) {
     policies.forEach(p => {
       if (!byAgent[p.agent]) byAgent[p.agent] = { apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
       byAgent[p.agent].apps++;
+      byAgent[p.agent].premium += p.premium || 0;
+      byAgent[p.agent].commission += p.commission || 0;
       byAgent[p.agent].gar += p.grossAdvancedRevenue || 0;
       if (isPlaced(p)) {
         byAgent[p.agent].placed++;
-        byAgent[p.agent].premium += p.premium || 0;
-        byAgent[p.agent].commission += p.commission || 0;
       }
     });
 
@@ -244,9 +244,10 @@ export async function GET(request) {
       const c = p.carrier || 'Unknown';
       if (!carrierMap[c]) carrierMap[c] = { sales: 0, placed: 0, premium: 0, gar: 0, commission: 0 };
       carrierMap[c].sales++;
+      carrierMap[c].premium += p.premium || 0;
       carrierMap[c].gar += p.grossAdvancedRevenue || 0;
       carrierMap[c].commission += p.commission || 0;
-      if (isPlaced(p)) { carrierMap[c].placed++; carrierMap[c].premium += p.premium || 0; }
+      if (isPlaced(p)) { carrierMap[c].placed++; }
     });
     // Add call/billable data per carrier via the pnl agent breakdown
     const byCarrier = Object.entries(carrierMap).map(([name, c]) => ({

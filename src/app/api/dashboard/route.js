@@ -299,21 +299,21 @@ export async function GET(request) {
       }
       const pub = pnlByPublisher[key];
       pub.appCount++;
+      pub.totalPremium += pol.premium;
+      pub.totalCommission += pol.commission;
       pub.grossAdvancedRevenue += pol.grossAdvancedRevenue;
+      pub.totalFace += pol.faceAmount;
       const isPlaced = ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(pol.placed);
       if (isPlaced) {
-        pub.totalPremium += pol.premium;
-        pub.totalCommission += pol.commission;
         pub.placedCount++;
-        pub.totalFace += pol.faceAmount;
       }
       if (pol.agent) {
         if (!pub.agents[pol.agent]) pub.agents[pol.agent] = { totalCalls: 0, billableCalls: 0, leadSpend: 0, sales: 0, totalPremium: 0, totalCommission: 0, placedCount: 0, appCount: 0, grossAdvancedRevenue: 0 };
         pub.agents[pol.agent].appCount++;
+        pub.agents[pol.agent].totalPremium += pol.premium;
+        pub.agents[pol.agent].totalCommission += pol.commission;
         pub.agents[pol.agent].grossAdvancedRevenue += pol.grossAdvancedRevenue;
         if (isPlaced) {
-          pub.agents[pol.agent].totalPremium += pol.premium;
-          pub.agents[pol.agent].totalCommission += pol.commission;
           pub.agents[pol.agent].placedCount++;
         }
       }
@@ -326,7 +326,7 @@ export async function GET(request) {
         rpc: p.totalCalls > 0 ? p.leadSpend / p.totalCalls : 0,
         closeRate: p.billableCalls > 0 ? p.placedCount / p.billableCalls * 100 : 0,
         cpa: p.appCount > 0 ? p.leadSpend / p.appCount : 0,
-        avgPremium: p.placedCount > 0 ? p.totalPremium / p.placedCount : 0,
+        avgPremium: p.appCount > 0 ? p.totalPremium / p.appCount : 0,
         premiumToCost: p.leadSpend > 0 ? p.totalPremium / p.leadSpend : 0,
         netRevenue,
         agentBreakdown: Object.entries(p.agents || {}).map(([name, a]) => ({
@@ -335,7 +335,7 @@ export async function GET(request) {
           cpa: a.appCount > 0 ? a.leadSpend / a.appCount : 0,
           rpc: a.totalCalls > 0 ? a.leadSpend / a.totalCalls : 0,
           billableRate: a.totalCalls > 0 ? a.billableCalls / a.totalCalls * 100 : 0,
-          avgPremium: a.placedCount > 0 ? a.totalPremium / a.placedCount : 0,
+          avgPremium: a.appCount > 0 ? a.totalPremium / a.appCount : 0,
           netRevenue: a.grossAdvancedRevenue - a.leadSpend - a.totalCommission,
         })),
       };

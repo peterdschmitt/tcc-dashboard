@@ -332,14 +332,14 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       };
     })(),
     eff_revenue: (() => {
-      const garRows = policies.filter(isPlaced).sort((a, b) => b.submitDate.localeCompare(a.submitDate));
+      const garRows = [...policies].sort((a, b) => b.submitDate.localeCompare(a.submitDate));
       const garTotalGAR  = garRows.reduce((s, r) => s + (r.grossAdvancedRevenue || 0), 0);
       const garTotalComm = garRows.reduce((s, r) => s + (r.commission || 0), 0);
       const garTotalSpend = garRows.reduce((s, r) => s + getCallCost(r), 0);
       const garCount = garRows.length;
       return {
-        title: 'Effectuated Revenue — Placed Policies',
-        summary: `${garCount} placed policies · GAR adjusted by effectuation rate`,
+        title: 'Effectuated Revenue — All Submitted',
+        summary: `${garCount} applications · GAR adjusted by effectuation rate`,
         financials: [
           { label: 'Gross Adv Revenue', value: fmtDollar(garTotalGAR),   color: C.green },
           { label: 'Eff. Revenue',      value: fmtDollar(garTotalGAR * 0.70), color: C.accent },
@@ -535,15 +535,15 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       };
     })(),
     monthly_premium: (() => {
-      const premRows = policies.filter(isPlaced).sort((a, b) => (b.premium||0) - (a.premium||0));
+      const premRows = [...policies].sort((a, b) => (b.premium||0) - (a.premium||0));
       const totalPrem = premRows.reduce((s, r) => s + (r.premium||0), 0);
       const avgPrem = premRows.length > 0 ? totalPrem / premRows.length : 0;
       const byAgent = {};
       premRows.forEach(r => { byAgent[r.agent] = (byAgent[r.agent]||0) + r.premium; });
       const topAgent = Object.entries(byAgent).sort((a,b) => b[1]-a[1])[0];
       return {
-        title: 'Monthly Premium — Placed Policies',
-        summary: `${premRows.length} placed policies · avg ${fmtDollar(avgPrem, 2)}/policy`,
+        title: 'Monthly Premium — All Submitted',
+        summary: `${premRows.length} applications · avg ${fmtDollar(avgPrem, 2)}/policy`,
         financials: [
           { label: 'Total Premium', value: fmtDollar(totalPrem, 2),                                        color: C.green },
           { label: 'Avg Premium',   value: fmtDollar(avgPrem, 2),                                          color: C.text },
@@ -615,7 +615,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       };
     })(),
     agent_commission: (() => {
-      const commRows = policies.filter(isPlaced).sort((a, b) => (b.commission||0) - (a.commission||0));
+      const commRows = [...policies].sort((a, b) => (b.commission||0) - (a.commission||0));
       const totalComm = commRows.reduce((s, r) => s + (r.commission||0), 0);
       const totalPrem = commRows.reduce((s, r) => s + (r.premium||0), 0);
       // Summarize by agent
@@ -819,7 +819,8 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       policies.forEach(r => {
         if (!byAgent[r.agent]) byAgent[r.agent] = { agent: r.agent, apps: 0, placed: 0, premium: 0 };
         byAgent[r.agent].apps++;
-        if (isPlaced(r)) { byAgent[r.agent].placed++; byAgent[r.agent].premium += r.premium||0; }
+        byAgent[r.agent].premium += r.premium||0;
+        if (isPlaced(r)) { byAgent[r.agent].placed++; }
       });
       const prRows = Object.values(byAgent).filter(r => r.apps > 0).sort((a, b) => {
         const prA = a.apps > 0 ? a.placed / a.apps : 0;
@@ -845,7 +846,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Not Placed',      render: r => fmt(r.apps - r.placed),                                                                               color: C.red },
           { label: 'Placement Rate',  render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—',                                                      color: r => { const v = r.apps > 0 ? r.placed/r.apps*100 : 0; return v >= 80 ? C.green : v >= 64 ? C.yellow : C.red; } },
           { label: 'Total Premium',   render: r => fmtDollar(r.premium, 2),                                                                              color: C.green },
-          { label: 'Avg Premium',     render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—',                                               color: C.muted },
+          { label: 'Avg Premium',     render: r => r.apps > 0 ? fmtDollar(r.premium/r.apps, 2) : '—',                                                   color: C.muted },
         ],
         totals: [
           'TOTAL',
@@ -883,7 +884,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Premium',        render: r => fmtDollar(r.totalPremium||0, 2),                                                                                     color: C.green },
           { label: 'Lead Spend',     render: r => fmtDollar(r.leadSpend||0, 2),                                                                                        color: C.yellow },
           { label: 'Prem:Cost',      render: r => r.leadSpend > 0 ? (r.totalPremium/r.leadSpend).toFixed(2) + 'x' : '—',                                              color: r => { const v = r.leadSpend > 0 ? r.totalPremium/r.leadSpend : 0; return v >= 2.5 ? C.green : v >= 2 ? C.yellow : C.red; } },
-          { label: 'Avg Premium',    render: r => r.placedCount > 0 ? fmtDollar(r.totalPremium/r.placedCount, 2) : '—',                                               color: C.muted },
+          { label: 'Avg Premium',    render: r => r.appCount > 0 ? fmtDollar(r.totalPremium/r.appCount, 2) : '—',                                                   color: C.muted },
           { label: 'CPA',            render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend/r.placedCount) : '—',                                                     color: C.muted },
         ],
         totals: [
@@ -897,8 +898,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       };
     })(),
     avg_premium: (() => {
-      const placed = policies.filter(isPlaced);
-      const avgRows = [...placed].sort((a, b) => (b.premium||0) - (a.premium||0));
+      const avgRows = [...policies].sort((a, b) => (b.premium||0) - (a.premium||0));
       const totalPrem = avgRows.reduce((s, r) => s + (r.premium||0), 0);
       const avgPrem   = avgRows.length > 0 ? totalPrem / avgRows.length : 0;
       // By agent summary
@@ -957,8 +957,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const key = keyFn(p) || 'Unknown';
       if (!map[key]) map[key] = { campaign: key, agent: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0, isSalaried: p.isSalaried };
       map[key].apps++;
+      map[key].premium += p.premium||0;
+      map[key].commission += p.commission||0;
       map[key].gar += p.grossAdvancedRevenue||0;
-      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; }
+      if (isPlaced(p)) { map[key].placed++; }
       map[key].leadSpend += getCallCost(p);
     });
     return Object.values(map).sort((a,b) => b.premium - a.premium);
@@ -982,8 +984,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const key = p.carrier || 'Unknown';
       if (!map[key]) map[key] = { carrier: key, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, leadSpend: 0 };
       map[key].apps++;
+      map[key].premium += p.premium||0;
+      map[key].commission += p.commission||0;
       map[key].gar += p.grossAdvancedRevenue||0;
-      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; }
+      if (isPlaced(p)) { map[key].placed++; }
       map[key].leadSpend += getCallCost(p);
     });
     return Object.values(map).sort((a,b) => b.premium - a.premium);
@@ -1001,7 +1005,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       const key = p.agent || 'Unknown';
       if (!map[key]) map[key] = { agent: key, calls: 0, billable: 0, spend: 0, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
       map[key].apps++;
-      if (isPlaced(p)) { map[key].placed++; map[key].premium += p.premium||0; map[key].commission += p.commission||0; map[key].gar += p.grossAdvancedRevenue||0; }
+      map[key].premium += p.premium||0;
+      map[key].commission += p.commission||0;
+      map[key].gar += p.grossAdvancedRevenue||0;
+      if (isPlaced(p)) { map[key].placed++; }
     });
     return Object.values(map).sort((a,b) => b.premium - a.premium);
   };
@@ -1015,7 +1022,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
     { label: 'Place Rate', render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—', color: r => { const v = r.apps>0?r.placed/r.apps*100:0; return v>=80?C.green:v>=64?C.yellow:C.red; }, sortValue: r => r.apps>0?r.placed/r.apps:0 },
     { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium },
-    { label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—', color: C.muted, sortValue: r => r.placed>0?r.premium/r.placed:0 },
+    { label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium/r.apps, 2) : '—', color: C.muted, sortValue: r => r.apps>0?r.premium/r.apps:0 },
     { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission },
     { label: 'GAR', render: r => fmtDollar(r.gar, 0), color: C.green, sortValue: r => r.gar },
   ];
@@ -1026,7 +1033,7 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     { label: 'Placed', render: r => fmt(r.placed), color: C.green, sortValue: r => r.placed },
     { label: 'Place Rate', render: r => r.apps > 0 ? fmtPct(r.placed/r.apps*100) : '—', color: r => { const v = r.apps>0?r.placed/r.apps*100:0; return v>=80?C.green:v>=64?C.yellow:C.red; }, sortValue: r => r.apps>0?r.placed/r.apps:0 },
     { label: 'Premium', render: r => fmtDollar(r.premium, 2), color: C.green, sortValue: r => r.premium },
-    { label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium/r.placed, 2) : '—', color: C.muted, sortValue: r => r.placed>0?r.premium/r.placed:0 },
+    { label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium/r.apps, 2) : '—', color: C.muted, sortValue: r => r.apps>0?r.premium/r.apps:0 },
     { label: 'Commission', render: r => fmtDollar(r.commission, 2), color: C.accent, sortValue: r => r.commission },
     { label: 'GAR', render: r => fmtDollar(r.gar, 0), color: C.green, sortValue: r => r.gar },
   ];
@@ -1129,10 +1136,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
     views = {
       campaign: { columns: cfg.columns, rows: cfg.rows, totals: cfg.totals },
       agent: { columns: mergedAgentCols, rows: buildMergedAgentRows() },
-      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies.filter(isPlaced)) },
+      carrier: { columns: carrierGroupCols, rows: buildCarrierGroupRows(policies) },
       all: isCallCentric
         ? { columns: allCallCols, rows: [...calls].filter(c => c.isBillable).sort((a,b) => (b.date||'').localeCompare(a.date||'')) }
-        : { columns: allPolicyCols, rows: policies.filter(isPlaced).sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
+        : { columns: allPolicyCols, rows: [...policies].sort((a,b) => (b.submitDate||'').localeCompare(a.submitDate||'')) },
     };
   }
 
@@ -1589,23 +1596,25 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
   const days = calcDays(dateRange.start, dateRange.end);
   const cg = goals?.company || {};
   const placed = policies.filter(isPlaced);
-  const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
+  const totalPremium = policies.reduce((s, p) => s + p.premium, 0);
   const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
-  const totalComm = placed.reduce((s, p) => s + p.commission, 0);
+  const totalComm = policies.reduce((s, p) => s + p.commission, 0);
   const totalCalls = calls.length;
   const billable = calls.filter(c => c.isBillable).length;
   const leadSpend = calls.reduce((s, c) => s + c.cost, 0);
   const cpa = policies.length > 0 ? leadSpend / policies.length : 0;
   const rpc = totalCalls > 0 ? leadSpend / totalCalls : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
-  const avgPrem = placed.length > 0 ? totalPremium / placed.length : 0;
+  const avgPrem = policies.length > 0 ? totalPremium / policies.length : 0;
 
   const byDay = {};
   policies.forEach(p => {
     if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
     byDay[p.submitDate].apps++;
+    byDay[p.submitDate].premium += p.premium;
+    byDay[p.submitDate].commission += p.commission;
     byDay[p.submitDate].gar += p.grossAdvancedRevenue;
-    if (isPlaced(p)) { byDay[p.submitDate].placed++; byDay[p.submitDate].premium += p.premium; byDay[p.submitDate].commission += p.commission; }
+    if (isPlaced(p)) { byDay[p.submitDate].placed++; }
   });
   calls.forEach(c => {
     if (!byDay[c.date]) byDay[c.date] = { date: c.date, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0, totalCalls: 0, billableCalls: 0, leadSpend: 0 };
@@ -1695,7 +1704,7 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
           { key: 'apps', label: 'Apps' },
           { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
           { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: r => r.premium > 0 ? C.green : C.muted },
-          { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+          { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
           { key: 'gar', label: 'Gross Adv Rev', render: r => fmtDollar(r.gar), color: r => r.gar > 0 ? C.green : C.muted },
           { key: 'totalCalls', label: 'Calls', render: r => fmt(r.totalCalls || 0) },
           { key: 'billableCalls', label: 'Billable', render: r => fmt(r.billableCalls || 0) },
@@ -1731,7 +1740,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
     t.closeRate = t.billableCalls > 0 ? t.placedCount / t.billableCalls * 100 : 0;
     t.appCount = pnl.reduce((s, p) => s + (p.appCount||0), 0);
     t.cpa = t.appCount > 0 ? t.leadSpend / t.appCount : 0;
-    t.avgPremium = t.placedCount > 0 ? t.totalPremium / t.placedCount : 0;
+    t.avgPremium = t.appCount > 0 ? t.totalPremium / t.appCount : 0;
     t.netRevenue = t.grossAdvancedRevenue - t.leadSpend - t.totalCommission;
     return t;
   }, [pnl]);
@@ -1744,8 +1753,10 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
     pp.forEach(p => {
       if (!agentMap[p.agent]) agentMap[p.agent] = { agent: p.agent, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
       agentMap[p.agent].apps++;
+      agentMap[p.agent].premium += p.premium;
+      agentMap[p.agent].commission += p.commission;
       agentMap[p.agent].gar += p.grossAdvancedRevenue;
-      if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium; agentMap[p.agent].commission += p.commission; }
+      if (isPlaced(p)) { agentMap[p.agent].placed++; }
     });
     (pub.agentBreakdown || []).forEach(a => {
       if (!agentMap[a.agent]) agentMap[a.agent] = { agent: a.agent, apps: 0, placed: 0, premium: 0, commission: 0, gar: 0 };
@@ -1776,7 +1787,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
             { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false },
             { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+            { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
             { key: 'totalCalls', label: 'Calls', render: r => fmt(r.totalCalls || 0) },
             { key: 'billableCalls', label: 'Billable', render: r => fmt(r.billableCalls || 0) },
             { key: 'billRate', label: 'Bill %', render: r => (r.totalCalls || 0) > 0 ? fmtPct(r.billableCalls / r.totalCalls * 100) : '—' },
@@ -1790,7 +1801,7 @@ function PublishersTab({ pnl, policies, goals, calls, dateRange, allTimePolicies
             { key: 'carrier', label: 'Carrier', align: 'left', bold: true, mono: false },
             { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+            { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
             { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.accent },
             { key: 'gar', label: 'Gross Adv Rev', render: r => fmtDollar(r.gar), color: () => C.green },
           ]} rows={Object.values(carrierMap)} />
@@ -1894,7 +1905,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, va
             { key: 'carrier', label: 'Carrier', align: 'left', bold: true, mono: false },
             { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+            { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
             { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.accent },
             { key: 'gar', label: 'Gross Adv Rev', render: r => fmtDollar(r.gar), color: () => C.green },
           ]} rows={Object.values(carrierMap)} />
@@ -1904,7 +1915,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, va
             { key: 'leadSource', label: 'Source', align: 'left', bold: true, mono: false },
             { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+            { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
           ]} rows={Object.values(sourceMap)} />
         </Section>
         <Section title="Recent Policies — Commission Verification">
@@ -1931,7 +1942,7 @@ function AgentsTab({ policies, calls, goals, dateRange, pnl, allTimePolicies, va
         { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false, render: r => <span>{r.agent}{isSalaried(r.agent) && <SalaryBadge />}</span> },
         { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
         { key: 'premium', label: 'Mo. Prem', render: r => fmtDollar(r.premium, 2), color: () => C.green, bold: true },
-        { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+        { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
         { key: 'premGoal', label: 'Prem Goal', render: r => r.agent === 'TOTAL' ? '' : <ProgressBar value={r.premium} goal={getGoal(r.agent, 'premiumTarget')} />, sortable: false },
         { key: 'commission', label: 'Commission', render: r => isSalaried(r.agent) ? <span style={{ color: C.muted }}>Salary</span> : fmtDollar(r.commission), color: r => isSalaried(r.agent) ? C.muted : C.accent },
         { key: 'gar', label: 'Gross Adv', render: r => fmtDollar(r.gar), color: () => C.green },
@@ -1995,7 +2006,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, 
             { key: 'agent', label: 'Agent', align: 'left', bold: true, mono: false },
             { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
             { key: 'premium', label: 'Premium', render: r => fmtDollar(r.premium, 2), color: () => C.green },
-            { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+            { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
             { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.accent },
           ]} rows={Object.values(agentMap)} />
         </Section>
@@ -2022,7 +2033,7 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, 
         { key: 'product', label: 'Product', align: 'left', mono: false },
         { key: 'apps', label: 'Apps' }, { key: 'placed', label: 'Placed', color: r => r.placed > 0 ? C.green : C.muted },
         { key: 'premium', label: 'Mo. Prem', render: r => fmtDollar(r.premium, 2), color: () => C.green, bold: true },
-        { key: 'avgPrem', label: 'Avg Prem', render: r => r.placed > 0 ? fmtDollar(r.premium / r.placed, 2) : '—' },
+        { key: 'avgPrem', label: 'Avg Prem', render: r => r.apps > 0 ? fmtDollar(r.premium / r.apps, 2) : '—' },
         { key: 'commission', label: 'Commission', render: r => fmtDollar(r.commission), color: () => C.accent },
         { key: 'gar', label: 'Gross Adv', render: r => fmtDollar(r.gar), color: () => C.green },
         { key: 'netRev', label: 'Net Rev', render: r => { const n = r.gar - r.commission; return fmtDollar(n); }, color: r => (r.gar - r.commission) > 0 ? C.green : C.red },
@@ -2038,8 +2049,8 @@ function CarriersTab({ policies, goals, calls, dateRange, pnl, allTimePolicies, 
 // ─── P&L TAB ─────────────────────────────────────────
 function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange, vaData }) {
   const placed = policies.filter(isPlaced);
-  const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
-  const totalComm = placed.reduce((s, p) => s + p.commission, 0);
+  const totalPremium = policies.reduce((s, p) => s + p.premium, 0);
+  const totalComm = policies.reduce((s, p) => s + p.commission, 0);
   const totalGAR = policies.reduce((s, p) => s + p.grossAdvancedRevenue, 0);
   const totalSpend = pnl.reduce((s, p) => s + p.leadSpend, 0);
   const totalCalls = calls.length;
@@ -2084,11 +2095,9 @@ function PnlTab({ pnl, policies, calls, goals, allTimePolicies, dateRange, vaDat
 function CommissionsTab({ policies }) {
   const [drill, setDrill] = useState(null);
 
-  const placed = policies.filter(isPlaced);
-
-  // Aggregate placed policies by submit date
+  // Aggregate all submitted policies by submit date
   const byDay = {};
-  placed.forEach(p => {
+  policies.forEach(p => {
     if (!byDay[p.submitDate]) byDay[p.submitDate] = { date: p.submitDate, policies: [], totalPremium: 0, totalCommission: 0, agentSet: new Set() };
     byDay[p.submitDate].policies.push(p);
     byDay[p.submitDate].totalPremium += p.premium;
@@ -2105,12 +2114,12 @@ function CommissionsTab({ policies }) {
     }))
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const totalPolicies = placed.length;
-  const totalPremium = placed.reduce((s, p) => s + p.premium, 0);
-  const totalCommission = placed.reduce((s, p) => s + p.commission, 0);
+  const totalPolicies = policies.length;
+  const totalPremium = policies.reduce((s, p) => s + p.premium, 0);
+  const totalCommission = policies.reduce((s, p) => s + p.commission, 0);
   const overallAvgRate = totalPremium > 0 ? totalCommission / totalPremium * 100 : 0;
-  const commAgentCount = new Set(placed.filter(p => !p.isSalaried && p.commission > 0).map(p => p.agent)).size;
-  const salaryAgentCount = new Set(placed.filter(p => p.isSalaried).map(p => p.agent)).size;
+  const commAgentCount = new Set(policies.filter(p => !p.isSalaried && p.commission > 0).map(p => p.agent)).size;
+  const salaryAgentCount = new Set(policies.filter(p => p.isSalaried).map(p => p.agent)).size;
 
   // ── Drill-down: single day ────────────────────────
   if (drill) {

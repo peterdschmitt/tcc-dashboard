@@ -43,7 +43,9 @@ function buildLiveDataContext(policies, calls, pnl, dateRange) {
   (policies || []).forEach(p => {
     if (!agentMap[p.agent]) agentMap[p.agent] = { apps: 0, placed: 0, premium: 0, commission: 0 };
     agentMap[p.agent].apps++;
-    if (isPlaced(p)) { agentMap[p.agent].placed++; agentMap[p.agent].premium += p.premium || 0; agentMap[p.agent].commission += p.commission || 0; }
+    agentMap[p.agent].premium += p.premium || 0;
+    agentMap[p.agent].commission += p.commission || 0;
+    if (isPlaced(p)) { agentMap[p.agent].placed++; }
   });
   const agentSummary = Object.entries(agentMap).map(([name, a]) => `${name}: ${a.apps} apps, ${a.placed} placed, $${a.premium.toFixed(0)} premium`).join('\n  ');
 
