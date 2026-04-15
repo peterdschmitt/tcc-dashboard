@@ -139,25 +139,33 @@ export async function GET(request) {
           : { commission: 0, rate: 0, advanceMonths: 9, matched: false };
 
         const carrierPayoutRate = commResult.rate;
-        const months = commResult.advanceMonths;
+        let months = commResult.advanceMonths;
+
+        // As-earned detection: CICA policies paid via credit/debit get no advance
+        const paymentTypeRaw = (r['Payment Type'] || '').trim().toLowerCase();
+        const isCICA = carrier.toLowerCase().includes('cica');
+        const isAsEarned = isCICA && (paymentTypeRaw === 'credit' || paymentTypeRaw === 'debit' || paymentTypeRaw === 'credit card' || paymentTypeRaw === 'debit card');
+        if (isAsEarned) months = 1;
 
         // Agent commission multiplier: from Agent Payout Rates sheet (GIWL = 1.5x, Standard = 3x)
         const agentMultiplier = isGIWL ? (agentPayoutRates['giwl'] || 1.5) : (agentPayoutRates['standard'] || 3);
         const commissionRate = agentMultiplier;
 
         // Agent commission: what the agency pays the agent (salaried agents = $0)
+        // As-earned policies: agent commission is unchanged (premium × multiplier)
         let commission = 0;
         if (!isSalaried && premium > 0) {
           commission = premium * agentMultiplier;
         }
 
         // GAR: premium × carrier rate × advance months (all from commission rates sheet)
+        // As-earned policies use months=1 (set above)
         const leadSource = r['Lead Source']?.trim() || '';
         const grossAdvancedRevenue = commResult.matched
           ? premium * carrierPayoutRate * months
           : premium * months;
 
-        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} rate=${carrierPayoutRate} months=${months} commission=${commission.toFixed(2)} GAR=${grossAdvancedRevenue.toFixed(2)} matched=${commResult.matched} ${commResult.matchedProduct || ''} ${isGIWL ? '(GIWL)' : ''}`);
+        if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} rate=${carrierPayoutRate} months=${months} commission=${commission.toFixed(2)} GAR=${grossAdvancedRevenue.toFixed(2)} matched=${commResult.matched} ${commResult.matchedProduct || ''} ${isGIWL ? '(GIWL)' : ''} ${isAsEarned ? '(AS-EARNED)' : ''}`);
 
         const phoneRaw = String(r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
         const phone = phoneRaw.length === 10
@@ -188,7 +196,7 @@ export async function GET(request) {
           placed: r['Policy Status']?.trim() || normalizePlacedStatus(r['Placed?']),
           submitDate, effectiveDate: parseFlexDate(r['Effective Date']),
           state: r['State']?.trim() || '',
-          age, commission, commissionRate, advanceMonths: months,
+          age, commission, commissionRate, advanceMonths: months, isAsEarned,
           grossAdvancedRevenue,
         };
       })
