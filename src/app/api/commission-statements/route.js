@@ -336,11 +336,27 @@ export async function GET(request) {
       const sortedMonths = [...allMonths].sort();
 
       // Finalize all policies
+      const DECLINED_STATUSES = ['declined'];
+      const CANCELED_STATUSES = ['canceled', 'cancelled', 'lapsed'];
       const allPolicies = Object.values(policyMap).map(p => {
         const totalPaid = Math.round(p.totalPaid * 100) / 100;
         const totalClawback = Math.round(p.totalClawback * 100) / 100;
         const netReceived = Math.round((p.totalPaid - p.totalClawback) * 100) / 100;
-        const balance = Math.round((p.expectedCommission - totalPaid + totalClawback) * 100) / 100;
+        const statusLower = (p.status || '').toLowerCase();
+
+        let balance;
+        if (DECLINED_STATUSES.includes(statusLower)) {
+          // Declined = never issued, nothing owed either way
+          balance = 0;
+        } else if (CANCELED_STATUSES.includes(statusLower)) {
+          // Canceled = carrier advanced us money, we owe back unearned portion
+          // If we were paid, balance = negative (liability). If never paid, $0.
+          balance = netReceived > 0 ? -netReceived : 0;
+        } else {
+          // Active/Pending/etc = carrier owes us the difference
+          balance = Math.round((p.expectedCommission - totalPaid + totalClawback) * 100) / 100;
+        }
+
         const carrierPaid = p.entries > 0;
         // Round monthly payments
         const monthlyPayments = {};

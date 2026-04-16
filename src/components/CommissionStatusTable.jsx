@@ -294,34 +294,117 @@ export default function CommissionStatusTable() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r) => {
-                const sc = STATUS_COLORS[r.status] || C.gray;
-                const icon = STATUS_ICONS[r.status] || '◯';
-                return (
-                  <tr key={r.status}
-                    onClick={() => setDrillStatus(r.status)}
-                    style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}33` }}
-                    onMouseOver={e => e.currentTarget.style.background = 'rgba(91,159,255,0.05)'}
-                    onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-                    <td style={{ ...tdStyle, color: sc, fontWeight: 600 }}>
-                      <span style={{ marginRight: 4 }}>{icon}</span>{r.status}
-                    </td>
-                    <td style={{ ...tdRight, color: C.text, fontWeight: 600 }}>{r.count}</td>
-                    <td style={{ ...tdRight, color: r.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{r.paid}</td>
-                    <td style={{ ...tdRight, color: r.unpaid > 0 ? C.red : C.muted }}>{r.unpaid}</td>
-                    <td style={tdRight}>{fmtDollar(Math.round(r.premium))}</td>
-                    <td style={tdRight}>{fmtDollar(Math.round(r.expected))}</td>
-                    <td style={{ ...tdRight, color: r.received > 0 ? C.green : C.muted }}>{fmtDollar(Math.round(r.received))}</td>
-                    <td style={{ ...tdRight, color: r.clawback > 0 ? C.red : C.muted }}>{r.clawback > 0 ? fmtDollar(Math.round(r.clawback)) : '—'}</td>
-                    <td style={{ ...tdRight, color: r.netReceived > 0 ? C.green : r.netReceived < 0 ? C.red : C.muted }}>
-                      {fmtDollar(Math.round(r.netReceived))}
-                    </td>
-                    <td style={{ ...tdRight, color: r.balance > 0 ? C.yellow : r.balance < 0 ? C.green : C.muted, fontWeight: 600 }}>
-                      {fmtDollar(Math.round(r.balance))}
-                    </td>
-                  </tr>
-                );
-              })}
+              {(() => {
+                const GROUPS = [
+                  { label: 'Active / Producing', color: C.green, statuses: new Set(['Active - In Force', 'Active - No commission paid yet', 'Active - Past Due']) },
+                  { label: 'In Process', color: C.yellow, statuses: new Set(['Issued, Not yet Active', 'Pending - Requirements Missing', 'Pending - Agent State Appt', 'Initial Pay Failure']) },
+                  { label: 'Gone', color: C.red, statuses: new Set(['Canceled', 'Declined']) },
+                  { label: 'Unknown', color: C.gray, statuses: new Set(['Unknown', 'not in system yet', '(No Status)']) },
+                ];
+
+                const subtotalStyle = { ...tdRight, fontWeight: 700, fontSize: 10, padding: '6px 8px' };
+                const groupHeaderStyle = { padding: '8px 8px 4px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, borderTop: `2px solid ${C.border}` };
+
+                const rows = [];
+                for (const group of GROUPS) {
+                  const groupRows = sorted.filter(r => group.statuses.has(r.status));
+                  if (groupRows.length === 0) continue;
+
+                  const sub = groupRows.reduce((t, r) => ({
+                    count: t.count + r.count, paid: t.paid + r.paid, unpaid: t.unpaid + r.unpaid,
+                    premium: t.premium + r.premium, expected: t.expected + r.expected,
+                    received: t.received + r.received, clawback: t.clawback + r.clawback,
+                    netReceived: t.netReceived + r.netReceived, balance: t.balance + r.balance,
+                  }), { count: 0, paid: 0, unpaid: 0, premium: 0, expected: 0, received: 0, clawback: 0, netReceived: 0, balance: 0 });
+
+                  // Group header
+                  rows.push(
+                    <tr key={`hdr-${group.label}`}>
+                      <td colSpan="10" style={{ ...groupHeaderStyle, color: group.color }}>{group.label}</td>
+                    </tr>
+                  );
+
+                  // Status rows
+                  for (const r of groupRows) {
+                    const sc = STATUS_COLORS[r.status] || C.gray;
+                    const icon = STATUS_ICONS[r.status] || '◯';
+                    rows.push(
+                      <tr key={r.status}
+                        onClick={() => setDrillStatus(r.status)}
+                        style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}33` }}
+                        onMouseOver={e => e.currentTarget.style.background = 'rgba(91,159,255,0.05)'}
+                        onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, color: sc, fontWeight: 600, paddingLeft: 16 }}>
+                          <span style={{ marginRight: 4 }}>{icon}</span>{r.status}
+                        </td>
+                        <td style={{ ...tdRight, color: C.text, fontWeight: 600 }}>{r.count}</td>
+                        <td style={{ ...tdRight, color: r.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{r.paid}</td>
+                        <td style={{ ...tdRight, color: r.unpaid > 0 ? C.red : C.muted }}>{r.unpaid}</td>
+                        <td style={tdRight}>{fmtDollar(Math.round(r.premium))}</td>
+                        <td style={tdRight}>{fmtDollar(Math.round(r.expected))}</td>
+                        <td style={{ ...tdRight, color: r.received > 0 ? C.green : C.muted }}>{fmtDollar(Math.round(r.received))}</td>
+                        <td style={{ ...tdRight, color: r.clawback > 0 ? C.red : C.muted }}>{r.clawback > 0 ? fmtDollar(Math.round(r.clawback)) : '—'}</td>
+                        <td style={{ ...tdRight, color: r.netReceived > 0 ? C.green : r.netReceived < 0 ? C.red : C.muted }}>
+                          {fmtDollar(Math.round(r.netReceived))}
+                        </td>
+                        <td style={{ ...tdRight, color: r.balance > 0 ? C.yellow : r.balance < 0 ? C.red : C.muted, fontWeight: 600 }}>
+                          {fmtDollar(Math.round(r.balance))}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  // Subtotal row
+                  rows.push(
+                    <tr key={`sub-${group.label}`} style={{ background: 'rgba(91,159,255,0.04)', borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: group.color, fontSize: 10, padding: '6px 8px' }}>Subtotal — {group.label}</td>
+                      <td style={{ ...subtotalStyle, color: C.text }}>{sub.count}</td>
+                      <td style={{ ...subtotalStyle, color: C.green }}>{sub.paid}</td>
+                      <td style={{ ...subtotalStyle, color: C.red }}>{sub.unpaid}</td>
+                      <td style={subtotalStyle}>{fmtDollar(Math.round(sub.premium))}</td>
+                      <td style={{ ...subtotalStyle, color: C.accent }}>{fmtDollar(Math.round(sub.expected))}</td>
+                      <td style={{ ...subtotalStyle, color: sub.received > 0 ? C.green : C.muted }}>{fmtDollar(Math.round(sub.received))}</td>
+                      <td style={{ ...subtotalStyle, color: sub.clawback > 0 ? C.red : C.muted }}>{sub.clawback > 0 ? fmtDollar(Math.round(sub.clawback)) : '—'}</td>
+                      <td style={{ ...subtotalStyle, color: sub.netReceived > 0 ? C.green : sub.netReceived < 0 ? C.red : C.muted }}>{fmtDollar(Math.round(sub.netReceived))}</td>
+                      <td style={{ ...subtotalStyle, color: sub.balance > 0 ? C.yellow : sub.balance < 0 ? C.red : C.muted }}>{fmtDollar(Math.round(sub.balance))}</td>
+                    </tr>
+                  );
+                }
+
+                // Any statuses that didn't match a group
+                const allGrouped = new Set(GROUPS.flatMap(g => [...g.statuses]));
+                const ungrouped = sorted.filter(r => !allGrouped.has(r.status));
+                for (const r of ungrouped) {
+                  const sc = STATUS_COLORS[r.status] || C.gray;
+                  const icon = STATUS_ICONS[r.status] || '◯';
+                  rows.push(
+                    <tr key={r.status}
+                      onClick={() => setDrillStatus(r.status)}
+                      style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}33` }}
+                      onMouseOver={e => e.currentTarget.style.background = 'rgba(91,159,255,0.05)'}
+                      onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ ...tdStyle, color: sc, fontWeight: 600 }}>
+                        <span style={{ marginRight: 4 }}>{icon}</span>{r.status}
+                      </td>
+                      <td style={{ ...tdRight, color: C.text, fontWeight: 600 }}>{r.count}</td>
+                      <td style={{ ...tdRight, color: r.paid > 0 ? C.green : C.muted, fontWeight: 600 }}>{r.paid}</td>
+                      <td style={{ ...tdRight, color: r.unpaid > 0 ? C.red : C.muted }}>{r.unpaid}</td>
+                      <td style={tdRight}>{fmtDollar(Math.round(r.premium))}</td>
+                      <td style={tdRight}>{fmtDollar(Math.round(r.expected))}</td>
+                      <td style={{ ...tdRight, color: r.received > 0 ? C.green : C.muted }}>{fmtDollar(Math.round(r.received))}</td>
+                      <td style={{ ...tdRight, color: r.clawback > 0 ? C.red : C.muted }}>{r.clawback > 0 ? fmtDollar(Math.round(r.clawback)) : '—'}</td>
+                      <td style={{ ...tdRight, color: r.netReceived > 0 ? C.green : r.netReceived < 0 ? C.red : C.muted }}>
+                        {fmtDollar(Math.round(r.netReceived))}
+                      </td>
+                      <td style={{ ...tdRight, color: r.balance > 0 ? C.yellow : r.balance < 0 ? C.red : C.muted, fontWeight: 600 }}>
+                        {fmtDollar(Math.round(r.balance))}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return rows;
+              })()}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${C.accent}` }}>

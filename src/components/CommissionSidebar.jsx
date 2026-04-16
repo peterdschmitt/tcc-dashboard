@@ -270,6 +270,21 @@ export default function CommissionSidebar({ open, onClose }) {
     return buckets;
   }, [policies]);
 
+  // Parse MM-DD-YYYY or YYYY-MM-DD to Date object
+  const parseDate = (raw) => {
+    if (!raw) return null;
+    // MM-DD-YYYY
+    const mdy = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (mdy) return new Date(parseInt(mdy[3]), parseInt(mdy[1]) - 1, parseInt(mdy[2]));
+    // YYYY-MM-DD
+    const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]));
+    // MM/DD/YYYY
+    const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slash) return new Date(parseInt(slash[3]), parseInt(slash[1]) - 1, parseInt(slash[2]));
+    return null;
+  };
+
   // WoW calculations
   const wow = useMemo(() => {
     const now = new Date();
@@ -277,20 +292,20 @@ export default function CommissionSidebar({ open, onClose }) {
     const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const thisMonday = new Date(now); thisMonday.setDate(now.getDate() + mondayOffset); thisMonday.setHours(0, 0, 0, 0);
     const lastMonday = new Date(thisMonday); lastMonday.setDate(thisMonday.getDate() - 7);
+    const thisSunday = new Date(thisMonday); thisSunday.setDate(thisMonday.getDate() + 6); thisSunday.setHours(23, 59, 59, 999);
     const lastSunday = new Date(thisMonday); lastSunday.setDate(thisMonday.getDate() - 1); lastSunday.setHours(23, 59, 59, 999);
-
-    const fmt = d => d.toLocaleDateString('en-CA');
-    const thisMon = fmt(thisMonday);
-    const lastMon = fmt(lastMonday);
-    const lastSun = fmt(lastSunday);
 
     let thisWeekRecv = 0, lastWeekRecv = 0, thisWeekApps = 0, lastWeekApps = 0;
     let thisWeekBal = 0, lastWeekBal = 0;
 
     for (const p of policies) {
-      const sd = p.submitDate || '';
-      if (sd >= thisMon) { thisWeekApps++; thisWeekRecv += p.netReceived; thisWeekBal += p.balance; }
-      else if (sd >= lastMon && sd <= lastSun) { lastWeekApps++; lastWeekRecv += p.netReceived; lastWeekBal += p.balance; }
+      const sd = parseDate(p.submitDate);
+      if (!sd) continue;
+      if (sd >= thisMonday && sd <= thisSunday) {
+        thisWeekApps++; thisWeekRecv += p.netReceived; thisWeekBal += p.balance;
+      } else if (sd >= lastMonday && sd <= lastSunday) {
+        lastWeekApps++; lastWeekRecv += p.netReceived; lastWeekBal += p.balance;
+      }
     }
 
     const recvDelta = thisWeekRecv - lastWeekRecv;
