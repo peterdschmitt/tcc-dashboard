@@ -9,6 +9,8 @@ import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import AiAnalystPane from './AiAnalystPane';
 import DailySummaryPage from './DailySummaryPage';
+import CommissionSidebar from './CommissionSidebar';
+import CommissionStatusTable from './CommissionStatusTable';
 // VoiceAgent moved to page.js to persist across loading states
 import DatePicker from './shared/DatePicker';
 
@@ -29,7 +31,7 @@ const TABS = [
   { id: 'carriers', label: 'Carriers' },
   { id: 'combined-policies', label: 'Combined Policies' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -3283,6 +3285,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
   }
   const { policies = [], calls = [], pnl = [] } = data || {};
   const voicePanelWidth = voicePanelOpen ? 380 : 0;
+  const [commSidebarOpen, setCommSidebarOpen] = useState(false);
 
   // Set CSS custom property so TileModal can read it
   useEffect(() => {
@@ -3290,7 +3293,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
   }, [voicePanelWidth]);
 
   return (
-    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth, transition: 'margin-right 0.2s ease' }}>
+    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth + (commSidebarOpen ? 420 : 0), transition: 'margin-right 0.2s ease' }}>
       {/* Voice-triggered tile modal */}
       {voiceTileTarget && MODAL_CONFIGS_KEYS.includes(voiceTileTarget) && (
         <TileModal tileKey={voiceTileTarget} policies={policies} calls={calls} pnl={pnl} onClose={() => setVoiceTileTarget(null)} />
@@ -3306,6 +3309,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
             <a href="/trends" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>📈 Trends</a>
             <a href="/settings" style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: C.accentDim, color: C.accent, textDecoration: 'none', border: `1px solid ${C.accent}33` }}>⚙ Settings</a>
             <button onClick={async () => { await fetch("/api/clear-cache", { method: "POST" }); window.location.reload(); }} style={{ padding: "6px 14px", borderRadius: 5, fontSize: 11, fontWeight: 600, background: "#2e0a0a", color: "#f87171", border: "1px solid #f8717133", cursor: "pointer" }}>🗑 Clear Cache</button>
+            <button onClick={() => setCommSidebarOpen(o => !o)} style={{ padding: '6px 14px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: commSidebarOpen ? C.green : C.accentDim, color: commSidebarOpen ? '#000' : C.accent, border: `1px solid ${commSidebarOpen ? C.green : C.accent}33`, cursor: 'pointer' }}>💰 Commissions</button>
             {dataSource && setDataSource && (
               <div style={{ display: 'flex', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
                 <button onClick={() => setDataSource('Sheet1')} style={{ padding: '5px 10px', borderRadius: 4, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer', background: dataSource === 'Sheet1' ? C.yellow : 'transparent', color: dataSource === 'Sheet1' ? '#000' : C.muted }}>App Data</button>
@@ -3352,9 +3356,11 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
+        {activeTab === 'commission-status' && <CommissionStatusTable />}
         {activeTab === 'commission-statements' && <CommissionStatementsTab />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
       </div>
+      <CommissionSidebar open={commSidebarOpen} onClose={() => setCommSidebarOpen(false)} />
       <AiAnalystPane
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -3369,6 +3375,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         pnl={pnl}
         goals={goals}
         onOpenChange={setAiPaneOpen}
+        rightOffset={commSidebarOpen ? 436 : 0}
       />
     </div>
   );

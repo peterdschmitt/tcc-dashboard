@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { fetchSheet } from '@/lib/sheets';
+import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
+const AI_CACHE_TAB = process.env.AI_CACHE_TAB || 'AI Summary Cache';
+const AI_CACHE_HEADERS = ['Date', 'Mode', 'Narrative', 'TableSummaries', 'GeneratedAt'];
 const isPlaced = p => PLACED_STATUSES.includes(p.placed);
 
 function getBaseUrl() {
@@ -332,21 +334,42 @@ ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail 
       })
       .join(', ');
 
-    // ─── GENERATE AI NARRATIVE + TABLE SUMMARIES ───
-    // Call OpenAI directly to get structured JSON — bypasses ai-analyst
-    // which mangles JSON through parseInsightsAndQuestions
+    // ─── AI NARRATIVE + TABLE SUMMARIES (cached in Google Sheet) ───
     let narrative = '';
     let tableSummaries = {};
-    try {
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.4,
-        max_tokens: 2000,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a senior insurance call center performance analyst. Your job is to uncover WHAT DRIVES the highest sales, GAR, and Net Revenue — not just describe the numbers.
+    const cacheKey = `${startDate}|${endDate}`;
+    const cacheSheetId = process.env.GOALS_SHEET_ID;
+
+    // Check cache first
+    let cacheHit = false;
+    if (cacheSheetId) {
+      try {
+        const cached = await fetchSheet(cacheSheetId, AI_CACHE_TAB, 300);
+        const row = cached.find(r => r['Date'] === cacheKey && r['Mode'] === mode);
+        if (row && row['Narrative']) {
+          narrative = row['Narrative'];
+          try { tableSummaries = JSON.parse(row['TableSummaries'] || '{}'); } catch { tableSummaries = {}; }
+          cacheHit = true;
+          console.log(`[daily-summary] AI cache hit for ${cacheKey} (${mode})`);
+        }
+      } catch (e) {
+        // Tab might not exist yet — will be created on first write
+        console.log('[daily-summary] AI cache tab not found, will generate fresh analysis');
+      }
+    }
+
+    // Generate via OpenAI only if not cached
+    if (!cacheHit) {
+      try {
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          temperature: 0.4,
+          max_tokens: 2000,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a senior insurance call center performance analyst. Your job is to uncover WHAT DRIVES the highest sales, GAR, and Net Revenue — not just describe the numbers.
 
 ALWAYS answer the question: "WHY did the best days/agents/publishers perform well, and what can we replicate?"
 
@@ -362,10 +385,10 @@ ANALYSIS RULES:
 - Be specific: cite actual numbers AND goals when relevant.
 - Do NOT mention "policies placed" or "placement rate."
 - Return ONLY valid JSON — no markdown, no code fences, no extra text.`,
-          },
-          {
-            role: 'user',
-            content: `Analyze this ${mode === 'weekly' ? 'weekly' : 'daily'} performance data. Focus on uncovering what DRIVES the highest sales, GAR, and NAR.
+            },
+            {
+              role: 'user',
+              content: `Analyze this ${mode === 'weekly' ? 'weekly' : 'daily'} performance data. Focus on uncovering what DRIVES the highest sales, GAR, and NAR.
 
 ${liveContext}
 
@@ -395,32 +418,67 @@ Return ONLY a JSON object:
   "agents": "3-4 sentences on agent productivity — who converts and why.",
   "pipeline": "2-3 sentences on what the status mix reveals."
 }`,
-          },
-        ],
-      });
+            },
+          ],
+        });
 
-      const rawText = completion.choices[0]?.message?.content || '';
-      try {
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          narrative = parsed.executive || '';
-          tableSummaries = {
-            dailyOverview: parsed.dailyOverview || '',
-            publishers: parsed.publishers || '',
-            carriers: parsed.carriers || '',
-            agents: parsed.agents || '',
-            pipeline: parsed.pipeline || '',
-          };
-        } else {
+        const rawText = completion.choices[0]?.message?.content || '';
+        try {
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            narrative = parsed.executive || '';
+            tableSummaries = {
+              dailyOverview: parsed.dailyOverview || '',
+              publishers: parsed.publishers || '',
+              carriers: parsed.carriers || '',
+              agents: parsed.agents || '',
+              pipeline: parsed.pipeline || '',
+            };
+          } else {
+            narrative = rawText;
+          }
+        } catch (parseErr) {
+          console.warn('[daily-summary] JSON parse failed, using raw text:', parseErr.message);
           narrative = rawText;
         }
-      } catch (parseErr) {
-        console.warn('[daily-summary] JSON parse failed, using raw text:', parseErr.message);
-        narrative = rawText;
+
+        // Save to cache (fire-and-forget)
+        if (cacheSheetId && narrative) {
+          (async () => {
+            try {
+              // Ensure tab exists
+              const sheets = await getSheetsClient();
+              try {
+                await sheets.spreadsheets.batchUpdate({
+                  spreadsheetId: cacheSheetId,
+                  requestBody: { requests: [{ addSheet: { properties: { title: AI_CACHE_TAB } } }] },
+                });
+                await sheets.spreadsheets.values.update({
+                  spreadsheetId: cacheSheetId, range: `'${AI_CACHE_TAB}'!A1`,
+                  valueInputOption: 'USER_ENTERED',
+                  requestBody: { values: [AI_CACHE_HEADERS] },
+                });
+                console.log(`[daily-summary] Created ${AI_CACHE_TAB} tab`);
+              } catch (e) {
+                if (!e.message?.includes('already exists')) throw e;
+              }
+              await appendRow(cacheSheetId, AI_CACHE_TAB, AI_CACHE_HEADERS, {
+                'Date': cacheKey,
+                'Mode': mode,
+                'Narrative': narrative,
+                'TableSummaries': JSON.stringify(tableSummaries),
+                'GeneratedAt': new Date().toISOString(),
+              });
+              console.log(`[daily-summary] Cached AI analysis for ${cacheKey} (${mode})`);
+            } catch (e) {
+              console.warn('[daily-summary] Failed to cache AI analysis:', e.message);
+            }
+          })();
+        }
+      } catch (e) {
+        console.warn('[daily-summary] AI narrative generation failed:', e.message);
       }
-    } catch (e) {
-      console.warn('[daily-summary] AI narrative generation failed:', e.message);
     }
 
     return NextResponse.json({

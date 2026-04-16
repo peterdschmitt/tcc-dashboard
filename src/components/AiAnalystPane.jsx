@@ -416,7 +416,7 @@ function buildReportContent(content) {
 }
 
 
-export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, applyPreset, setCustomRange, dataSource, setDataSource, dateRange, setVoiceDrillTarget, policies: dashPolicies, calls: dashCalls, pnl: dashPnl, goals: dashGoals, onOpenChange }) {
+export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, applyPreset, setCustomRange, dataSource, setDataSource, dateRange, setVoiceDrillTarget, policies: dashPolicies, calls: dashCalls, pnl: dashPnl, goals: dashGoals, onOpenChange, rightOffset = 0 }) {
   const liveDataContext = useMemo(() => buildLiveDataContext(dashPolicies, dashCalls, dashPnl, dateRange), [dashPolicies, dashCalls, dashPnl, dateRange]);
   const [open, setOpen] = useState(false);
   const [paneHeight, setPaneHeight] = useState(0);
@@ -746,13 +746,13 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
     </button>
   );
 
-  if (!open) return <div style={{ position: 'fixed', top: 12, right: 16, zIndex: 1001 }}>{toggleButton}</div>;
+  if (!open) return <div style={{ position: 'fixed', top: 12, right: 16 + rightOffset, zIndex: 1001, transition: 'right 0.2s ease' }}>{toggleButton}</div>;
 
   // ---------- EXPANDED PANE ----------
   return (
     <>
       {/* Top-right button */}
-      <div style={{ position: 'fixed', top: 12, right: 16, zIndex: 1002 }}>{toggleButton}</div>
+      <div style={{ position: 'fixed', top: 12, right: 16 + rightOffset, zIndex: 1002, transition: 'right 0.2s ease' }}>{toggleButton}</div>
 
       {/* Pane */}
       <div
