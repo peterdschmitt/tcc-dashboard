@@ -11,6 +11,8 @@ import AiAnalystPane from './AiAnalystPane';
 import DailySummaryPage from './DailySummaryPage';
 import CommissionSidebar from './CommissionSidebar';
 import CommissionStatusTable from './CommissionStatusTable';
+import PeriodRevenueTable from './PeriodRevenueTable';
+import CarrierBalancesTable from './CarrierBalancesTable';
 // VoiceAgent moved to page.js to persist across loading states
 import DatePicker from './shared/DatePicker';
 
@@ -31,7 +33,7 @@ const TABS = [
   { id: 'carriers', label: 'Carriers' },
   { id: 'combined-policies', label: 'Combined Policies' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'period-revenue', label: 'Period Revenue' },  { id: 'carrier-balances', label: 'Carrier Balances' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -3285,7 +3287,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
   }
   const { policies = [], calls = [], pnl = [] } = data || {};
   const voicePanelWidth = voicePanelOpen ? 380 : 0;
-  const [commSidebarOpen, setCommSidebarOpen] = useState(false);
+  const [commSidebarOpen, setCommSidebarOpen] = useState(true);
 
   // Set CSS custom property so TileModal can read it
   useEffect(() => {
@@ -3293,7 +3295,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
   }, [voicePanelWidth]);
 
   return (
-    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth + (commSidebarOpen ? 420 : 0), transition: 'margin-right 0.2s ease' }}>
+    <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth + (commSidebarOpen ? 520 : 0), transition: 'margin-right 0.2s ease' }}>
       {/* Voice-triggered tile modal */}
       {voiceTileTarget && MODAL_CONFIGS_KEYS.includes(voiceTileTarget) && (
         <TileModal tileKey={voiceTileTarget} policies={policies} calls={calls} pnl={pnl} onClose={() => setVoiceTileTarget(null)} />
@@ -3357,10 +3359,12 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
         {activeTab === 'commission-status' && <CommissionStatusTable />}
+        {activeTab === 'period-revenue' && <PeriodRevenueTable />}
+        {activeTab === 'carrier-balances' && <CarrierBalancesTable />}
         {activeTab === 'commission-statements' && <CommissionStatementsTab />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
       </div>
-      <CommissionSidebar open={commSidebarOpen} onClose={() => setCommSidebarOpen(false)} />
+      <CommissionSidebar open={commSidebarOpen} onClose={() => setCommSidebarOpen(false)} onNavigateTab={setActiveTab} />
       <AiAnalystPane
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -3375,7 +3379,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         pnl={pnl}
         goals={goals}
         onOpenChange={setAiPaneOpen}
-        rightOffset={commSidebarOpen ? 436 : 0}
+        rightOffset={commSidebarOpen ? 536 : 0}
       />
     </div>
   );

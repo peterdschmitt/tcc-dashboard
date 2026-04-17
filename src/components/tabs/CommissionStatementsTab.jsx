@@ -78,7 +78,7 @@ const SUB_TABS = [
   { id: 'upload', label: 'Upload' },
   { id: 'history', label: 'History' },
   { id: 'reconciliation', label: 'Reconciliation' },
-  { id: 'waterfall', label: 'Waterfall' },
+  { id: 'waterfall', label: 'Period Revenue' },
   { id: 'anticipated', label: 'Anticipated Payments' },
   { id: 'organize', label: 'Organize Files' },
 ];
@@ -125,7 +125,7 @@ export default function CommissionStatementsTab() {
   // Waterfall state
   const [waterfall, setWaterfall] = useState(null);
   const [waterfallCollapsed, setWaterfallCollapsed] = useState({});
-  const waterfallSort = useSort('submitDate', 'desc');
+  const waterfallSort = useSort('effectiveDate', 'desc');
   const [waterfallDetail, setWaterfallDetail] = useState(null); // selected policy for drill-down
 
   // Anticipated payments state
@@ -1094,7 +1094,7 @@ export default function CommissionStatementsTab() {
                 onClick={() => setWaterfallDetail(null)}
                 style={{ background: 'none', border: `1px solid ${C.border}`, color: C.accent, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 11, marginBottom: 12 }}
               >
-                ← Back to Waterfall
+                ← Back to Period Revenue
               </button>
               <PolicyCashFlow policyNumber={waterfallDetail.policyNumber} policySummary={waterfallDetail} />
             </div>
@@ -1192,35 +1192,60 @@ export default function CommissionStatementsTab() {
                   return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
                 };
 
-                // Group policies by status
+                // Parse effective date to get period key (YYYY-MM)
+                const parseEffDate = (raw) => {
+                  if (!raw) return null;
+                  // MM-DD-YYYY
+                  const mdy = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+                  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, '0')}`;
+                  // YYYY-MM-DD
+                  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+                  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}`;
+                  // MM/DD/YYYY
+                  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                  if (slash) return `${slash[3]}-${slash[1].padStart(2, '0')}`;
+                  return null;
+                };
+
+                const fmtPeriod = (key) => {
+                  if (!key) return 'No Effective Date';
+                  const d = new Date(key + '-15');
+                  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                };
+
+                // Group policies by effective date period
                 const groups = {};
                 for (const p of waterfall.policies) {
-                  const st = p.status || '(No Status)';
-                  if (!groups[st]) groups[st] = [];
-                  groups[st].push(p);
+                  const period = parseEffDate(p.effectiveDate) || 'no-date';
+                  if (!groups[period]) groups[period] = [];
+                  groups[period].push(p);
                 }
 
-                // Sort groups by STATUS_ORDER
-                const orderedStatuses = STATUS_ORDER.filter(s => groups[s]);
-                Object.keys(groups).forEach(s => { if (!orderedStatuses.includes(s)) orderedStatuses.push(s); });
+                // Sort periods chronologically (newest first), no-date at end
+                const orderedPeriods = Object.keys(groups).sort((a, b) => {
+                  if (a === 'no-date') return 1;
+                  if (b === 'no-date') return -1;
+                  return b.localeCompare(a);
+                });
 
-                return orderedStatuses.map(status => {
-                  const grp = groups[status];
-                  const collapsed = waterfallCollapsed[status];
+                return orderedPeriods.map(period => {
+                  const grp = groups[period];
+                  const collapsed = waterfallCollapsed[period];
                   const grpPrem = grp.reduce((s, p) => s + p.premium, 0);
+                  const grpExpected = grp.reduce((s, p) => s + p.expectedCommission, 0);
                   const grpPaid = grp.filter(p => p.carrierPaid).length;
                   const grpReceived = grp.reduce((s, p) => s + p.netReceived, 0);
                   const grpBalance = grp.reduce((s, p) => s + p.balance, 0);
-                  const icon = STATUS_ICON[status] || '?';
-                  const color = STATUS_COLOR[status] || C.muted;
+                  const periodLabel = fmtPeriod(period);
+                  const color = C.accent;
 
                   const sorted = sortData(grp, waterfallSort.sortKey, waterfallSort.sortDir);
 
                   return (
-                    <div key={status} style={{ marginTop: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                    <div key={period} style={{ marginTop: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
                       {/* Group Header */}
                       <div
-                        onClick={() => setWaterfallCollapsed(prev => ({ ...prev, [status]: !prev[status] }))}
+                        onClick={() => setWaterfallCollapsed(prev => ({ ...prev, [period]: !prev[period] }))}
                         style={{
                           padding: '10px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
                           borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
@@ -1228,11 +1253,14 @@ export default function CommissionStatementsTab() {
                         }}
                       >
                         <span style={{ color: C.muted, fontSize: 10, width: 12 }}>{collapsed ? '▸' : '▾'}</span>
-                        <span style={{ color, fontSize: 14, fontWeight: 700 }}>{icon}</span>
-                        <span style={{ color, fontSize: 13, fontWeight: 700 }}>{status}</span>
+                        <span style={{ color, fontSize: 14, fontWeight: 700 }}>📅</span>
+                        <span style={{ color, fontSize: 13, fontWeight: 700 }}>{periodLabel}</span>
                         <span style={{ color: C.muted, fontSize: 11 }}>— {grp.length} policies</span>
                         <span style={{ color: C.muted, fontSize: 11, marginLeft: 'auto' }}>
                           {fmtDollar(grpPrem)}/mo
+                        </span>
+                        <span style={{ color: C.accent, fontSize: 10 }}>
+                          Expected {fmtDollar(grpExpected)}
                         </span>
                         <span style={{ color: grpPaid > 0 ? C.green : C.muted, fontSize: 10 }}>
                           Paid {grpPaid}/{grp.length}
@@ -1259,6 +1287,7 @@ export default function CommissionStatementsTab() {
                                 <SortTh label="Insured" field="insuredName" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Agent" field="agent" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Carrier" field="carrier" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
+                                <SortTh label="Status" field="status" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Premium" field="premium" {...waterfallSort} onSort={waterfallSort.toggle} style={thRight} />
                                 <SortTh label="Phone" field="phone" {...waterfallSort} onSort={waterfallSort.toggle} style={thStyle} />
                                 <SortTh label="Text" field="textFriendly" {...waterfallSort} onSort={waterfallSort.toggle} style={thCenter} />
@@ -1294,6 +1323,9 @@ export default function CommissionStatementsTab() {
                                     <td style={{ padding: '5px 10px', fontSize: 10, color: C.text, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.insuredName}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 10, color: C.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.agent}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, color: C.muted, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.carrier}</td>
+                                    <td style={{ padding: '5px 10px', fontSize: 9, color: STATUS_COLOR[p.status] || C.muted, fontWeight: 600, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {STATUS_ICON[p.status] || '?'} {p.status || '—'}
+                                    </td>
                                     <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 10, color: C.text, textAlign: 'right' }}>{fmtDollar(p.premium)}</td>
                                     <td style={{ padding: '5px 10px', fontFamily: C.mono, fontSize: 9, color: C.muted, whiteSpace: 'nowrap' }}>{p.phone || '—'}</td>
                                     <td style={{ padding: '5px 10px', fontSize: 9, textAlign: 'center', color: p.textFriendly?.toLowerCase() === 'yes' ? C.green : C.muted }}>
