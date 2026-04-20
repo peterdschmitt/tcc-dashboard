@@ -43,9 +43,17 @@ export async function GET(request) {
     for (const sr of salesRows) {
       const pn = (sr['Policy #'] || '').trim();
       if (!pn) continue;
-      const parts = (sr['Carrier + Product + Payout'] || '').split(',');
-      const carrier = (parts[0] || '').trim();
-      const product = (parts[1] || '').trim();
+      const carrierProductRaw = sr['Carrier + Product + Payout'] || sr['Carrier'] || '';
+      let carrier, product;
+      if (carrierProductRaw.includes(',')) {
+        const cpParts = carrierProductRaw.split(',').map(s => s.trim());
+        carrier = cpParts[0] || '';
+        product = cpParts.slice(1).join(', ').trim() || '';
+      } else {
+        const dashParts = carrierProductRaw.split(/\s+-\s+/);
+        carrier = (dashParts[0] || '').trim();
+        product = (dashParts.slice(1).join(' - ') || '').trim();
+      }
       const premium = num(sr['Monthly Premium']);
       const cr = calcCommission(premium, carrier, product, 0, commRates);
       const advanceMonths = cr.advanceMonths || 9;

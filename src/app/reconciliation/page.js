@@ -34,7 +34,7 @@ export default function ReconciliationPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sortKey, setSortKey] = useState('submissionDate');
+  const [sortKey, setSortKey] = useState('_dataFirst');
   const [sortDir, setSortDir] = useState('desc');
   const [filter, setFilter] = useState('');
   const [viewMode, setViewMode] = useState('all'); // all | advanced | chargeback | awaiting | variance
@@ -64,6 +64,12 @@ export default function ReconciliationPage() {
     if (f) rows = rows.filter(r => [r.agent, r.client, r.policyNumber, r.carrier, r.product, r.leadSource]
       .some(v => (v || '').toLowerCase().includes(f)));
     return [...rows].sort((a, b) => {
+      // _dataFirst: policies with ledger activity first, then by submission date desc
+      if (sortKey === '_dataFirst') {
+        const ea = a.ledgerEntries || 0, eb = b.ledgerEntries || 0;
+        if (ea !== eb) return sortDir === 'asc' ? ea - eb : eb - ea;
+        return (b.submissionDate || '').localeCompare(a.submissionDate || '');
+      }
       let va = a[sortKey], vb = b[sortKey];
       if (va == null) return 1; if (vb == null) return -1;
       if (typeof va === 'number' && typeof vb === 'number') return sortDir === 'asc' ? va - vb : vb - va;
@@ -207,7 +213,8 @@ export default function ReconciliationPage() {
                       <Th label="Premium"     k="premium"        align="right" />
                       <Th label="Commission"  k="commission"     align="right" />
                       <Th label="GAR"         k="gar"            align="right" />
-                      <Th label="Carrier Adv" k="carrierAdvance" align="right" extra={{ borderLeft: `2px solid ${C.border}` }} />
+                      <Th label="#"           k="ledgerEntries"  align="right" extra={{ borderLeft: `2px solid ${C.border}` }} />
+                      <Th label="Carrier Adv" k="carrierAdvance" align="right" />
                       <Th label="Adv Date"    k="advanceDate"    align="right" />
                       <Th label="Charge Back" k="chargeBack"     align="right" />
                       <Th label="CB Date"     k="chargeBackDate" align="right" />
@@ -239,25 +246,28 @@ export default function ReconciliationPage() {
                         <td style={{ padding: '7px 12px', color: C.text, textAlign: 'right' }}>{fmtDollar(r.premium)}</td>
                         <td style={{ padding: '7px 12px', color: C.text, textAlign: 'right' }}>{fmtDollar(r.commission)}</td>
                         <td style={{ padding: '7px 12px', color: C.muted, textAlign: 'right' }}>{fmtDollar(r.gar, 0)}</td>
-                        <td style={{ padding: '7px 12px', color: r.carrierAdvance > 0 ? C.green : C.muted, textAlign: 'right', borderLeft: `2px solid ${C.border}`, fontWeight: r.carrierAdvance > 0 ? 700 : 400 }}>
-                          {r.carrierAdvance > 0 ? fmtDollar(r.carrierAdvance) : '—'}
+                        <td style={{ padding: '7px 12px', color: r.ledgerEntries > 0 ? C.accent : C.border, textAlign: 'right', fontWeight: 700, borderLeft: `2px solid ${C.border}` }}>
+                          {r.ledgerEntries || '—'}
                         </td>
-                        <td style={{ padding: '7px 12px', color: C.muted, textAlign: 'right' }}>{fmtDate(r.advanceDate) || '—'}</td>
-                        <td style={{ padding: '7px 12px', color: r.chargeBack > 0 ? C.red : C.muted, textAlign: 'right', fontWeight: r.chargeBack > 0 ? 700 : 400 }}>
-                          {r.chargeBack > 0 ? fmtDollar(r.chargeBack) : '—'}
+                        <td style={{ padding: '7px 12px', color: r.carrierAdvance > 0 ? C.green : (r.ledgerEntries === 0 ? C.muted : C.border), textAlign: 'right', fontWeight: r.carrierAdvance > 0 ? 700 : 400, fontStyle: r.ledgerEntries === 0 ? 'italic' : 'normal', fontSize: r.ledgerEntries === 0 ? 10 : 11 }}>
+                          {r.carrierAdvance > 0 ? fmtDollar(r.carrierAdvance) : (r.ledgerEntries === 0 ? 'awaiting' : '—')}
                         </td>
-                        <td style={{ padding: '7px 12px', color: C.muted, textAlign: 'right' }}>{fmtDate(r.chargeBackDate) || '—'}</td>
-                        <td style={{ padding: '7px 12px', color: r.ledgerEntries === 0 ? C.muted : (r.netReceived >= 0 ? C.text : C.red), textAlign: 'right', fontWeight: 700 }}>
-                          {r.ledgerEntries > 0 ? fmtDollar(r.netReceived) : '—'}
+                        <td style={{ padding: '7px 12px', color: C.muted, textAlign: 'right', fontSize: 10 }}>{fmtDate(r.advanceDate) || ''}</td>
+                        <td style={{ padding: '7px 12px', color: r.chargeBack > 0 ? C.red : C.border, textAlign: 'right', fontWeight: r.chargeBack > 0 ? 700 : 400 }}>
+                          {r.chargeBack > 0 ? fmtDollar(r.chargeBack) : ''}
                         </td>
-                        <td style={{ padding: '7px 12px', color: r.ledgerEntries === 0 ? C.muted : (r.variance >= 0 ? C.green : C.red), textAlign: 'right', fontWeight: 700 }}>
-                          {r.ledgerEntries > 0 ? fmtDollar(r.variance) : '—'}
+                        <td style={{ padding: '7px 12px', color: C.muted, textAlign: 'right', fontSize: 10 }}>{fmtDate(r.chargeBackDate) || ''}</td>
+                        <td style={{ padding: '7px 12px', color: r.ledgerEntries === 0 ? C.border : (r.netReceived >= 0 ? C.text : C.red), textAlign: 'right', fontWeight: 700 }}>
+                          {r.ledgerEntries > 0 ? fmtDollar(r.netReceived) : ''}
+                        </td>
+                        <td style={{ padding: '7px 12px', color: r.ledgerEntries === 0 ? C.border : (r.variance >= 0 ? C.green : C.red), textAlign: 'right', fontWeight: 700 }}>
+                          {r.ledgerEntries > 0 ? fmtDollar(r.variance) : ''}
                         </td>
                       </tr>
                       {isOpen && (
                         <tr key={r.policyNumber + '-detail-' + i} style={{ background: 'rgba(91,159,255,0.04)', borderBottom: `1px solid ${C.border}` }}>
                           <td></td>
-                          <td colSpan={17} style={{ padding: '0 12px 12px 12px' }}>
+                          <td colSpan={18} style={{ padding: '0 12px 12px 12px' }}>
                             <div style={{ padding: '10px 14px', background: C.surface, borderRadius: 6, border: `1px solid ${C.border}` }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                                 Ledger entries ({(r.entries || []).length}) — every payment/chargeback touching this policy
@@ -301,7 +311,7 @@ export default function ReconciliationPage() {
                       );
                     })}
                     {filtered.length === 0 && (
-                      <tr><td colSpan={18} style={{ padding: 24, textAlign: 'center', color: C.muted }}>No policies match.</td></tr>
+                      <tr><td colSpan={19} style={{ padding: 24, textAlign: 'center', color: C.muted }}>No policies match.</td></tr>
                     )}
                   </tbody>
                   {filtered.length > 0 && (
@@ -311,7 +321,8 @@ export default function ReconciliationPage() {
                         <td style={{ padding: '10px 12px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.premium)}</td>
                         <td style={{ padding: '10px 12px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.commission)}</td>
                         <td style={{ padding: '10px 12px', color: C.muted, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.gar, 0)}</td>
-                        <td style={{ padding: '10px 12px', color: C.green, fontWeight: 800, textAlign: 'right', borderLeft: `2px solid ${C.border}` }}>{fmtDollar(tfoot.advance)}</td>
+                        <td style={{ padding: '10px 12px', color: C.accent, fontWeight: 800, textAlign: 'right', borderLeft: `2px solid ${C.border}` }}>{filtered.reduce((s,r)=>s+(r.ledgerEntries||0),0)}</td>
+                        <td style={{ padding: '10px 12px', color: C.green, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.advance)}</td>
                         <td></td>
                         <td style={{ padding: '10px 12px', color: C.red, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.chargeback)}</td>
                         <td></td>
