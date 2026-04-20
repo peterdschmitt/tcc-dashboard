@@ -261,11 +261,11 @@ export default function ComparePage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                     <thead>
                       <tr style={{ background: C.surface }}>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Date</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Agent</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Client</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Carrier</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Product</th>
+                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Date</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>PREMIUM</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>COMMISSION</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>GAR</th>
@@ -283,11 +283,11 @@ export default function ComparePage() {
                     <tbody>
                       {rowsToShow.map((m, i) => (
                         <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <td style={tdBase}>{fmtDate(m.xl.date)}</td>
                           <td style={tdBase}>{m.xl.agent}</td>
                           <td style={{ ...tdBase, color: C.accent, fontWeight: 600 }}>{m.xl.client}</td>
                           <td style={tdBase}>{m.xl.carrier}</td>
                           <td style={{ ...tdBase, color: C.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.xl.product}>{m.xl.product}</td>
+                          <td style={tdBase}>{fmtDate(m.xl.date)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.premium)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), color: C.text }}>{fmtDollar(m.sys.premium)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.commission), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.commission)}</td>
