@@ -207,10 +207,22 @@ export async function GET() {
   }
 }
 
-// POST — process all new files from Drive folder (root + subfolders)
-export async function POST() {
+// POST — process files from Drive folder.
+//   Default: all new files (root + subfolders).
+//   ?fileIds=id1,id2,...  → only those files (even if already processed; caller decides).
+export async function POST(request) {
   try {
-    const { newFiles } = await listDriveFiles();
+    const url = new URL(request.url);
+    const fileIdsParam = url.searchParams.get('fileIds');
+    let newFiles;
+    if (fileIdsParam) {
+      const targetIds = new Set(fileIdsParam.split(',').map(s => s.trim()).filter(Boolean));
+      const { driveFiles } = await listDriveFiles();
+      newFiles = driveFiles.filter(f => targetIds.has(f.id));
+      console.log(`[sync] Targeted run: ${newFiles.length} of ${targetIds.size} requested file IDs found`);
+    } else {
+      ({ newFiles } = await listDriveFiles());
+    }
     if (newFiles.length === 0) {
       return NextResponse.json({ success: true, message: 'No new files to process', processed: 0, results: [] });
     }
