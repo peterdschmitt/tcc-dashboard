@@ -24,19 +24,44 @@ export async function GET(request) {
     const salesSheetId = process.env.SALES_SHEET_ID;
     const ledgerTab    = process.env.COMMISSION_LEDGER_TAB || 'Commission Ledger';
 
-    const [salesRows, ledgerRows, commRows] = await Promise.all([
+    const [salesRows, ledgerRows, commRows, agentGoalsRaw, agentPayoutRaw] = await Promise.all([
       fetchSheet(salesSheetId, process.env.SALES_TAB_NAME || 'Sheet1', 0),
       fetchSheet(salesSheetId, ledgerTab, 60),
       fetchSheet(process.env.COMMISSION_SHEET_ID, process.env.COMMISSION_TAB_NAME || 'Sheet1', 3600),
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_GOALS_TAB || 'Agent Daily Goals', 1800).catch(() => []),
+      fetchSheet(process.env.GOALS_SHEET_ID, process.env.AGENT_PAYOUT_TAB || 'Agent Payout Rates', 3600).catch(() => []),
     ]);
 
-    // Commission rate lookup
-    const commRates = commRows.map(r => ({
-      carrier: r['Carrier']?.trim(),
-      product: r['Product']?.trim(),
-      ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
-      commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
-    }));
+    // Commission rate lookup — include advanceMonths so GAR matches dashboard calc
+    const commRates = commRows
+      .filter(r => r['Carrier'] && r['Commission Rate'] != null && r['Commission Rate'] !== '')
+      .map(r => {
+        const advKey = Object.keys(r).find(k => /advance\s*length/i.test(k));
+        const advMonthsRaw = advKey ? r[advKey] : '';
+        const advMonthsParsed = parseInt(advMonthsRaw.toString().replace(/[^0-9]/g, '')) || 0;
+        return {
+          carrier: r['Carrier']?.trim(),
+          product: r['Product']?.trim(),
+          ageRange: r['Age range']?.trim() || r['Age Range']?.trim() || 'n/a',
+          commissionRate: parseFloat((r['Commission Rate'] || '0').replace('%', '')) / 100,
+          advanceMonths: advMonthsParsed > 0 ? advMonthsParsed : 9,
+        };
+      });
+
+    // Salaried agents → commission = $0
+    const salaryAgents = new Set(
+      agentGoalsRaw
+        .filter(r => (r['Commission Type'] || '').trim().toLowerCase() === 'salary')
+        .map(r => (r['Agent Name'] || r['Agent'] || r['Name'] || '').trim().toLowerCase())
+    );
+
+    // Agent payout multipliers (GIWL vs standard)
+    const agentPayoutRates = { standard: 3, giwl: 1.5 };
+    agentPayoutRaw.forEach(r => {
+      const type = (r['Product Type'] || '').trim().toLowerCase();
+      const mult = parseFloat(r['Multiplier'] || '0') || 0;
+      if (type && mult > 0) agentPayoutRates[type] = mult;
+    });
 
     // Build one reconciliation row per policy from the sales tracker
     const byPolicy = {};
@@ -55,22 +80,40 @@ export async function GET(request) {
         product = (dashParts.slice(1).join(' - ') || '').trim();
       }
       const premium = num(sr['Monthly Premium']);
-      const cr = calcCommission(premium, carrier, product, 0, commRates);
-      const advanceMonths = cr.advanceMonths || 9;
-      const isGIWL = /giwl/i.test(product);
-      const commMult = isGIWL ? 1.5 : 3;
-      const commission = cr.matched ? premium * cr.rate * commMult : premium * commMult;
+      const agentNameRaw = (sr['Agent'] || '').trim();
+      const isSalaried = salaryAgents.has(agentNameRaw.toLowerCase());
+      const cr = premium > 0
+        ? calcCommission(premium, carrier, product, 0, commRates)
+        : { commission: 0, rate: 0, advanceMonths: 9, matched: false };
+
+      // CICA credit/debit → as-earned (no advance, months=1)
+      const paymentTypeRaw = (sr['Payment Type'] || '').trim().toLowerCase();
+      const isCICA = carrier.toLowerCase().includes('cica');
+      const isAsEarned = isCICA && ['credit', 'debit', 'credit card', 'debit card'].includes(paymentTypeRaw);
+      const advanceMonths = isAsEarned ? 1 : (cr.advanceMonths || 9);
+
+      // GIWL → agent multiplier 1.5x; otherwise standard (3x)
+      const isGIWL = (carrier + ' ' + product).toLowerCase().includes('giwl');
+      const agentMultiplier = isGIWL ? agentPayoutRates['giwl'] : agentPayoutRates['standard'];
+
+      // Agent commission: salaried agents earn $0; others = premium × multiplier
+      const commission = (!isSalaried && premium > 0) ? premium * agentMultiplier : 0;
+
+      // GAR: premium × carrier rate × advance months (matches dashboard)
       const gar = cr.matched ? premium * cr.rate * advanceMonths : premium * advanceMonths;
 
       byPolicy[pn] = {
         policyNumber: pn,
         submissionDate: toISO(sr['Application Submitted Date']),
         effectiveDate: toISO(sr['Effective Date']),
-        agent: (sr['Agent'] || '').trim(),
+        agent: agentNameRaw,
         client: `${(sr['First Name'] || '').trim()} ${(sr['Last Name'] || '').trim()}`.trim(),
         leadSource: (sr['Lead Source'] || '').trim(),
         carrier,
         product,
+        isSalaried,
+        isAsEarned,
+        advanceMonths,
         premium: Math.round(premium * 100) / 100,
         commission: Math.round(commission * 100) / 100,
         gar: Math.round(gar * 100) / 100,

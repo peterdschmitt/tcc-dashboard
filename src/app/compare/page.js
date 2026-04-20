@@ -113,6 +113,8 @@ export default function ComparePage() {
       const m = cands[0];
       if (m) {
         usedSys.add(m.policyNumber);
+        // Excel stores chargebacks as negative ($-1,806); system as positive magnitude.
+        // Normalize both to positive magnitude for apples-to-apples comparison.
         const xl = {
           date: excelToISO(x.Date),
           agent: x.Agent, client: x.Client, leadSource: x['Lead Source'],
@@ -120,7 +122,7 @@ export default function ComparePage() {
           premium: num(x.Premium), commission: num(x.Commission), gar: num(x['Gross Adv Rev']),
           carrierAdvance: num(x['Carrier Advance']),
           advanceDate: excelToISO(x['Advance Date']),
-          chargeBack: num(x['Charge Back']),
+          chargeBack: Math.abs(num(x['Charge Back'])),
           chargeBackDate: excelToISO(x['Charge Back Date']),
           netRevenue: num(x['Net Revenue']),
           status: x.Status, aging: x.Aging,
