@@ -239,6 +239,15 @@ export function mapCarrierStatusToPlaced(carrierStatus) {
 
 // ── Fuzzy match carrier record to Sales sheet row ──────────────────
 // Three-tier matching: policy number → name+agent → null
+// Strip common name suffixes so "Munford Sr" matches "Munford" etc.
+const NAME_SUFFIXES = new Set(['sr', 'jr', 'ii', 'iii', 'iv', 'v']);
+function stripSuffix(name) {
+  if (!name) return name;
+  const parts = name.toLowerCase().replace(/\./g, '').split(/\s+/).filter(Boolean);
+  while (parts.length > 1 && NAME_SUFFIXES.has(parts[parts.length - 1])) parts.pop();
+  return parts.join(' ');
+}
+
 export function fuzzyMatchPolicyholder(carrierRecord, salesRows) {
   const crPolicyNo = (carrierRecord['Policy No.'] || '').trim();
   const crInsured = (carrierRecord['Insured'] || '').trim();
@@ -253,14 +262,15 @@ export function fuzzyMatchPolicyholder(carrierRecord, salesRows) {
   // Tier 2: Name + Agent fuzzy match
   if (!crInsured) return null;
 
-  // Parse carrier "Last,First" or "First Last" format
+  // Parse carrier "Last,First" or "First Last" format, strip suffixes
   let crFirst = '', crLast = '';
   if (crInsured.includes(',')) {
     const parts = crInsured.split(',').map(s => s.trim());
-    crLast = parts[0].toLowerCase();
+    crLast = stripSuffix(parts[0]);
     crFirst = (parts[1] || '').split(/\s+/)[0].toLowerCase();
   } else {
-    const parts = crInsured.toLowerCase().split(/\s+/);
+    const cleaned = stripSuffix(crInsured);
+    const parts = cleaned.split(/\s+/);
     crFirst = parts[0] || '';
     crLast = parts[parts.length - 1] || '';
   }
@@ -272,13 +282,13 @@ export function fuzzyMatchPolicyholder(carrierRecord, salesRows) {
   const candidates = [];
 
   for (const sr of salesRows) {
-    const sFirst = (sr['First Name'] || '').trim().toLowerCase();
-    const sLast = (sr['Last Name'] || '').trim().toLowerCase();
+    const sFirst = stripSuffix((sr['First Name'] || '').trim());
+    const sLast  = stripSuffix((sr['Last Name'] || '').trim());
     const sAgent = (sr['Agent'] || '').trim().toLowerCase();
 
     if (!sLast || !sFirst) continue;
 
-    // Last name must match (exact or edit distance ≤ 1)
+    // Last name must match (exact or edit distance ≤ 1, suffix-agnostic)
     const lastExact = sLast === crLast;
     const lastClose = !lastExact && levenshtein(sLast, crLast) <= 1;
     if (!lastExact && !lastClose) continue;

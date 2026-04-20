@@ -7,12 +7,27 @@ import { NextResponse } from 'next/server';
  * POST /api/commission-statements/dedup          — remove duplicates from ledger sheet
  */
 
+// Normalize "01/06/2026" / "1/6/2026" / "2026-01-06" → "2026-01-06"
+function normalizeDate(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  const mdy = s.match(/^(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{4})/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, '0')}-${mdy[2].padStart(2, '0')}`;
+  const ymd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+  return s;
+}
+// Normalize "$336.96", "336.96", " 336.96 ", "336.96000" → "336.96"
+function normalizeAmount(raw) {
+  const n = parseFloat(String(raw || '').replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? '0' : n.toFixed(2);
+}
 function buildKey(row) {
   return [
     (row['Policy #'] || '').trim(),
-    (row['Statement Date'] || '').trim(),
-    (row['Commission Amount'] || '0').trim(),
-    (row['Transaction Type'] || '').trim(),
+    normalizeDate(row['Statement Date'] || ''),
+    normalizeAmount(row['Commission Amount']),
+    (row['Transaction Type'] || '').trim().toLowerCase(),
     (row['Agent ID'] || '').trim(),
   ].join('|');
 }
@@ -84,9 +99,9 @@ export async function POST() {
     function rowKey(row) {
       return [
         (row[colIdx.policyNum] || '').trim(),
-        (row[colIdx.stmtDate] || '').trim(),
-        (row[colIdx.commAmount] || '0').trim(),
-        (row[colIdx.txnType] || '').trim(),
+        normalizeDate(row[colIdx.stmtDate] || ''),
+        normalizeAmount(row[colIdx.commAmount]),
+        (row[colIdx.txnType] || '').trim().toLowerCase(),
         (row[colIdx.agentId] || '').trim(),
       ].join('|');
     }
