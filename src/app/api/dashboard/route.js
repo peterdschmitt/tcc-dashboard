@@ -167,7 +167,7 @@ export async function GET(request) {
 
         if (_dbgIdx++ < 5) console.log(`[dashboard] Policy sample: carrier="${carrier}" product="${product}" premium=${premium} rate=${carrierPayoutRate} months=${months} commission=${commission.toFixed(2)} GAR=${grossAdvancedRevenue.toFixed(2)} matched=${commResult.matched} ${commResult.matchedProduct || ''} ${isGIWL ? '(GIWL)' : ''} ${isAsEarned ? '(AS-EARNED)' : ''}`);
 
-        const phoneRaw = String(r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
+        const phoneRaw = String(r['Phone Number (US format)'] || r['Phone Number'] || '').replace(/\.0$/, '').replace(/[^0-9]/g, '');
         const phone = phoneRaw.length === 10
           ? `(${phoneRaw.slice(0,3)}) ${phoneRaw.slice(3,6)}-${phoneRaw.slice(6)}`
           : phoneRaw.length === 11

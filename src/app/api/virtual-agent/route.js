@@ -70,6 +70,9 @@ export async function GET(request) {
     if (startDate) rows = rows.filter(r => r.date >= startDate);
     if (endDate) rows = rows.filter(r => r.date <= endDate);
 
+    // Exclude rows with no campaign assigned
+    rows = rows.filter(r => r.campaign && r.campaign.toUpperCase() !== 'NA');
+
     // Aggregates
     const totalCalls = rows.length;
     const transfers = rows.filter(r => r.transferConfirmation).length;

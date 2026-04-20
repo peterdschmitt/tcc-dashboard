@@ -1486,6 +1486,7 @@ function normalizePhone(raw) {
 }
 
 function VirtualAgentTiles({ vaData, policies, goals, dateRange }) {
+  const [drillKey, setDrillKey] = useState(null);
   const vaCalls = vaData?.calls || [];
   const cg = goals?.company || {};
   const meta = goals?.companyMeta || {};
@@ -1520,7 +1521,23 @@ function VirtualAgentTiles({ vaData, policies, goals, dateRange }) {
     { label: 'VA Conversion', actual: vaConvRate, dailyGoal: cg.va_conversion_rate, key: 'va_conversion_rate', format: fmtPct, isRate: true },
   ];
 
+  const filterForKey = (key) => {
+    switch (key) {
+      case 'va_transfers': return vaCalls.filter(c => c.transferConfirmation);
+      case 'va_sales':
+      case 'va_conversion_rate':
+        return vaCalls.filter(c => c.transferConfirmation && c.callerId && policyPhones.has(c.callerId));
+      case 'va_calls':
+      case 'va_transfer_rate':
+      default:
+        return vaCalls;
+    }
+  };
+  const drillTile = tiles.find(t => t.key === drillKey);
+  const drillCalls = drillKey ? filterForKey(drillKey) : [];
+
   return (
+    <>
     <Section title={`Virtual Agent Screener — ${days} active day${days !== 1 ? 's' : ''}`}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tiles.length}, 1fr)`, gap: 8 }}>
@@ -1532,8 +1549,17 @@ function VirtualAgentTiles({ vaData, policies, goals, dateRange }) {
             const pctLabel = pctOff !== null ? (pctOff >= 0 ? '+' + pctOff.toFixed(1) + '%' : pctOff.toFixed(1) + '%') : null;
             const tileColor = !periodGoal ? '#ffffff' : ratio >= 1 ? C.green : ratio >= (gm.yellow / 100) ? C.yellow : C.red;
             const tileBg = !periodGoal ? C.surface : ratio >= 1 ? C.greenDim : ratio >= (gm.yellow / 100) ? C.yellowDim : C.redDim;
+            const isActive = drillKey === g.key;
             return (
-              <div key={g.label} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}` }}>
+              <div
+                key={g.label}
+                onClick={() => setDrillKey(isActive ? null : g.key)}
+                style={{
+                  background: tileBg, borderRadius: 6, padding: '10px 14px',
+                  border: `1px solid ${isActive ? tileColor : C.border}`,
+                  cursor: 'pointer', transition: 'border-color 0.15s',
+                  boxShadow: isActive ? `0 0 0 1px ${tileColor}` : 'none',
+                }}>
                 <div style={{ fontSize: 9, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{g.label}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color: tileColor, lineHeight: 1 }}>{g.format(g.actual)}</span>
@@ -1570,6 +1596,212 @@ function VirtualAgentTiles({ vaData, policies, goals, dateRange }) {
             );
           })}
         </div>
+      </div>
+    </Section>
+    {drillKey && (
+      <div
+        onClick={() => setDrillKey(null)}
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+          padding: '40px 24px', overflowY: 'auto',
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ width: '100%', maxWidth: 1400 }}
+        >
+          <VirtualAgentDrilldown
+            calls={drillCalls}
+            label={drillTile?.label || ''}
+            onClose={() => setDrillKey(null)}
+          />
+        </div>
+      </div>
+    )}
+    </>
+  );
+}
+
+// ─── VIRTUAL AGENT DRILL-DOWN ─────────────────────
+function VirtualAgentDrilldown({ calls, label, onClose }) {
+  const fmtDur = s => {
+    if (!s) return '0:00';
+    const m = Math.floor(s / 60), sec = s % 60;
+    return `${m}:${String(sec).padStart(2, '0')}`;
+  };
+  const fmtPhone = p => {
+    if (!p || p.length !== 10) return p || '—';
+    return `(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}`;
+  };
+  const fmtDate = d => {
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return `${parseInt(m)}/${parseInt(day)}/${y}`;
+  };
+  const bool = v => v
+    ? <span style={{ color: C.green, fontWeight: 700 }}>✓</span>
+    : <span style={{ color: C.red, fontWeight: 700 }}>✗</span>;
+
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  // Group by date → campaign
+  const byDate = {};
+  calls.forEach(c => {
+    const d = c.date || '(no date)';
+    const camp = c.campaign || '(no campaign)';
+    if (!byDate[d]) byDate[d] = {};
+    if (!byDate[d][camp]) byDate[d][camp] = [];
+    byDate[d][camp].push(c);
+  });
+  const allDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+
+  // Day-level summary stats
+  const dayStats = allDates.map(d => {
+    const rows = Object.values(byDate[d]).flat();
+    const uniq = new Set(rows.map(r => r.callerId).filter(Boolean)).size;
+    const endXfer = rows.filter(r => r.endCallSource === 'transfer').length;
+    const colXfer = rows.filter(r => r.transferConfirmation).length;
+    const billable = rows.filter(r => r.billable).length;
+    const avgDur = rows.length ? Math.round(rows.reduce((s, r) => s + (r.duration || 0), 0) / rows.length) : 0;
+    return {
+      date: d, rows: rows.length, uniq, endXfer, colXfer, billable, avgDur,
+      xferRate: rows.length ? (endXfer / rows.length * 100) : 0,
+      campaigns: Object.keys(byDate[d]).length,
+    };
+  });
+
+  const dates = selectedDay ? [selectedDay] : [];
+  const detailCols = ['Agent', 'Caller ID', 'Billable', 'Duration', 'Disposition'];
+  const statusCols = ['End Call Src', 'Lead Review', 'Intent', 'DOB', 'Existing Cov', 'Budget', 'State', 'Xfer Conf'];
+
+  return (
+    <Section
+      title={selectedDay
+        ? `${label} — ${fmtDate(selectedDay)} Detail`
+        : `${label} — Day Summary (${calls.length} row${calls.length !== 1 ? 's' : ''} across ${allDates.length} day${allDates.length !== 1 ? 's' : ''})`}
+      rightContent={
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {selectedDay && (
+            <span
+              onClick={() => setSelectedDay(null)}
+              style={{ cursor: 'pointer', fontSize: 11, color: C.accent, padding: '4px 10px', border: `1px solid ${C.accent}`, borderRadius: 4 }}
+            >‹ Back to Summary</span>
+          )}
+          <span
+            onClick={onClose}
+            style={{ cursor: 'pointer', fontSize: 11, color: C.muted, padding: '4px 10px', border: `1px solid ${C.border}`, borderRadius: 4 }}
+          >✕ Close</span>
+        </div>
+      }
+    >
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {allDates.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: C.muted, fontSize: 12 }}>No rows match.</div>
+        )}
+        {!selectedDay && allDates.length > 0 && (
+          <div style={{ overflowX: 'auto', border: `1px solid ${C.border}`, borderRadius: 6 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: C.mono }}>
+              <thead>
+                <tr style={{ background: C.surface }}>
+                  {['Date', 'Calls', 'Unique Callers', 'Campaigns', 'Transfers (end=xfer)', 'Xfer Conf Col', 'Xfer Rate', 'Billable', 'Avg Duration', ''].map(h => (
+                    <th key={h} style={{ padding: '8px 10px', textAlign: h==='Date' ? 'left' : 'right', color: C.muted, fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dayStats.map(s => (
+                  <tr key={s.date}
+                      onClick={() => setSelectedDay(s.date)}
+                      style={{ borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.background = C.surface}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={{ padding: '8px 10px', color: C.accent, fontWeight: 700 }}>{fmtDate(s.date)}</td>
+                    <td style={{ padding: '8px 10px', color: C.text, textAlign: 'right' }}>{s.rows}</td>
+                    <td style={{ padding: '8px 10px', color: C.text, textAlign: 'right' }}>{s.uniq}</td>
+                    <td style={{ padding: '8px 10px', color: C.muted, textAlign: 'right' }}>{s.campaigns}</td>
+                    <td style={{ padding: '8px 10px', color: C.green, textAlign: 'right' }}>{s.endXfer}</td>
+                    <td style={{ padding: '8px 10px', color: C.muted, textAlign: 'right' }}>{s.colXfer}</td>
+                    <td style={{ padding: '8px 10px', color: s.xferRate >= 20 ? C.green : s.xferRate >= 10 ? C.yellow : C.red, textAlign: 'right', fontWeight: 700 }}>{s.xferRate.toFixed(1)}%</td>
+                    <td style={{ padding: '8px 10px', color: C.text, textAlign: 'right' }}>{s.billable}</td>
+                    <td style={{ padding: '8px 10px', color: C.muted, textAlign: 'right' }}>{fmtDur(s.avgDur)}</td>
+                    <td style={{ padding: '8px 10px', color: C.accent, textAlign: 'right', fontSize: 10 }}>›</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: C.bg, borderTop: `2px solid ${C.border}` }}>
+                  <td style={{ padding: '8px 10px', color: C.accent, fontWeight: 800 }}>TOTAL</td>
+                  <td style={{ padding: '8px 10px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{dayStats.reduce((s,x)=>s+x.rows,0)}</td>
+                  <td style={{ padding: '8px 10px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{new Set(calls.map(c=>c.callerId).filter(Boolean)).size}</td>
+                  <td style={{ padding: '8px 10px', color: C.muted, textAlign: 'right' }}>—</td>
+                  <td style={{ padding: '8px 10px', color: C.green, fontWeight: 800, textAlign: 'right' }}>{dayStats.reduce((s,x)=>s+x.endXfer,0)}</td>
+                  <td style={{ padding: '8px 10px', color: C.muted, textAlign: 'right' }}>{dayStats.reduce((s,x)=>s+x.colXfer,0)}</td>
+                  <td style={{ padding: '8px 10px', color: C.accent, fontWeight: 800, textAlign: 'right' }}>{(() => { const t=dayStats.reduce((s,x)=>s+x.rows,0); const x=dayStats.reduce((s,x)=>s+x.endXfer,0); return t ? (x/t*100).toFixed(1)+'%' : '—'; })()}</td>
+                  <td style={{ padding: '8px 10px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{dayStats.reduce((s,x)=>s+x.billable,0)}</td>
+                  <td style={{ padding: '8px 10px' }}></td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+        {dates.map(d => {
+          const campaigns = Object.keys(byDate[d]).sort();
+          const dayTotal = campaigns.reduce((s, c) => s + byDate[d][c].length, 0);
+          return (
+            <div key={d} style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ background: C.surface, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 12, fontWeight: 700, color: C.accent }}>
+                {fmtDate(d)} <span style={{ color: C.muted, fontWeight: 400, marginLeft: 8 }}>({dayTotal} call{dayTotal !== 1 ? 's' : ''})</span>
+              </div>
+              {campaigns.map(camp => {
+                const rows = byDate[d][camp];
+                return (
+                  <div key={camp}>
+                    <div style={{ background: C.card, padding: '6px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      {camp} <span style={{ fontWeight: 400, marginLeft: 6 }}>· {rows.length}</span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: C.mono }}>
+                        <thead>
+                          <tr style={{ background: C.bg }}>
+                            {detailCols.map(h => (
+                              <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: C.muted, fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                            ))}
+                            <th style={{ padding: '6px 8px', borderLeft: `2px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}></th>
+                            {statusCols.map(h => (
+                              <th key={h} style={{ padding: '6px 8px', textAlign: 'center', color: C.muted, fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r, i) => (
+                            <tr key={r.recordingId || i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '6px 8px', color: C.text }}>{r.agentName || '—'}</td>
+                              <td style={{ padding: '6px 8px', color: C.text }}>{fmtPhone(r.callerId)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.billable)}</td>
+                              <td style={{ padding: '6px 8px', color: C.text }}>{fmtDur(r.duration)}</td>
+                              <td style={{ padding: '6px 8px', color: C.muted, maxWidth: 360, fontSize: 10 }} title={r.disposition}>{r.disposition || '—'}</td>
+                              <td style={{ borderLeft: `2px solid ${C.border}` }}></td>
+                              <td style={{ padding: '6px 8px', color: r.endCallSource === 'transfer' ? C.green : C.text, fontSize: 10, textAlign: 'center' }}>{r.endCallSource || '—'}</td>
+                              <td style={{ padding: '6px 8px', color: C.muted, fontSize: 10, textAlign: 'center' }}>{r.leadReview || '—'}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.intentConfirmation)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.collectDob)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.existingCoverage)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.budgetQualification)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.collectState)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{bool(r.transferConfirmation)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </Section>
   );
