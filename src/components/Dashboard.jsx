@@ -7,6 +7,7 @@ import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
+import CommissionReconciliationTab from './tabs/CommissionReconciliationTab';
 import AiAnalystPane from './AiAnalystPane';
 import DailySummaryPage from './DailySummaryPage';
 import CommissionSidebar from './CommissionSidebar';
@@ -32,6 +33,7 @@ const TABS = [
   { id: 'agents', label: 'Agents' },
   { id: 'carriers', label: 'Carriers' },
   { id: 'combined-policies', label: 'Combined Policies' },
+  { id: 'commission-recon', label: 'Commission Recon' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },
   { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'period-revenue', label: 'Period Revenue' },  { id: 'carrier-balances', label: 'Carrier Balances' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
@@ -3595,6 +3597,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'carrier-balances' && <CarrierBalancesTable />}
         {activeTab === 'commission-statements' && <CommissionStatementsTab />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
+        {activeTab === 'commission-recon' && <CommissionReconciliationTab dateRange={dateRange} />}
       </div>
       <CommissionSidebar open={commSidebarOpen} onClose={() => setCommSidebarOpen(false)} onNavigateTab={setActiveTab} />
       <AiAnalystPane
