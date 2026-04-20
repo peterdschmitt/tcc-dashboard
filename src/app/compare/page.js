@@ -130,6 +130,7 @@ export default function ComparePage() {
         const fields = ['premium', 'commission', 'gar', 'carrierAdvance', 'chargeBack'];
         // System side maps: carrierAdvance stays; chargeBack stays. GAR uses gar. netRevenue = carrierAdvance - chargeBack
         const sys = {
+          submissionDate: m.submissionDate, effectiveDate: m.effectiveDate,
           premium: m.premium, commission: m.commission, gar: m.gar,
           carrierAdvance: m.carrierAdvance, chargeBack: m.chargeBack,
           advanceDate: m.advanceDate, chargeBackDate: m.chargeBackDate,
@@ -265,7 +266,8 @@ export default function ComparePage() {
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Client</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Carrier</th>
                         <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Product</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Date</th>
+                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Submit</th>
+                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Effective</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>PREMIUM</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>COMMISSION</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>GAR</th>
@@ -288,6 +290,7 @@ export default function ComparePage() {
                           <td style={tdBase}>{m.xl.carrier}</td>
                           <td style={{ ...tdBase, color: C.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.xl.product}>{m.xl.product}</td>
                           <td style={tdBase}>{fmtDate(m.xl.date)}</td>
+                          <td style={{ ...tdBase, color: C.muted }}>{fmtDate(m.sys.effectiveDate)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.premium)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), color: C.text }}>{fmtDollar(m.sys.premium)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.commission), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.commission)}</td>
