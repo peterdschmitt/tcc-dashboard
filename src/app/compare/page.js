@@ -270,10 +270,12 @@ export default function ComparePage() {
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>COMMISSION</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>GAR</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.green }}>CARRIER ADVANCE</th>
+                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.green }}>PAID DATE</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.red }}>CHARGE BACK</th>
+                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.red }}>CB DATE</th>
                       </tr>
                       <tr style={{ background: C.surface }}>
-                        {['Excel','System','Excel','System','Excel','System','Excel','System','Excel','System'].map((lbl, i) => (
+                        {['Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System'].map((lbl, i) => (
                           <th key={i} style={{ ...thSub, borderLeft: (i % 2 === 0) ? `2px solid ${C.border}` : `1px solid ${C.border}` }}>{lbl}</th>
                         ))}
                       </tr>
@@ -294,8 +296,12 @@ export default function ComparePage() {
                           <td style={{ ...diffCellStyle(m.diffs.gar), color: C.text }}>{fmtDollar(m.sys.gar, 0)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), borderLeft: `2px solid ${C.border}` }}>{m.xl.carrierAdvance > 0 ? fmtDollar(m.xl.carrierAdvance) : '—'}</td>
                           <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), color: C.text }}>{m.sys.carrierAdvance > 0 ? fmtDollar(m.sys.carrierAdvance) : '—'}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.advanceDate)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.advanceDate)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), borderLeft: `2px solid ${C.border}` }}>{m.xl.chargeBack !== 0 ? fmtDollar(m.xl.chargeBack) : '—'}</td>
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), color: C.text }}>{m.sys.chargeBack !== 0 ? fmtDollar(m.sys.chargeBack) : '—'}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.chargeBackDate)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.chargeBackDate)}</td>
                         </tr>
                       ))}
                     </tbody>
