@@ -32,6 +32,14 @@ function fmtDate(v) {
 const num = v => { const n = typeof v === 'number' ? v : parseFloat(String(v || '').replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
 const normName = s => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
+// Days between two ISO dates (null if either missing)
+function daysBetween(fromISO, toISO) {
+  if (!fromISO || !toISO) return null;
+  const f = new Date(fromISO + 'T00:00:00Z'), t = new Date(toISO + 'T00:00:00Z');
+  if (isNaN(f) || isNaN(t)) return null;
+  return Math.round((t - f) / 86400000);
+}
+
 // Excel date serial → YYYY-MM-DD
 function excelToISO(v) {
   if (typeof v !== 'number') {
@@ -273,6 +281,8 @@ export default function ComparePage() {
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>GAR</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.green }}>CARRIER ADVANCE</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.green }}>PAID DATE</th>
+                        <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
+                        <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.red }}>CHARGE BACK</th>
                         <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.red }}>CB DATE</th>
                       </tr>
@@ -301,6 +311,17 @@ export default function ComparePage() {
                           <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), color: C.text }}>{m.sys.carrierAdvance > 0 ? fmtDollar(m.sys.carrierAdvance) : '—'}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.advanceDate)}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.advanceDate)}</td>
+                          {(() => {
+                            const dSubmit = daysBetween(m.sys.submissionDate, m.sys.advanceDate);
+                            const dEff = daysBetween(m.sys.effectiveDate, m.sys.advanceDate);
+                            const dColor = d => d == null ? C.muted : d <= 14 ? C.green : d <= 30 ? C.yellow : C.red;
+                            return (
+                              <>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: dColor(dSubmit), fontFamily: C.mono, fontWeight: 600, fontSize: 11 }}>{dSubmit == null ? '—' : `${dSubmit}d`}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: dColor(dEff),    fontFamily: C.mono, fontWeight: 600, fontSize: 11 }}>{dEff == null ? '—' : `${dEff}d`}</td>
+                              </>
+                            );
+                          })()}
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), borderLeft: `2px solid ${C.border}` }}>{m.xl.chargeBack !== 0 ? fmtDollar(m.xl.chargeBack) : '—'}</td>
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), color: C.text }}>{m.sys.chargeBack !== 0 ? fmtDollar(m.sys.chargeBack) : '—'}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.chargeBackDate)}</td>
