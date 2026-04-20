@@ -72,6 +72,8 @@ export async function GET(request) {
         chargeBack: 0,
         chargeBackDate: '',
         ledgerEntries: 0,
+        entries: [],          // per-entry detail: date, type, amount, file
+        statementFiles: [],   // unique filenames touching this policy
       };
     }
 
@@ -93,8 +95,25 @@ export async function GET(request) {
       const isAdvance = advAmt > 0 || commAmt > 0;
       const isChargeback = cbAmt > 0 || commAmt < 0;
 
+      const statementFile = (lr['Statement File'] || '').trim();
+      const transactionType = (lr['Transaction Type'] || '').trim();
+
       const row = byPolicy[matchedPn];
       if (row) {
+        const entryAmt = isChargeback
+          ? -(cbAmt > 0 ? cbAmt : Math.abs(commAmt))
+          : (advAmt > 0 ? advAmt : commAmt);
+        row.entries.push({
+          date: processingDate,
+          statementDate,
+          type: isChargeback ? 'chargeback' : 'advance',
+          transactionType,
+          amount: Math.round(entryAmt * 100) / 100,
+          statementFile,
+        });
+        if (statementFile && !row.statementFiles.includes(statementFile)) {
+          row.statementFiles.push(statementFile);
+        }
         if (isAdvance) {
           row.carrierAdvance += advAmt > 0 ? advAmt : commAmt;
           if (processingDate && (!row.advanceDate || processingDate > row.advanceDate)) {

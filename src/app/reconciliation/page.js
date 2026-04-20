@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Fragment } from 'react';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -40,6 +40,7 @@ export default function ReconciliationPage() {
   const [viewMode, setViewMode] = useState('all'); // all | advanced | chargeback | awaiting | variance
   const [start, setStart] = useState('2020-01-01');
   const [end,   setEnd]   = useState('2030-12-31');
+  const [expanded, setExpanded] = useState(new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -194,6 +195,7 @@ export default function ReconciliationPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
                     <tr>
+                      <th style={{ padding: '10px 6px', width: 26, background: C.surface, borderBottom: `1px solid ${C.border}` }}></th>
                       <Th label="Submit"      k="submissionDate" />
                       <Th label="Effective"   k="effectiveDate" />
                       <Th label="Agent"       k="agent" />
@@ -214,8 +216,18 @@ export default function ReconciliationPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((r, i) => (
-                      <tr key={r.policyNumber + '-' + i} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
+                    {filtered.map((r, i) => {
+                      const isOpen = expanded.has(r.policyNumber);
+                      const canExpand = (r.entries || []).length > 0;
+                      return (
+                      <Fragment key={r.policyNumber + '-group-' + i}>
+                      <tr
+                          onClick={() => {
+                            if (!canExpand) return;
+                            setExpanded(prev => { const n = new Set(prev); n.has(r.policyNumber) ? n.delete(r.policyNumber) : n.add(r.policyNumber); return n; });
+                          }}
+                          style={{ borderBottom: isOpen ? 'none' : `1px solid ${C.border}`, background: isOpen ? 'rgba(91,159,255,0.06)' : (i % 2 ? 'transparent' : 'rgba(255,255,255,0.015)'), cursor: canExpand ? 'pointer' : 'default' }}>
+                        <td style={{ padding: '7px 6px', color: canExpand ? C.accent : C.border, textAlign: 'center', fontSize: 10 }}>{canExpand ? (isOpen ? '▾' : '▸') : ''}</td>
                         <td style={{ padding: '7px 12px', color: C.muted, whiteSpace: 'nowrap' }}>{fmtDate(r.submissionDate)}</td>
                         <td style={{ padding: '7px 12px', color: C.muted, whiteSpace: 'nowrap' }}>{fmtDate(r.effectiveDate)}</td>
                         <td style={{ padding: '7px 12px', color: C.text }}>{r.agent || '—'}</td>
@@ -242,15 +254,60 @@ export default function ReconciliationPage() {
                           {r.ledgerEntries > 0 ? fmtDollar(r.variance) : '—'}
                         </td>
                       </tr>
-                    ))}
+                      {isOpen && (
+                        <tr key={r.policyNumber + '-detail-' + i} style={{ background: 'rgba(91,159,255,0.04)', borderBottom: `1px solid ${C.border}` }}>
+                          <td></td>
+                          <td colSpan={17} style={{ padding: '0 12px 12px 12px' }}>
+                            <div style={{ padding: '10px 14px', background: C.surface, borderRadius: 6, border: `1px solid ${C.border}` }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                                Ledger entries ({(r.entries || []).length}) — every payment/chargeback touching this policy
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                                <thead>
+                                  <tr>
+                                    {['Paid Date', 'Stmt Date', 'Type', 'Transaction', 'Amount', 'Source File'].map(h => (
+                                      <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Amount' ? 'right' : 'left', fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(r.entries || [])
+                                    .slice()
+                                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                                    .map((e, ei) => (
+                                    <tr key={ei} style={{ borderBottom: ei < r.entries.length - 1 ? `1px solid ${C.border}` : 'none' }}>
+                                      <td style={{ padding: '6px 10px', color: C.text, whiteSpace: 'nowrap' }}>{fmtDate(e.date) || '—'}</td>
+                                      <td style={{ padding: '6px 10px', color: C.muted, whiteSpace: 'nowrap' }}>{fmtDate(e.statementDate) || '—'}</td>
+                                      <td style={{ padding: '6px 10px' }}>
+                                        <span style={{
+                                          fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 3,
+                                          background: e.type === 'advance' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)',
+                                          color: e.type === 'advance' ? C.green : C.red,
+                                          textTransform: 'uppercase', letterSpacing: 0.8,
+                                        }}>{e.type}</span>
+                                      </td>
+                                      <td style={{ padding: '6px 10px', color: C.muted }}>{e.transactionType || '—'}</td>
+                                      <td style={{ padding: '6px 10px', color: e.amount >= 0 ? C.green : C.red, textAlign: 'right', fontWeight: 700 }}>{fmtDollar(e.amount)}</td>
+                                      <td style={{ padding: '6px 10px', color: C.muted, fontSize: 10 }} title={e.statementFile}>{e.statementFile || '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
+                      );
+                    })}
                     {filtered.length === 0 && (
-                      <tr><td colSpan={17} style={{ padding: 24, textAlign: 'center', color: C.muted }}>No policies match.</td></tr>
+                      <tr><td colSpan={18} style={{ padding: 24, textAlign: 'center', color: C.muted }}>No policies match.</td></tr>
                     )}
                   </tbody>
                   {filtered.length > 0 && (
                     <tfoot>
                       <tr style={{ background: C.surface, borderTop: `2px solid ${C.border}` }}>
-                        <td colSpan={8} style={{ padding: '10px 12px', color: C.accent, fontWeight: 800 }}>TOTAL ({filtered.length})</td>
+                        <td colSpan={9} style={{ padding: '10px 12px', color: C.accent, fontWeight: 800 }}>TOTAL ({filtered.length})</td>
                         <td style={{ padding: '10px 12px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.premium)}</td>
                         <td style={{ padding: '10px 12px', color: C.text, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.commission)}</td>
                         <td style={{ padding: '10px 12px', color: C.muted, fontWeight: 800, textAlign: 'right' }}>{fmtDollar(tfoot.gar, 0)}</td>
