@@ -38,7 +38,7 @@ function trendSlope(xs) {
 export function computeBaseline(series, { bestWorstWindow = 14 } = {}) {
   if (!series || !series.length) {
     return { today: 0, prev: null, avg7: null, avg30: null, stdev30: null,
-             z: null, trend7: null, bestInN: false, worstInN: false, deltaPct: null };
+             z: null, trend7: null, bestInN: false, worstInN: false, deltaPct: null, window: bestWorstWindow };
   }
   const asc = [...series].sort((a, b) => a.date.localeCompare(b.date));
   const today = asc[asc.length - 1].value;
@@ -60,7 +60,7 @@ export function computeBaseline(series, { bestWorstWindow = 14 } = {}) {
 
   const deltaPct = (avg30 != null && avg30 !== 0) ? (today - avg30) / avg30 : null;
 
-  return { today, prev, avg7, avg30, stdev30: sd30, z, trend7, bestInN, worstInN, deltaPct };
+  return { today, prev, avg7, avg30, stdev30: sd30, z, trend7, bestInN, worstInN, deltaPct, window: bestWorstWindow };
 }
 
 /**
@@ -80,8 +80,8 @@ export function buildBaselineBlock({ company = {}, topAgents = [], topCampaigns 
     if (b.avg30 != null) parts.push(`avg30=${round(b.avg30)}`);
     if (b.z     != null) parts.push(`z=${round(b.z, 2)}`);
     if (b.deltaPct != null) parts.push(`Δ30=${(b.deltaPct * 100).toFixed(0)}%`);
-    if (b.bestInN)  parts.push('BEST_IN_14');
-    if (b.worstInN) parts.push('WORST_IN_14');
+    if (b.bestInN)  parts.push(`BEST_IN_${b.window || 14}`);
+    if (b.worstInN) parts.push(`WORST_IN_${b.window || 14}`);
     return parts.join(' ');
   };
 
