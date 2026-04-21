@@ -1,5 +1,5 @@
 // src/lib/snapshots.js
-import { ensureTabExists } from './sheets';
+import { ensureTabExists, getSheetsClient, fetchSheet, appendRow } from './sheets';
 
 export const SNAP_COMPANY_TAB = process.env.SNAP_COMPANY_TAB || 'Daily Snapshots Company';
 export const SNAP_AGENTS_TAB  = process.env.SNAP_AGENTS_TAB  || 'Daily Snapshots Agents';
@@ -156,4 +156,64 @@ export function buildCampaignRows(date, byCampaign) {
     });
   }
   return rows;
+}
+
+/**
+ * For a given date, delete any existing rows whose `date` matches, then append
+ * the fresh rows. Deletion is done in descending row order so indices stay stable.
+ */
+async function upsertRowsForDate(sheetId, tabName, headers, date, rows) {
+  const sheets = await getSheetsClient();
+  // Read current rows (including empty tab case)
+  let existing = [];
+  try { existing = await fetchSheet(sheetId, tabName, 0); } catch { existing = []; }
+
+  const toDelete = existing
+    .filter(r => r.date === date)
+    .map(r => r._rowIndex)
+    .sort((a, b) => b - a); // descending so earlier indices don't shift
+
+  if (toDelete.length > 0) {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+    const sheet = meta.data.sheets.find(s => s.properties.title === tabName);
+    if (!sheet) throw new Error('Tab not found: ' + tabName);
+    const sheetGid = sheet.properties.sheetId;
+
+    const requests = toDelete.map(rowNum => ({
+      deleteDimension: {
+        range: {
+          sheetId: sheetGid,
+          dimension: 'ROWS',
+          startIndex: rowNum - 1,
+          endIndex: rowNum,
+        },
+      },
+    }));
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    });
+  }
+
+  for (const row of rows) {
+    await appendRow(sheetId, tabName, headers, row);
+  }
+}
+
+/**
+ * Write all three snapshot tabs for one date.
+ * `companyRow` is a single object; `agentRows` / `campaignRows` are arrays.
+ */
+export async function writeSnapshots(date, companyRow, agentRows, campaignRows) {
+  await ensureSnapshotTabs();
+  const sheetId = process.env.GOALS_SHEET_ID;
+  await upsertRowsForDate(sheetId, SNAP_COMPANY_TAB, SNAP_COMPANY_HEADERS, date, [companyRow]);
+  await upsertRowsForDate(sheetId, SNAP_AGENTS_TAB, SNAP_AGENT_HEADERS, date, agentRows);
+  await upsertRowsForDate(sheetId, SNAP_CAMPAIGNS_TAB, SNAP_CAMPAIGN_HEADERS, date, campaignRows);
+  return {
+    date,
+    companyWritten: 1,
+    agentsWritten: agentRows.length,
+    campaignsWritten: campaignRows.length,
+  };
 }
