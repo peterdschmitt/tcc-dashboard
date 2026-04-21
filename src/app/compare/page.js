@@ -61,6 +61,123 @@ function diffClass(a, b) {
   return na > nb ? 'higher' : 'lower';
 }
 
+// Build one row of the Excel export from a compared-records entry
+function buildExportRow(m) {
+  const round = n => Math.round((n || 0) * 100) / 100;
+  const dSubmit = daysBetween(m.sys?.submissionDate, m.sys?.advanceDate);
+  const dEff    = daysBetween(m.sys?.effectiveDate,  m.sys?.advanceDate);
+  const sourceLabel = m.source === 'onlyExcel' ? 'Excel only'
+                    : m.source === 'onlySystem' ? 'System only'
+                    : 'Both';
+  return {
+    'Source':           sourceLabel,
+    'Agent':            m.xl?.agent || m.sys?.agent || '',
+    'Client':           m.xl?.client || m.sys?.client || '',
+    'Carrier':          m.xl?.carrier || m.sys?.carrier || '',
+    'Product':          m.xl?.product || m.sys?.product || '',
+    'Submit Date':      m.xl?.date || m.sys?.submissionDate || '',
+    'Effective Date':   m.sys?.effectiveDate || '',
+    'Policy #':         m.sysPolicyNumber || '',
+
+    'Premium (Excel)':      round(m.xl?.premium),
+    'Premium (System)':     round(m.sys?.premium),
+    'Premium Δ':            round((m.xl?.premium || 0) - (m.sys?.premium || 0)),
+
+    'Commission (Excel)':   round(m.xl?.commission),
+    'Commission (System)':  round(m.sys?.commission),
+    'Commission Δ':         round((m.xl?.commission || 0) - (m.sys?.commission || 0)),
+
+    'GAR (Excel)':          round(m.xl?.gar),
+    'GAR (System)':         round(m.sys?.gar),
+    'GAR Δ':                round((m.xl?.gar || 0) - (m.sys?.gar || 0)),
+
+    'Carrier Advance (Excel)':  round(m.xl?.carrierAdvance),
+    'Carrier Advance (System)': round(m.sys?.carrierAdvance),
+    'Advance Δ':                round((m.xl?.carrierAdvance || 0) - (m.sys?.carrierAdvance || 0)),
+
+    'Paid Date (Excel)':  m.xl?.advanceDate || '',
+    'Paid Date (System)': m.sys?.advanceDate || '',
+    'Days Submit→Paid':   dSubmit == null ? '' : dSubmit,
+    'Days Eff→Paid':      dEff    == null ? '' : dEff,
+
+    'Charge Back (Excel)':   round(m.xl?.chargeBack),
+    'Charge Back (System)':  round(m.sys?.chargeBack),
+    'Charge Back Δ':         round((m.xl?.chargeBack || 0) - (m.sys?.chargeBack || 0)),
+
+    'CB Date (Excel)':   m.xl?.chargeBackDate || '',
+    'CB Date (System)':  m.sys?.chargeBackDate || '',
+  };
+}
+
+function downloadXLSX(compared, excelFilename) {
+  const allRows = compared.all.map(buildExportRow);
+
+  const totals = compared.all.reduce((t, m) => {
+    const add = (f, side) => t[f + (side || '')] += (m[side || 'xl']?.[f] || 0);
+    return {
+      xlPrem: t.xlPrem + (m.xl?.premium || 0),          sysPrem: t.sysPrem + (m.sys?.premium || 0),
+      xlComm: t.xlComm + (m.xl?.commission || 0),       sysComm: t.sysComm + (m.sys?.commission || 0),
+      xlGar:  t.xlGar  + (m.xl?.gar || 0),              sysGar:  t.sysGar  + (m.sys?.gar || 0),
+      xlAdv:  t.xlAdv  + (m.xl?.carrierAdvance || 0),   sysAdv:  t.sysAdv  + (m.sys?.carrierAdvance || 0),
+      xlCb:   t.xlCb   + (m.xl?.chargeBack || 0),       sysCb:   t.sysCb   + (m.sys?.chargeBack || 0),
+    };
+  }, { xlPrem:0, sysPrem:0, xlComm:0, sysComm:0, xlGar:0, sysGar:0, xlAdv:0, sysAdv:0, xlCb:0, sysCb:0 });
+
+  const round = n => Math.round((n || 0) * 100) / 100;
+  const summary = [
+    { Metric: 'Total records',       Value: compared.all.length },
+    { Metric: 'Matched (both)',      Value: compared.matched.length },
+    { Metric: 'Matched & equal',     Value: compared.equal.length },
+    { Metric: 'Matched with diffs',  Value: compared.different.length },
+    { Metric: 'Excel only',          Value: compared.onlyExcel.length },
+    { Metric: 'System only',         Value: compared.onlySystem.length },
+    { Metric: '', Value: '' },
+    { Metric: 'Total Premium (Excel)',          Value: round(totals.xlPrem) },
+    { Metric: 'Total Premium (System)',         Value: round(totals.sysPrem) },
+    { Metric: 'Premium Δ',                      Value: round(totals.xlPrem - totals.sysPrem) },
+    { Metric: '', Value: '' },
+    { Metric: 'Total Commission (Excel)',       Value: round(totals.xlComm) },
+    { Metric: 'Total Commission (System)',      Value: round(totals.sysComm) },
+    { Metric: 'Commission Δ',                   Value: round(totals.xlComm - totals.sysComm) },
+    { Metric: '', Value: '' },
+    { Metric: 'Total GAR (Excel)',              Value: round(totals.xlGar) },
+    { Metric: 'Total GAR (System)',             Value: round(totals.sysGar) },
+    { Metric: 'GAR Δ',                          Value: round(totals.xlGar - totals.sysGar) },
+    { Metric: '', Value: '' },
+    { Metric: 'Total Carrier Advance (Excel)',  Value: round(totals.xlAdv) },
+    { Metric: 'Total Carrier Advance (System)', Value: round(totals.sysAdv) },
+    { Metric: 'Carrier Advance Δ',              Value: round(totals.xlAdv - totals.sysAdv) },
+    { Metric: '', Value: '' },
+    { Metric: 'Total Charge Back (Excel)',      Value: round(totals.xlCb) },
+    { Metric: 'Total Charge Back (System)',     Value: round(totals.sysCb) },
+    { Metric: 'Charge Back Δ',                  Value: round(totals.xlCb - totals.sysCb) },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(allRows), 'All Records');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(compared.different.map(buildExportRow)), 'Differences');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(compared.equal.map(buildExportRow)),     'Matched Equal');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(compared.onlyExcel.map(x => ({
+    Date: excelToISO(x.Date), Agent: x.Agent, Client: x.Client, Carrier: x.Carrier,
+    Product: x.Product, Premium: num(x.Premium), Commission: num(x.Commission),
+    'Gross Adv Rev': num(x['Gross Adv Rev']), 'Carrier Advance': num(x['Carrier Advance']),
+    Status: x.Status,
+  }))), 'Only in Excel');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(compared.onlySystem.map(r => ({
+    'Policy #': r.policyNumber, 'Submit Date': r.submissionDate, 'Effective Date': r.effectiveDate,
+    Agent: r.agent, Client: r.client, Carrier: r.carrier, Product: r.product,
+    Premium: r.premium, Commission: r.commission, GAR: r.gar,
+    'Carrier Advance': r.carrierAdvance, 'Paid Date': r.advanceDate,
+    'Charge Back': r.chargeBack, 'CB Date': r.chargeBackDate,
+    'Ledger Entries': r.ledgerEntries,
+  }))), 'Only in System');
+
+  const base = excelFilename.replace(/\.[^.]+$/, '') || 'comparison';
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `${base}_reconciliation_${stamp}.xlsx`);
+}
+
 export default function ComparePage() {
   const fileRef = useRef(null);
   const [excelRows, setExcelRows] = useState(null);
@@ -334,6 +451,14 @@ export default function ComparePage() {
               {filterBtn('equal',      `Matched & Equal`, compared.equal.length,       C.green)}
               {filterBtn('onlyExcel',  `Only in Excel`,   compared.onlyExcel.length,   C.red)}
               {filterBtn('onlySystem', `Only in System`,  compared.onlySystem.length,  C.accent)}
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => downloadXLSX(compared, excelFile)}
+                style={{
+                  background: C.green, color: '#000', border: 'none', padding: '8px 16px',
+                  borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >⇣ Export to Excel</button>
               <input type="text" placeholder="Filter by client, agent, carrier…" value={filter} onChange={e => setFilter(e.target.value)}
                 style={{ flex: 1, minWidth: 220, padding: '6px 10px', background: C.card, border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, fontSize: 11 }} />
             </div>
