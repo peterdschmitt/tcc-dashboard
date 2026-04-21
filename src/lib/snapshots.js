@@ -218,3 +218,62 @@ export async function writeSnapshots(date, companyRow, agentRows, campaignRows) 
     campaignsWritten: campaignRows.length,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot reader helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns rows up to and including `asOfDate`, sorted ascending.
+ * Numeric columns are cast to numbers.
+ */
+async function readSnapshotTab(tabName, asOfDate) {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  let rows = [];
+  try { rows = await fetchSheet(sheetId, tabName, 60); } catch { return []; }
+  return rows
+    .filter(r => r.date && r.date <= asOfDate)
+    .map(r => {
+      const o = {};
+      for (const [k, v] of Object.entries(r)) {
+        if (k === '_rowIndex' || k === 'date' || k === 'agent' || k === 'campaign' || k === 'vendor' || k === 'generatedAt') {
+          o[k] = v;
+        } else {
+          const n = Number(v);
+          o[k] = isFinite(n) ? n : 0;
+        }
+      }
+      return o;
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export async function readCompanySeries(asOfDate, metric) {
+  const rows = await readSnapshotTab(SNAP_COMPANY_TAB, asOfDate);
+  return rows.map(r => ({ date: r.date, value: r[metric] ?? 0 }));
+}
+
+export async function readAgentSeries(asOfDate, agent, metric) {
+  const rows = await readSnapshotTab(SNAP_AGENTS_TAB, asOfDate);
+  return rows
+    .filter(r => r.agent === agent)
+    .map(r => ({ date: r.date, value: r[metric] ?? 0 }));
+}
+
+export async function readCampaignSeries(asOfDate, campaign, metric) {
+  const rows = await readSnapshotTab(SNAP_CAMPAIGNS_TAB, asOfDate);
+  return rows
+    .filter(r => r.campaign === campaign)
+    .map(r => ({ date: r.date, value: r[metric] ?? 0 }));
+}
+
+/** Return { agents: [names], campaigns: [codes] } for rows on `date`. */
+export async function readEntitiesOnDate(date) {
+  const [agentsRows, campaignRows] = await Promise.all([
+    readSnapshotTab(SNAP_AGENTS_TAB, date),
+    readSnapshotTab(SNAP_CAMPAIGNS_TAB, date),
+  ]);
+  const agents = [...new Set(agentsRows.filter(r => r.date === date).map(r => r.agent))];
+  const campaigns = [...new Set(campaignRows.filter(r => r.date === date).map(r => r.campaign))];
+  return { agents, campaigns };
+}
