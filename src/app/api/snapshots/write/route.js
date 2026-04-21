@@ -40,10 +40,19 @@ async function writeForDate(baseUrl, date) {
 }
 
 export async function GET(request) {
+  if (process.env.CRON_SECRET) {
+    const auth = request.headers.get('authorization');
+    if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
   try {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
     if (!date) return NextResponse.json({ error: 'date=YYYY-MM-DD required' }, { status: 400 });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 });
+    }
     const result = await writeForDate(getBaseUrl(), date);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
