@@ -1,5 +1,5 @@
 // src/lib/snapshots.js
-import { ensureTabExists, getSheetsClient, fetchSheet, appendRow } from './sheets';
+import { ensureTabExists, getSheetsClient, fetchSheet, appendRow, invalidateCache } from './sheets';
 
 export const SNAP_COMPANY_TAB = process.env.SNAP_COMPANY_TAB || 'Daily Snapshots Company';
 export const SNAP_AGENTS_TAB  = process.env.SNAP_AGENTS_TAB  || 'Daily Snapshots Agents';
@@ -193,6 +193,7 @@ async function upsertRowsForDate(sheetId, tabName, headers, date, rows) {
       spreadsheetId: sheetId,
       requestBody: { requests },
     });
+    invalidateCache(sheetId, tabName);
   }
 
   for (const row of rows) {
