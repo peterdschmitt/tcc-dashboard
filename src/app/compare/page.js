@@ -66,8 +66,8 @@ function buildExportRow(m) {
   const round = n => Math.round((n || 0) * 100) / 100;
   const dSubmit = daysBetween(m.sys?.submissionDate, m.sys?.advanceDate);
   const dEff    = daysBetween(m.sys?.effectiveDate,  m.sys?.advanceDate);
-  const sourceLabel = m.source === 'onlyExcel' ? 'Excel only'
-                    : m.source === 'onlySystem' ? 'System only'
+  const sourceLabel = m.source === 'onlyExcel' ? 'Tracker only (not in TCC)'
+                    : m.source === 'onlySystem' ? 'TCC only (not in Manual Tracker)'
                     : 'Both';
   return {
     'Source':           sourceLabel,
@@ -79,33 +79,33 @@ function buildExportRow(m) {
     'Effective Date':   m.sys?.effectiveDate || '',
     'Policy #':         m.sysPolicyNumber || '',
 
-    'Premium (Excel)':      round(m.xl?.premium),
-    'Premium (System)':     round(m.sys?.premium),
-    'Premium Δ':            round((m.xl?.premium || 0) - (m.sys?.premium || 0)),
+    'Premium (Tracker)':          round(m.xl?.premium),
+    'Premium (TCC Sales)':        round(m.sys?.premium),
+    'Premium Δ':                  round((m.xl?.premium || 0) - (m.sys?.premium || 0)),
 
-    'Commission (Excel)':   round(m.xl?.commission),
-    'Commission (System)':  round(m.sys?.commission),
-    'Commission Δ':         round((m.xl?.commission || 0) - (m.sys?.commission || 0)),
+    'Commission (Tracker)':       round(m.xl?.commission),
+    'Commission (TCC Sales)':     round(m.sys?.commission),
+    'Commission Δ':               round((m.xl?.commission || 0) - (m.sys?.commission || 0)),
 
-    'GAR (Excel)':          round(m.xl?.gar),
-    'GAR (System)':         round(m.sys?.gar),
-    'GAR Δ':                round((m.xl?.gar || 0) - (m.sys?.gar || 0)),
+    'GAR (Tracker)':              round(m.xl?.gar),
+    'GAR (TCC Sales)':            round(m.sys?.gar),
+    'GAR Δ':                      round((m.xl?.gar || 0) - (m.sys?.gar || 0)),
 
-    'Carrier Advance (Excel)':  round(m.xl?.carrierAdvance),
-    'Carrier Advance (System)': round(m.sys?.carrierAdvance),
-    'Advance Δ':                round((m.xl?.carrierAdvance || 0) - (m.sys?.carrierAdvance || 0)),
+    'Carrier Advance (Tracker)':       round(m.xl?.carrierAdvance),
+    'Carrier Advance (Carrier Stmts)': round(m.sys?.carrierAdvance),
+    'Advance Δ':                       round((m.xl?.carrierAdvance || 0) - (m.sys?.carrierAdvance || 0)),
 
-    'Paid Date (Excel)':  m.xl?.advanceDate || '',
-    'Paid Date (System)': m.sys?.advanceDate || '',
-    'Days Submit→Paid':   dSubmit == null ? '' : dSubmit,
-    'Days Eff→Paid':      dEff    == null ? '' : dEff,
+    'Paid Date (Tracker)':        m.xl?.advanceDate || '',
+    'Paid Date (Carrier Stmts)':  m.sys?.advanceDate || '',
+    'Days Submit→Paid':           dSubmit == null ? '' : dSubmit,
+    'Days Eff→Paid':              dEff    == null ? '' : dEff,
 
-    'Charge Back (Excel)':   round(m.xl?.chargeBack),
-    'Charge Back (System)':  round(m.sys?.chargeBack),
-    'Charge Back Δ':         round((m.xl?.chargeBack || 0) - (m.sys?.chargeBack || 0)),
+    'Charge Back (Tracker)':       round(m.xl?.chargeBack),
+    'Charge Back (Carrier Stmts)': round(m.sys?.chargeBack),
+    'Charge Back Δ':               round((m.xl?.chargeBack || 0) - (m.sys?.chargeBack || 0)),
 
-    'CB Date (Excel)':   m.xl?.chargeBackDate || '',
-    'CB Date (System)':  m.sys?.chargeBackDate || '',
+    'CB Date (Tracker)':       m.xl?.chargeBackDate || '',
+    'CB Date (Carrier Stmts)': m.sys?.chargeBackDate || '',
   };
 }
 
@@ -399,9 +399,18 @@ export default function ComparePage() {
           <span style={{ margin: '0 8px', color: C.border }}>|</span>
           <a href="/" style={{ color: C.accent, textDecoration: 'none' }}>Dashboard</a>
         </div>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px 0' }}>Excel Compare</h1>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>
-          Upload an external tracker (.xlsx) — each row is matched to a policy in our system by Client + Agent, and every dollar field is diffed.
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px 0' }}>Tracker Reconciliation</h1>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+          Compare an external manual tracker (.xlsx) against our live data. Every row is matched by Client + Agent and every dollar field is diffed.
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 16, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.accent, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Data sources</div>
+          <div><span style={{ color: C.yellow, fontWeight: 700 }}>Manual Tracker</span> — the .xlsx file you upload (every column comes from this single spreadsheet)</div>
+          <div><span style={{ color: C.accent, fontWeight: 700 }}>TCC</span> — our live Google Sheets data, which is the combination of:</div>
+          <div style={{ paddingLeft: 16, color: C.muted }}>
+            · <span style={{ color: C.text }}>Sales Tracker</span> (agent-entered apps) → Agent, Client, Carrier, Product, Submit Date, Effective Date, Premium, Commission, GAR<br/>
+            · <span style={{ color: C.text }}>Commission Ledger</span> (parsed carrier statements) → Carrier Advance, Paid Date, Charge Back, CB Date
+          </div>
         </div>
 
         {/* File upload */}
@@ -429,13 +438,13 @@ export default function ComparePage() {
             {/* KPIs */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
               {[
-                { label: 'Excel Rows',     value: excelRows.length,                color: C.accent },
-                { label: 'System Rows',    value: system.rows.length,              color: C.accent },
-                { label: 'Matched',        value: compared.matched.length,         color: C.green },
-                { label: 'Equal',          value: compared.equal.length,           color: C.green },
-                { label: 'Differences',    value: compared.different.length,       color: C.yellow },
-                { label: 'Only in Excel',  value: compared.onlyExcel.length,       color: compared.onlyExcel.length > 0 ? C.red : C.muted },
-                { label: 'Only in System', value: compared.onlySystem.length,      color: compared.onlySystem.length > 0 ? C.yellow : C.muted },
+                { label: 'Tracker Rows',    value: excelRows.length,                color: C.yellow },
+                { label: 'TCC Rows',        value: system.rows.length,              color: C.accent },
+                { label: 'Matched',         value: compared.matched.length,         color: C.green },
+                { label: 'Equal',           value: compared.equal.length,           color: C.green },
+                { label: 'Differences',     value: compared.different.length,       color: C.yellow },
+                { label: 'Only in Tracker', value: compared.onlyExcel.length,       color: compared.onlyExcel.length > 0 ? C.red : C.muted },
+                { label: 'Only in TCC',     value: compared.onlySystem.length,      color: compared.onlySystem.length > 0 ? C.yellow : C.muted },
               ].map(k => (
                 <div key={k.label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 16px', minWidth: 110, borderTop: `3px solid ${k.color}` }}>
                   <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{k.label}</div>
@@ -449,8 +458,8 @@ export default function ComparePage() {
               {filterBtn('all',        `All Records`,     compared.matched.length + compared.onlyExcel.length + compared.onlySystem.length, C.accent)}
               {filterBtn('diffs',      `Differences`,     compared.different.length,   C.yellow)}
               {filterBtn('equal',      `Matched & Equal`, compared.equal.length,       C.green)}
-              {filterBtn('onlyExcel',  `Only in Excel`,   compared.onlyExcel.length,   C.red)}
-              {filterBtn('onlySystem', `Only in System`,  compared.onlySystem.length,  C.accent)}
+              {filterBtn('onlyExcel',  `Only in Tracker`, compared.onlyExcel.length,   C.red)}
+              {filterBtn('onlySystem', `Only in TCC`,     compared.onlySystem.length,  C.accent)}
               <div style={{ flex: 1 }} />
               <button
                 onClick={() => downloadXLSX(compared, excelFile)}
@@ -505,7 +514,15 @@ export default function ComparePage() {
                         );
                       })()}
                       <tr style={{ background: C.surface }}>
-                        {['Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System'].map((lbl, i) => (
+                        {[
+                          'Tracker','TCC Sales',     // Premium (from sales tracker)
+                          'Tracker','TCC Sales',     // Commission
+                          'Tracker','TCC Sales',     // GAR
+                          'Tracker','Carrier Stmts', // Carrier Advance — from ledger
+                          'Tracker','Carrier Stmts', // Paid Date — from ledger
+                          'Tracker','Carrier Stmts', // Charge Back — from ledger
+                          'Tracker','Carrier Stmts', // CB Date — from ledger
+                        ].map((lbl, i) => (
                           <th key={i} style={{ ...thSub, borderLeft: (i % 2 === 0) ? `2px solid ${C.border}` : `1px solid ${C.border}` }}>{lbl}</th>
                         ))}
                       </tr>
@@ -515,7 +532,9 @@ export default function ComparePage() {
                         const primary = m.xl.agent ? m.xl : m.sys; // fall back to sys for onlySystem rows
                         const showSource = viewMode === 'all';
                         const srcColor = m.source === 'onlyExcel' ? C.red : m.source === 'onlySystem' ? C.yellow : C.green;
-                        const srcLabel = m.source === 'onlyExcel' ? 'Excel only' : m.source === 'onlySystem' ? 'System only' : 'Both';
+                        const srcLabel = m.source === 'onlyExcel' ? 'Tracker only'
+                                       : m.source === 'onlySystem' ? 'TCC only'
+                                       : 'Both';
                         return (
                         <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                           {showSource && (
@@ -561,7 +580,7 @@ export default function ComparePage() {
             )}
 
             {viewMode === 'onlyExcel' && (
-              <SimpleTable title="Policies in Excel but not in System" rows={rowsToShow} columns={[
+              <SimpleTable title="Policies in the Manual Tracker but not in TCC" rows={rowsToShow} columns={[
                 { k: 'Date', label: 'Date', fmt: fmtDate },
                 { k: 'Agent', label: 'Agent' }, { k: 'Client', label: 'Client', highlight: true },
                 { k: 'Carrier', label: 'Carrier' }, { k: 'Product', label: 'Product' },
@@ -572,7 +591,7 @@ export default function ComparePage() {
             )}
 
             {viewMode === 'onlySystem' && (
-              <SimpleTable title="Policies in System but not in Excel" rows={rowsToShow} columns={[
+              <SimpleTable title="Policies in TCC Sales Tracker but not in the Manual Tracker" rows={rowsToShow} columns={[
                 { k: 'submissionDate', label: 'Submit', fmt: fmtDate },
                 { k: 'agent', label: 'Agent' }, { k: 'client', label: 'Client', highlight: true },
                 { k: 'carrier', label: 'Carrier' }, { k: 'product', label: 'Product' },
