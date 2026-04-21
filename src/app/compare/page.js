@@ -95,6 +95,9 @@ function buildExportRow(m) {
     'Carrier Advance (Carrier Stmts)': round(m.sys?.carrierAdvance),
     'Advance Δ':                       round((m.xl?.carrierAdvance || 0) - (m.sys?.carrierAdvance || 0)),
 
+    'AnnL Spread (Tracker)': round((m.xl?.gar  || 0) - (m.xl?.carrierAdvance  || 0)),
+    'AnnL Spread (TCC)':     round((m.sys?.gar || 0) - (m.sys?.carrierAdvance || 0)),
+
     'Paid Date (Tracker)':        m.xl?.advanceDate || '',
     'Paid Date (Carrier Stmts)':  m.sys?.advanceDate || '',
     'Days Submit→Paid':           dSubmit == null ? '' : dSubmit,
@@ -348,6 +351,7 @@ export default function ComparePage() {
           case 'commission':     return (row.xl?.commission || row.sys?.commission || 0);
           case 'gar':            return (row.xl?.gar || row.sys?.gar || 0);
           case 'carrierAdvance': return (row.xl?.carrierAdvance || row.sys?.carrierAdvance || 0);
+          case 'annlSpread':     return ((row.sys?.gar || row.xl?.gar || 0) - (row.sys?.carrierAdvance || row.xl?.carrierAdvance || 0));
           case 'advanceDate':    return p(row.xl?.advanceDate || row.sys?.advanceDate);
           case 'chargeBack':     return (row.xl?.chargeBack || row.sys?.chargeBack || 0);
           case 'cbDate':         return p(row.xl?.chargeBackDate || row.sys?.chargeBackDate);
@@ -505,6 +509,7 @@ export default function ComparePage() {
                             <SortableGroup k="commission"     colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>COMMISSION</SortableGroup>
                             <SortableGroup k="gar"            colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>GAR</SortableGroup>
                             <SortableGroup k="carrierAdvance" colSpan={2} color={C.green}  extraStyle={{ borderLeft: `2px solid ${C.border}` }}>CARRIER ADVANCE</SortableGroup>
+                            <SortableGroup k="annlSpread"     colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>ANNL SPREAD<br/><span style={{ fontSize: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>GAR − Advance</span></SortableGroup>
                             <SortableGroup k="advanceDate"    colSpan={2} color={C.green}  extraStyle={{ borderLeft: `1px solid ${C.border}` }}>PAID DATE</SortableGroup>
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
@@ -519,6 +524,7 @@ export default function ComparePage() {
                           'Tracker','TCC Sales',     // Commission
                           'Tracker','TCC Sales',     // GAR
                           'Tracker','Carrier Stmts', // Carrier Advance — from ledger
+                          'Tracker','TCC',           // AnnL Spread (= GAR - Advance, computed each side)
                           'Tracker','Carrier Stmts', // Paid Date — from ledger
                           'Tracker','Carrier Stmts', // Charge Back — from ledger
                           'Tracker','Carrier Stmts', // CB Date — from ledger
@@ -554,6 +560,20 @@ export default function ComparePage() {
                           <td style={{ ...diffCellStyle(m.diffs.gar), color: C.text }}>{fmtDollar(m.sys.gar, 0)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), borderLeft: `2px solid ${C.border}` }}>{m.xl.carrierAdvance > 0 ? fmtDollar(m.xl.carrierAdvance) : '—'}</td>
                           <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), color: C.text }}>{m.sys.carrierAdvance > 0 ? fmtDollar(m.sys.carrierAdvance) : '—'}</td>
+                          {(() => {
+                            const xlSpread  = (m.xl.gar || 0)  - (m.xl.carrierAdvance  || 0);
+                            const sysSpread = (m.sys.gar || 0) - (m.sys.carrierAdvance || 0);
+                            const cellStyle = v => ({
+                              padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, fontSize: 11,
+                              color: v > 0 ? C.accent : v < 0 ? C.red : C.muted, fontWeight: 600, whiteSpace: 'nowrap',
+                            });
+                            return (
+                              <>
+                                <td style={{ ...cellStyle(xlSpread),  borderLeft: `2px solid ${C.border}` }}>{(m.xl.gar  || m.xl.carrierAdvance)  ? fmtDollar(xlSpread, 0)  : '—'}</td>
+                                <td style={{ ...cellStyle(sysSpread), borderLeft: `1px solid ${C.border}` }}>{(m.sys.gar || m.sys.carrierAdvance) ? fmtDollar(sysSpread, 0) : '—'}</td>
+                              </>
+                            );
+                          })()}
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.advanceDate)}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.advanceDate)}</td>
                           {(() => {
