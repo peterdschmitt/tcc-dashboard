@@ -69,7 +69,9 @@ export default function ComparePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('');
-  const [viewMode, setViewMode] = useState('diffs'); // diffs | equal | onlyExcel | onlySystem
+  const [viewMode, setViewMode] = useState('all'); // all | diffs | equal | onlyExcel | onlySystem
+  const [allSortKey, setAllSortKey] = useState('date');
+  const [allSortDir, setAllSortDir] = useState('desc');
 
   // Fetch system data on load
   useEffect(() => {
@@ -157,8 +159,42 @@ export default function ComparePage() {
       }
     }
     const onlySystem = system.rows.filter(r => !usedSys.has(r.policyNumber));
+
+    // Build a unified "all records" list — matched pairs + Excel-only + System-only,
+    // all in the same {xl, sys, diffs, source} shape so a single side-by-side table can render them.
+    const empty = { agent:'', client:'', carrier:'', product:'', submissionDate:'', effectiveDate:'',
+      premium:0, commission:0, gar:0, carrierAdvance:0, chargeBack:0, advanceDate:'', chargeBackDate:'', netRevenue:0 };
+    const allRecords = [
+      ...matched.map(m => ({ ...m, source: 'matched' })),
+      ...onlyExcel.map(x => ({
+        xl: {
+          date: excelToISO(x.Date), agent: x.Agent, client: x.Client, leadSource: x['Lead Source'],
+          carrier: x.Carrier, product: x.Product,
+          premium: num(x.Premium), commission: num(x.Commission), gar: num(x['Gross Adv Rev']),
+          carrierAdvance: num(x['Carrier Advance']), advanceDate: excelToISO(x['Advance Date']),
+          chargeBack: Math.abs(num(x['Charge Back'])), chargeBackDate: excelToISO(x['Charge Back Date']),
+          netRevenue: num(x['Net Revenue']), status: x.Status,
+        },
+        sys: { ...empty },
+        sysPolicyNumber: '',
+        diffs: {}, diffCount: 0, source: 'onlyExcel',
+      })),
+      ...onlySystem.map(r => ({
+        xl: { ...empty, date: r.submissionDate },
+        sys: {
+          submissionDate: r.submissionDate, effectiveDate: r.effectiveDate,
+          agent: r.agent, client: r.client, carrier: r.carrier, product: r.product,
+          premium: r.premium, commission: r.commission, gar: r.gar,
+          carrierAdvance: r.carrierAdvance, chargeBack: r.chargeBack,
+          advanceDate: r.advanceDate, chargeBackDate: r.chargeBackDate, netRevenue: r.netReceived,
+        },
+        sysPolicyNumber: r.policyNumber,
+        diffs: {}, diffCount: 0, source: 'onlySystem',
+      })),
+    ];
+
     return {
-      matched, onlyExcel, onlySystem,
+      matched, onlyExcel, onlySystem, all: allRecords,
       equal: matched.filter(m => m.diffCount === 0),
       different: matched.filter(m => m.diffCount > 0),
     };
@@ -167,19 +203,57 @@ export default function ComparePage() {
   const rowsToShow = useMemo(() => {
     if (!compared) return [];
     let rows;
-    if (viewMode === 'diffs')      rows = compared.different;
-    else if (viewMode === 'equal') rows = compared.equal;
+    if (viewMode === 'all')             rows = compared.all;
+    else if (viewMode === 'diffs')      rows = compared.different;
+    else if (viewMode === 'equal')      rows = compared.equal;
     else if (viewMode === 'onlyExcel')  rows = compared.onlyExcel;
     else if (viewMode === 'onlySystem') rows = compared.onlySystem;
     else rows = compared.matched;
     const f = filter.trim().toLowerCase();
-    if (!f) return rows;
-    return rows.filter(r => {
-      const src = r.xl || r || {};
-      return [src.agent, src.client, src.carrier, src.product, src.Agent, src.Client, src.Carrier, src.Product]
-        .some(v => (v || '').toLowerCase().includes(f));
-    });
-  }, [compared, viewMode, filter]);
+    if (f) {
+      rows = rows.filter(r => {
+        const src = r.xl || r || {};
+        return [src.agent, src.client, src.carrier, src.product, src.Agent, src.Client, src.Carrier, src.Product]
+          .some(v => (v || '').toLowerCase().includes(f));
+      });
+    }
+    if (viewMode === 'all') {
+      const getVal = (row, key) => {
+        const p = v => v ?? '';
+        switch (key) {
+          case 'agent':          return p(row.xl?.agent || row.sys?.agent);
+          case 'client':         return p(row.xl?.client || row.sys?.client);
+          case 'carrier':        return p(row.xl?.carrier || row.sys?.carrier);
+          case 'product':        return p(row.xl?.product || row.sys?.product);
+          case 'submit':         return p(row.xl?.date || row.sys?.submissionDate);
+          case 'effective':      return p(row.sys?.effectiveDate);
+          case 'premium':        return (row.xl?.premium || row.sys?.premium || 0);
+          case 'commission':     return (row.xl?.commission || row.sys?.commission || 0);
+          case 'gar':            return (row.xl?.gar || row.sys?.gar || 0);
+          case 'carrierAdvance': return (row.xl?.carrierAdvance || row.sys?.carrierAdvance || 0);
+          case 'advanceDate':    return p(row.xl?.advanceDate || row.sys?.advanceDate);
+          case 'chargeBack':     return (row.xl?.chargeBack || row.sys?.chargeBack || 0);
+          case 'cbDate':         return p(row.xl?.chargeBackDate || row.sys?.chargeBackDate);
+          case 'source':         return p(row.source);
+          default: return '';
+        }
+      };
+      rows = [...rows].sort((a, b) => {
+        const va = getVal(a, allSortKey), vb = getVal(b, allSortKey);
+        const cmp = (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb
+          : String(va).localeCompare(String(vb));
+        return allSortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return rows;
+  }, [compared, viewMode, filter, allSortKey, allSortDir]);
+
+  const toggleSort = (key) => {
+    if (allSortKey === key) setAllSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setAllSortKey(key); setAllSortDir('asc'); }
+  };
+  const sortArrow = (key) => allSortKey === key ? (allSortDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
 
   const diffCellStyle = (d) => ({
     padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, fontSize: 11, whiteSpace: 'nowrap',
@@ -255,6 +329,7 @@ export default function ComparePage() {
 
             {/* View filters */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              {filterBtn('all',        `All Records`,     compared.matched.length + compared.onlyExcel.length + compared.onlySystem.length, C.accent)}
               {filterBtn('diffs',      `Differences`,     compared.different.length,   C.yellow)}
               {filterBtn('equal',      `Matched & Equal`, compared.equal.length,       C.green)}
               {filterBtn('onlyExcel',  `Only in Excel`,   compared.onlyExcel.length,   C.red)}
@@ -264,28 +339,46 @@ export default function ComparePage() {
             </div>
 
             {/* Tables per view */}
-            {(viewMode === 'diffs' || viewMode === 'equal') && rowsToShow.length > 0 && (
+            {(viewMode === 'all' || viewMode === 'diffs' || viewMode === 'equal') && rowsToShow.length > 0 && (
               <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                     <thead>
-                      <tr style={{ background: C.surface }}>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Agent</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Client</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Carrier</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Product</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Submit</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'left' }}>Effective</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>PREMIUM</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>COMMISSION</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.accent }}>GAR</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.green }}>CARRIER ADVANCE</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.green }}>PAID DATE</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
-                        <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `2px solid ${C.border}`, color: C.red }}>CHARGE BACK</th>
-                        <th colSpan={2} style={{ ...thBase, textAlign: 'center', borderLeft: `1px solid ${C.border}`, color: C.red }}>CB DATE</th>
-                      </tr>
+                      {(() => {
+                        const sortable = viewMode === 'all';
+                        const Sortable = ({ k, children, style }) => (
+                          <th rowSpan={2} onClick={sortable ? () => toggleSort(k) : undefined}
+                              style={{ ...thBase, textAlign: 'left', cursor: sortable ? 'pointer' : 'default', userSelect: 'none', ...style }}>
+                            {children}{sortable ? sortArrow(k) : ''}
+                          </th>
+                        );
+                        const SortableGroup = ({ k, colSpan, color, children, extraStyle }) => (
+                          <th colSpan={colSpan} onClick={sortable ? () => toggleSort(k) : undefined}
+                              style={{ ...thBase, textAlign: 'center', color, cursor: sortable ? 'pointer' : 'default', userSelect: 'none', ...extraStyle }}>
+                            {children}{sortable ? sortArrow(k) : ''}
+                          </th>
+                        );
+                        return (
+                          <tr style={{ background: C.surface }}>
+                            {sortable && <Sortable k="source" style={{ fontSize: 9 }}>SOURCE</Sortable>}
+                            <Sortable k="agent">Agent</Sortable>
+                            <Sortable k="client">Client</Sortable>
+                            <Sortable k="carrier">Carrier</Sortable>
+                            <Sortable k="product">Product</Sortable>
+                            <Sortable k="submit">Submit</Sortable>
+                            <Sortable k="effective">Effective</Sortable>
+                            <SortableGroup k="premium"        colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>PREMIUM</SortableGroup>
+                            <SortableGroup k="commission"     colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>COMMISSION</SortableGroup>
+                            <SortableGroup k="gar"            colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>GAR</SortableGroup>
+                            <SortableGroup k="carrierAdvance" colSpan={2} color={C.green}  extraStyle={{ borderLeft: `2px solid ${C.border}` }}>CARRIER ADVANCE</SortableGroup>
+                            <SortableGroup k="advanceDate"    colSpan={2} color={C.green}  extraStyle={{ borderLeft: `1px solid ${C.border}` }}>PAID DATE</SortableGroup>
+                            <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
+                            <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
+                            <SortableGroup k="chargeBack"     colSpan={2} color={C.red}    extraStyle={{ borderLeft: `2px solid ${C.border}` }}>CHARGE BACK</SortableGroup>
+                            <SortableGroup k="cbDate"         colSpan={2} color={C.red}    extraStyle={{ borderLeft: `1px solid ${C.border}` }}>CB DATE</SortableGroup>
+                          </tr>
+                        );
+                      })()}
                       <tr style={{ background: C.surface }}>
                         {['Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System','Excel','System'].map((lbl, i) => (
                           <th key={i} style={{ ...thSub, borderLeft: (i % 2 === 0) ? `2px solid ${C.border}` : `1px solid ${C.border}` }}>{lbl}</th>
@@ -293,13 +386,21 @@ export default function ComparePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rowsToShow.map((m, i) => (
+                      {rowsToShow.map((m, i) => {
+                        const primary = m.xl.agent ? m.xl : m.sys; // fall back to sys for onlySystem rows
+                        const showSource = viewMode === 'all';
+                        const srcColor = m.source === 'onlyExcel' ? C.red : m.source === 'onlySystem' ? C.yellow : C.green;
+                        const srcLabel = m.source === 'onlyExcel' ? 'Excel only' : m.source === 'onlySystem' ? 'System only' : 'Both';
+                        return (
                         <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <td style={tdBase}>{m.xl.agent}</td>
-                          <td style={{ ...tdBase, color: C.accent, fontWeight: 600 }}>{m.xl.client}</td>
-                          <td style={tdBase}>{m.xl.carrier}</td>
-                          <td style={{ ...tdBase, color: C.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.xl.product}>{m.xl.product}</td>
-                          <td style={tdBase}>{fmtDate(m.xl.date)}</td>
+                          {showSource && (
+                            <td style={{ padding: '6px 8px', fontSize: 9, fontWeight: 700, color: srcColor, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{srcLabel}</td>
+                          )}
+                          <td style={tdBase}>{primary.agent || '—'}</td>
+                          <td style={{ ...tdBase, color: C.accent, fontWeight: 600 }}>{primary.client || '—'}</td>
+                          <td style={tdBase}>{primary.carrier || '—'}</td>
+                          <td style={{ ...tdBase, color: C.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={primary.product}>{primary.product || '—'}</td>
+                          <td style={tdBase}>{fmtDate(m.xl.date || m.sys.submissionDate)}</td>
                           <td style={{ ...tdBase, color: C.muted }}>{fmtDate(m.sys.effectiveDate)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.premium)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.premium), color: C.text }}>{fmtDollar(m.sys.premium)}</td>
@@ -314,11 +415,10 @@ export default function ComparePage() {
                           {(() => {
                             const dSubmit = daysBetween(m.sys.submissionDate, m.sys.advanceDate);
                             const dEff = daysBetween(m.sys.effectiveDate, m.sys.advanceDate);
-                            const dColor = d => d == null ? C.muted : d <= 14 ? C.green : d <= 30 ? C.yellow : C.red;
                             return (
                               <>
-                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: dColor(dSubmit), fontFamily: C.mono, fontWeight: 600, fontSize: 11 }}>{dSubmit == null ? '—' : `${dSubmit}d`}</td>
-                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: dColor(dEff),    fontFamily: C.mono, fontWeight: 600, fontSize: 11 }}>{dEff == null ? '—' : `${dEff}d`}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.text, fontFamily: C.mono, fontSize: 11 }}>{dSubmit == null ? '—' : `${dSubmit}d`}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.text, fontFamily: C.mono, fontSize: 11 }}>{dEff == null ? '—' : `${dEff}d`}</td>
                               </>
                             );
                           })()}
@@ -327,7 +427,8 @@ export default function ComparePage() {
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.chargeBackDate)}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.chargeBackDate)}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
