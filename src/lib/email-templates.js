@@ -1,8 +1,20 @@
 export function buildDailySummaryEmail(summary) {
-  const { date, sales, financials, calls, agentPerf, alerts } = summary;
+  const { date, sales, financials, calls, agentPerf, alerts, baselines } = summary;
   const fmt = (n, d = 0) => n != null ? n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—';
   const fmtD = (n, d = 0) => n != null ? (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—';
   const fmtP = n => n != null ? n.toFixed(1) + '%' : '—';
+
+  // Delta chip: rendered next to a KPI value. `lower=true` inverts the "good direction" (e.g. CPA up is bad).
+  const deltaChip = (metricKey, lower = false) => {
+    const b = baselines?.company?.[metricKey];
+    if (!b || b.deltaPct == null) return '';
+    const pct = b.deltaPct * 100;
+    const goodUp = !lower;
+    const isGood = goodUp ? pct >= 0 : pct <= 0;
+    const color = Math.abs(pct) < 5 ? '#8fa3be' : (isGood ? '#4ade80' : '#f87171');
+    const arrow = pct >= 0 ? '↑' : '↓';
+    return `<span style="color:${color};font-size:10px;margin-left:6px">${arrow}${Math.abs(pct).toFixed(0)}% vs 30d</span>`;
+  };
 
   const alertColor = s => s === 'red' ? '#f87171' : s === 'yellow' ? '#facc15' : '#4ade80';
   const alertBg = s => s === 'red' ? '#2e0a0a' : s === 'yellow' ? '#2e2a0a' : '#0a2e1a';
@@ -67,19 +79,19 @@ export function buildDailySummaryEmail(summary) {
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
     <div style="flex:1;min-width:100px;background:#131b28;border:1px solid #1a2538;border-radius:8px;padding:12px;text-align:center">
       <div style="color:#8fa3be;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">CPA</div>
-      <div style="color:#f0f3f9;font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.cpa)}</div>
+      <div style="color:#f0f3f9;font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.cpa)}${deltaChip('cpa', true)}</div>
     </div>
     <div style="flex:1;min-width:100px;background:#131b28;border:1px solid #1a2538;border-radius:8px;padding:12px;text-align:center">
       <div style="color:#8fa3be;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">Gross Revenue</div>
-      <div style="color:#4ade80;font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.gar)}</div>
+      <div style="color:#4ade80;font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.gar)}${deltaChip('gar')}</div>
     </div>
     <div style="flex:1;min-width:100px;background:#131b28;border:1px solid #1a2538;border-radius:8px;padding:12px;text-align:center">
       <div style="color:#8fa3be;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">Net Revenue</div>
-      <div style="color:${financials.netRevenue >= 0 ? '#4ade80' : '#f87171'};font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.netRevenue)}</div>
+      <div style="color:${financials.netRevenue >= 0 ? '#4ade80' : '#f87171'};font-size:20px;font-weight:800;margin-top:4px">${fmtD(financials.netRevenue)}${deltaChip('netRevenue')}</div>
     </div>
     <div style="flex:1;min-width:100px;background:#131b28;border:1px solid #1a2538;border-radius:8px;padding:12px;text-align:center">
       <div style="color:#8fa3be;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">Close Rate</div>
-      <div style="color:#f0f3f9;font-size:20px;font-weight:800;margin-top:4px">${fmtP(financials.closeRate)}</div>
+      <div style="color:#f0f3f9;font-size:20px;font-weight:800;margin-top:4px">${fmtP(financials.closeRate)}${deltaChip('closeRate')}</div>
     </div>
   </div>
 
