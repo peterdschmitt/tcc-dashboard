@@ -3,7 +3,9 @@ import OpenAI from 'openai';
 import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
 import {
   buildCompanyRow, buildAgentRows, buildCampaignRows, writeSnapshots,
+  readCompanySeries, readAgentSeries, readCampaignSeries,
 } from '@/lib/snapshots';
+import { computeBaseline, buildBaselineBlock } from '@/lib/baselines';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
 const AI_CACHE_TAB = process.env.AI_CACHE_TAB || 'AI Summary Cache';
@@ -209,6 +211,54 @@ export async function GET(request) {
       }
     }
 
+    // ─── HISTORICAL BASELINES (daily mode only, single-day requests) ───
+    let baselines = { company: {}, topAgents: [], topCampaigns: [] };
+    let baselineBlock = '';
+    if (mode === 'daily' && startDate === endDate) {
+      try {
+        const asOf = startDate;
+        const companyMetrics = ['apps','placed','calls','billable','premium','gar','leadSpend','commission','netRevenue','cpa','rpc','closeRate','placementRate','billableRate','avgPremium','premCost'];
+        for (const m of companyMetrics) {
+          const series = await readCompanySeries(asOf, m);
+          baselines.company[m] = computeBaseline(series);
+        }
+
+        // Top 5 agents today by premium
+        const topAgentNames = Object.entries(byAgent)
+          .sort((a, b) => (b[1].premium || 0) - (a[1].premium || 0))
+          .slice(0, 5)
+          .map(([n]) => n);
+        const agentMetrics = ['apps','premium','gar','availPct','talkTimeSec','salesPerHour'];
+        for (const name of topAgentNames) {
+          const bl = {};
+          for (const m of agentMetrics) {
+            const s = await readAgentSeries(asOf, name, m);
+            bl[m] = computeBaseline(s);
+          }
+          baselines.topAgents.push({ agent: name, baseline: bl });
+        }
+
+        // Top 8 campaigns today by spend
+        const topCampaignCodes = Object.entries(byCampaign)
+          .sort((a, b) => (b[1].spend || 0) - (a[1].spend || 0))
+          .slice(0, 8)
+          .map(([c]) => c);
+        const campaignMetricsList = ['calls','billable','spend','sales','premium','gar','cpa','rpc','closeRate','netRevenue'];
+        for (const code of topCampaignCodes) {
+          const bl = {};
+          for (const m of campaignMetricsList) {
+            const s = await readCampaignSeries(asOf, code, m);
+            bl[m] = computeBaseline(s);
+          }
+          baselines.topCampaigns.push({ campaign: code, baseline: bl });
+        }
+
+        baselineBlock = buildBaselineBlock(baselines);
+      } catch (e) {
+        console.warn('[daily-summary] Baseline compute failed:', e.message);
+      }
+    }
+
     // ─── TABLE 1: DAILY OVERVIEW (metrics x days) ───
     const allDates = [...new Set([...calls.map(c => c.date), ...policies.map(p => p.submitDate)])].filter(Boolean).sort();
     const dailyOverview = {};
@@ -303,7 +353,8 @@ AGENTS: ${Object.entries(byAgent).map(([n, a]) => `${n}: ${a.apps} apps, $${a.pr
 PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls, ${c.billable} billable (${c.billableRate.toFixed(1)}%), $${c.spend.toFixed(0)} spend, RPC $${c.rpc.toFixed(2)}, CPA $${c.cpa.toFixed(0)}, ${c.placed || 0} sales, $${(c.premium || 0).toFixed(0)} premium, $${(c.gar || 0).toFixed(0)} GAR`).join('; ')}
 CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toFixed(0)} premium, $${c.gar.toFixed(0)} GAR, Conv ${c.conversionRate.toFixed(1)}%`).join('; ')}
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
-${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}`;
+${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}
+${baselineBlock ? '\n' + baselineBlock : ''}`;
 
     // ─── LOAD AI ANALYSIS RULES ───
     let aiRules = {};
@@ -529,6 +580,7 @@ Return ONLY a JSON object:
       alerts: allAlerts,
       narrative,
       tableSummaries,
+      baselines,
       // Table data
       dailyOverview,
       byCarrier,
