@@ -20,11 +20,24 @@ const fmtTime = sec => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-function KPI({ label, value, color }) {
+function DeltaChip({ baseline, lower = false }) {
+  if (!baseline || baseline.deltaPct == null) return null;
+  const pct = baseline.deltaPct * 100;
+  const isGood = lower ? pct <= 0 : pct >= 0;
+  const color = Math.abs(pct) < 5 ? C.muted : (isGood ? C.green : C.red);
+  const arrow = pct >= 0 ? '↑' : '↓';
+  return (
+    <span style={{ color, fontSize: 10, marginLeft: 6, fontFamily: C.sans, fontWeight: 500 }}>
+      {arrow}{Math.abs(pct).toFixed(0)}% vs 30d
+    </span>
+  );
+}
+
+function KPI({ label, value, color, chip }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', flex: '1 1 140px', minWidth: 140 }}>
       <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: color || C.text, marginTop: 4, fontFamily: C.mono }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || C.text, marginTop: 4, fontFamily: C.mono }}>{value}{chip}</div>
     </div>
   );
 }
@@ -219,18 +232,30 @@ export default function DailySummaryPage({ dateRange }) {
 
       {/* KPI Row — NO "Placed" (irrelevant for daily/weekly performance reviews) */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <KPI label="Apps Submitted" value={fmt(viewSales.total)} />
-        <KPI label="Total Calls" value={fmt(viewCalls.total)} />
-        <KPI label="Billable Calls" value={fmt(viewCalls.billable)} />
-        <KPI label="Billable Rate" value={fmtP(viewFinancials.billableRate)} />
-        <KPI label="CPA" value={fmtD(viewFinancials.cpa)} />
-        <KPI label="Gross Revenue" value={fmtD(viewFinancials.gar)} color={C.green} />
-        <KPI label="Net Revenue" value={fmtD(viewFinancials.netRevenue)} color={viewFinancials.netRevenue >= 0 ? C.green : C.red} />
-        <KPI label="Lead Spend" value={fmtD(viewFinancials.leadSpend)} color={C.yellow} />
-        <KPI label="Close Rate" value={fmtP(viewFinancials.closeRate)} />
-        <KPI label="Avg Premium" value={fmtD(viewFinancials.avgPremium)} />
-        <KPI label="Prem:Cost" value={viewFinancials.premCost > 0 ? viewFinancials.premCost.toFixed(2) + 'x' : '—'} />
-        <KPI label="RPC" value={fmtD(viewFinancials.rpc, 2)} />
+        <KPI label="Apps Submitted" value={fmt(viewSales.total)}
+             chip={<DeltaChip baseline={data.baselines?.company?.apps} />} />
+        <KPI label="Total Calls" value={fmt(viewCalls.total)}
+             chip={<DeltaChip baseline={data.baselines?.company?.calls} />} />
+        <KPI label="Billable Calls" value={fmt(viewCalls.billable)}
+             chip={<DeltaChip baseline={data.baselines?.company?.billable} />} />
+        <KPI label="Billable Rate" value={fmtP(viewFinancials.billableRate)}
+             chip={<DeltaChip baseline={data.baselines?.company?.billableRate} />} />
+        <KPI label="CPA" value={fmtD(viewFinancials.cpa)}
+             chip={<DeltaChip baseline={data.baselines?.company?.cpa} lower />} />
+        <KPI label="Gross Revenue" value={fmtD(viewFinancials.gar)} color={C.green}
+             chip={<DeltaChip baseline={data.baselines?.company?.gar} />} />
+        <KPI label="Net Revenue" value={fmtD(viewFinancials.netRevenue)} color={viewFinancials.netRevenue >= 0 ? C.green : C.red}
+             chip={<DeltaChip baseline={data.baselines?.company?.netRevenue} />} />
+        <KPI label="Lead Spend" value={fmtD(viewFinancials.leadSpend)} color={C.yellow}
+             chip={<DeltaChip baseline={data.baselines?.company?.leadSpend} lower />} />
+        <KPI label="Close Rate" value={fmtP(viewFinancials.closeRate)}
+             chip={<DeltaChip baseline={data.baselines?.company?.closeRate} />} />
+        <KPI label="Avg Premium" value={fmtD(viewFinancials.avgPremium)}
+             chip={<DeltaChip baseline={data.baselines?.company?.avgPremium} />} />
+        <KPI label="Prem:Cost" value={viewFinancials.premCost > 0 ? viewFinancials.premCost.toFixed(2) + 'x' : '—'}
+             chip={<DeltaChip baseline={data.baselines?.company?.premCost} />} />
+        <KPI label="RPC" value={fmtD(viewFinancials.rpc, 2)}
+             chip={<DeltaChip baseline={data.baselines?.company?.rpc} lower />} />
       </div>
 
       {/* ─── TABLE 1: DAILY OVERVIEW (ordered by importance, color-coded to thresholds) ─── */}
