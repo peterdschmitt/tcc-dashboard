@@ -26,39 +26,60 @@ function getYesterday() {
   return et.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
-function computeAlerts(metrics, goals, companyMeta) {
+function computeAlerts(metrics, goals, companyMeta, companyBaselines = {}) {
   const alerts = [];
   const metricDefs = [
-    { key: 'apps_submitted', label: 'Apps Submitted', actual: metrics.apps },
-    { key: 'policies_placed', label: 'Policies Placed', actual: metrics.placed },
-    { key: 'total_calls', label: 'Total Calls', actual: metrics.totalCalls },
-    { key: 'billable_calls', label: 'Billable Calls', actual: metrics.billable },
-    { key: 'billable_rate', label: 'Billable Rate', actual: metrics.billableRate, isRate: true },
-    { key: 'monthly_premium', label: 'Monthly Premium', actual: metrics.totalPremium },
-    { key: 'gross_adv_revenue', label: 'Gross Adv Revenue', actual: metrics.totalGAR },
-    { key: 'lead_spend', label: 'Lead Spend', actual: metrics.totalLeadSpend },
-    { key: 'agent_commission', label: 'Agent Commission', actual: metrics.totalComm },
-    { key: 'net_revenue', label: 'Net Revenue', actual: metrics.netRevenue },
-    { key: 'cpa', label: 'CPA', actual: metrics.cpa, isRate: true },
-    { key: 'rpc', label: 'RPC', actual: metrics.rpc, isRate: true },
-    { key: 'close_rate', label: 'Close Rate', actual: metrics.closeRate, isRate: true },
-    { key: 'placement_rate', label: 'Placement Rate', actual: metrics.placementRate, isRate: true },
-    { key: 'premium_cost_ratio', label: 'Premium:Cost', actual: metrics.premCost, isRate: true },
-    { key: 'avg_premium', label: 'Avg Premium', actual: metrics.avgPremium, isRate: true },
+    { key: 'apps_submitted',     label: 'Apps Submitted',     actual: metrics.apps,          snapKey: 'apps' },
+    { key: 'policies_placed',    label: 'Policies Placed',    actual: metrics.placed,        snapKey: 'placed' },
+    { key: 'total_calls',        label: 'Total Calls',        actual: metrics.totalCalls,    snapKey: 'calls' },
+    { key: 'billable_calls',     label: 'Billable Calls',     actual: metrics.billable,      snapKey: 'billable' },
+    { key: 'billable_rate',      label: 'Billable Rate',      actual: metrics.billableRate,  snapKey: 'billableRate', isRate: true },
+    { key: 'monthly_premium',    label: 'Monthly Premium',    actual: metrics.totalPremium,  snapKey: 'premium' },
+    { key: 'gross_adv_revenue',  label: 'Gross Adv Revenue',  actual: metrics.totalGAR,      snapKey: 'gar' },
+    { key: 'lead_spend',         label: 'Lead Spend',         actual: metrics.totalLeadSpend, snapKey: 'leadSpend' },
+    { key: 'agent_commission',   label: 'Agent Commission',   actual: metrics.totalComm,     snapKey: 'commission' },
+    { key: 'net_revenue',        label: 'Net Revenue',        actual: metrics.netRevenue,    snapKey: 'netRevenue' },
+    { key: 'cpa',                label: 'CPA',                actual: metrics.cpa,           snapKey: 'cpa',         isRate: true },
+    { key: 'rpc',                label: 'RPC',                actual: metrics.rpc,           snapKey: 'rpc',         isRate: true },
+    { key: 'close_rate',         label: 'Close Rate',         actual: metrics.closeRate,     snapKey: 'closeRate',   isRate: true },
+    { key: 'placement_rate',     label: 'Placement Rate',     actual: metrics.placementRate, snapKey: 'placementRate', isRate: true },
+    { key: 'premium_cost_ratio', label: 'Premium:Cost',       actual: metrics.premCost,      snapKey: 'premCost',    isRate: true },
+    { key: 'avg_premium',        label: 'Avg Premium',        actual: metrics.avgPremium,    snapKey: 'avgPremium',  isRate: true },
   ];
 
   for (const m of metricDefs) {
-    const goal = goals[m.key];
-    if (!goal || !m.actual) continue;
     const meta = companyMeta[m.key] || {};
     const lower = meta.lower || false;
     const yellowPct = (meta.yellow || 80) / 100;
-    const ratio = lower ? goal / m.actual : m.actual / goal;
 
-    if (ratio < yellowPct) {
-      alerts.push({ metric: m.label, actual: m.actual, goal, status: 'red', lower });
-    } else if (ratio < 1) {
-      alerts.push({ metric: m.label, actual: m.actual, goal, status: 'yellow', lower });
+    // Goal-based alert (existing behavior, now tagged with kind)
+    const goal = goals[m.key];
+    if (goal && m.actual) {
+      const ratio = lower ? goal / m.actual : m.actual / goal;
+      if (ratio < yellowPct) {
+        alerts.push({ kind: 'goal-miss', metric: m.label, actual: m.actual, goal, status: 'red', lower });
+      } else if (ratio < 1) {
+        alerts.push({ kind: 'goal-miss', metric: m.label, actual: m.actual, goal, status: 'yellow', lower });
+      }
+    }
+
+    // Historical-anomaly alert (new, independent of goal)
+    const b = companyBaselines[m.snapKey];
+    if (b && b.z != null) {
+      // For "lower is better" metrics, a high positive z (spike up) is bad; for normal metrics, a low negative z (drop) is bad.
+      const badZ = lower ? b.z : -b.z;
+      if (badZ >= 1.5 || b.worstInN) {
+        alerts.push({
+          kind: 'historical-anomaly',
+          metric: m.label,
+          actual: m.actual,
+          status: badZ >= 2.5 ? 'red' : 'yellow',
+          lower,
+          z: b.z,
+          avg30: b.avg30,
+          worstInN: b.worstInN || false,
+        });
+      }
     }
   }
 
@@ -184,15 +205,6 @@ export async function GET(request) {
       }
     });
 
-    // ─── COMPANY ALERTS ───
-    const companyAlerts = computeAlerts({
-      apps, placed: placed.length, totalCalls, billable, billableRate,
-      totalPremium, totalGAR, totalLeadSpend, totalComm, netRevenue,
-      cpa, rpc, closeRate, placementRate, premCost, avgPremium,
-    }, cg, cm);
-
-    const allAlerts = [...companyAlerts, ...agentAlerts];
-
     // ─── SNAPSHOT WRITE (daily mode only, single-day requests) ───
     if (mode === 'daily' && startDate === endDate) {
       try {
@@ -258,6 +270,15 @@ export async function GET(request) {
         console.warn('[daily-summary] Baseline compute failed:', e.message);
       }
     }
+
+    // ─── COMPANY ALERTS (after baselines so anomaly signal is available) ───
+    const companyAlerts = computeAlerts({
+      apps, placed: placed.length, totalCalls, billable, billableRate,
+      totalPremium, totalGAR, totalLeadSpend, totalComm, netRevenue,
+      cpa, rpc, closeRate, placementRate, premCost, avgPremium,
+    }, cg, cm, baselines.company);
+
+    const allAlerts = [...companyAlerts, ...agentAlerts];
 
     // ─── TABLE 1: DAILY OVERVIEW (metrics x days) ───
     const allDates = [...new Set([...calls.map(c => c.date), ...policies.map(p => p.submitDate)])].filter(Boolean).sort();
