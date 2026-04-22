@@ -107,6 +107,9 @@ function buildExportRow(m) {
     'Charge Back (Carrier Stmts)': round(m.sys?.chargeBack),
     'Charge Back Δ':               round((m.xl?.chargeBack || 0) - (m.sys?.chargeBack || 0)),
 
+    'Net Received (Tracker)':       round((m.xl?.carrierAdvance  || 0) - (m.xl?.chargeBack  || 0)),
+    'Net Received (Carrier Stmts)': round((m.sys?.carrierAdvance || 0) - (m.sys?.chargeBack || 0)),
+
     'CB Date (Tracker)':       m.xl?.chargeBackDate || '',
     'CB Date (Carrier Stmts)': m.sys?.chargeBackDate || '',
   };
@@ -151,9 +154,13 @@ function downloadXLSX(compared, excelFilename) {
     { Metric: 'Total Carrier Advance (System)', Value: round(totals.sysAdv) },
     { Metric: 'Carrier Advance Δ',              Value: round(totals.xlAdv - totals.sysAdv) },
     { Metric: '', Value: '' },
-    { Metric: 'Total Charge Back (Excel)',      Value: round(totals.xlCb) },
-    { Metric: 'Total Charge Back (System)',     Value: round(totals.sysCb) },
-    { Metric: 'Charge Back Δ',                  Value: round(totals.xlCb - totals.sysCb) },
+    { Metric: 'Total Charge Back (Tracker)',      Value: round(totals.xlCb) },
+    { Metric: 'Total Charge Back (Carrier Stmts)', Value: round(totals.sysCb) },
+    { Metric: 'Charge Back Δ',                    Value: round(totals.xlCb - totals.sysCb) },
+    { Metric: '', Value: '' },
+    { Metric: 'Net Received (Tracker)',           Value: round(totals.xlAdv  - totals.xlCb) },
+    { Metric: 'Net Received (Carrier Stmts)',     Value: round(totals.sysAdv - totals.sysCb) },
+    { Metric: 'Net Received Δ',                   Value: round((totals.xlAdv - totals.xlCb) - (totals.sysAdv - totals.sysCb)) },
   ];
 
   const wb = XLSX.utils.book_new();
@@ -358,6 +365,7 @@ export default function ComparePage() {
           case 'annlSpread':     return ((row.sys?.gar || row.xl?.gar || 0) - (row.sys?.carrierAdvance || row.xl?.carrierAdvance || 0));
           case 'advanceDate':    return p(row.xl?.advanceDate || row.sys?.advanceDate);
           case 'chargeBack':     return (row.xl?.chargeBack || row.sys?.chargeBack || 0);
+          case 'netReceived':    return (row.sys?.carrierAdvance || row.xl?.carrierAdvance || 0) - (row.sys?.chargeBack || row.xl?.chargeBack || 0);
           case 'cbDate':         return p(row.xl?.chargeBackDate || row.sys?.chargeBackDate);
           case 'source':         return p(row.source);
           default: return '';
@@ -519,6 +527,7 @@ export default function ComparePage() {
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
                             <SortableGroup k="chargeBack"     colSpan={2} color={C.red}    extraStyle={{ borderLeft: `2px solid ${C.border}`, background: 'rgba(248,113,113,0.08)' }}>CHARGE BACK</SortableGroup>
+                            <SortableGroup k="netReceived"    colSpan={2} color={C.green}  extraStyle={{ borderLeft: `2px solid ${C.border}`, background: 'rgba(74,222,128,0.10)' }}>NET RECEIVED<br/><span style={{ fontSize: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>Advance − Chargeback</span></SortableGroup>
                             <SortableGroup k="cbDate"         colSpan={2} color={C.red}    extraStyle={{ borderLeft: `1px solid ${C.border}`, background: 'rgba(248,113,113,0.08)' }}>CB DATE</SortableGroup>
                           </tr>
                         );
@@ -542,6 +551,8 @@ export default function ComparePage() {
                             { lbl:'Carrier Stmts', bg:stmtShade,  },
                             { lbl:'Tracker',       bg:cbShade,    },   // Charge Back
                             { lbl:'Carrier Stmts', bg:cbShade,    },
+                            { lbl:'Tracker',       bg:'rgba(74,222,128,0.10)' }, // Net Received
+                            { lbl:'Carrier Stmts', bg:'rgba(74,222,128,0.10)' },
                             { lbl:'Tracker',       bg:cbShade,    },   // CB Date
                             { lbl:'Carrier Stmts', bg:cbShade,    },
                           ];
@@ -583,7 +594,9 @@ export default function ComparePage() {
                             <td style={tdTotal}></td>
                             <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}`, background: 'rgba(248,113,113,0.10)', color: C.red }}>{fmtDollar(t.xlCb)}</td>
                             <td style={{ ...tdTotal, background: 'rgba(248,113,113,0.10)', color: C.red }}>{fmtDollar(t.sysCb)}</td>
-                            <td style={{ ...tdTotal, borderLeft: `1px solid ${C.border}`, background: 'rgba(248,113,113,0.10)' }}></td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}`, background: 'rgba(74,222,128,0.15)', color: (t.xlAdv  - t.xlCb)  >= 0 ? C.green : C.red }}>{fmtDollar(t.xlAdv  - t.xlCb)}</td>
+                            <td style={{ ...tdTotal, background: 'rgba(74,222,128,0.15)', color: (t.sysAdv - t.sysCb) >= 0 ? C.green : C.red }}>{fmtDollar(t.sysAdv - t.sysCb)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}`, background: 'rgba(248,113,113,0.10)' }}></td>
                             <td style={{ ...tdTotal, background: 'rgba(248,113,113,0.10)' }}></td>
                           </tr>
                         );
@@ -643,7 +656,22 @@ export default function ComparePage() {
                           })()}
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), borderLeft: `2px solid ${C.border}`, background: m.diffs.chargeBack && m.diffs.chargeBack !== 'equal' ? undefined : 'rgba(248,113,113,0.04)' }}>{m.xl.chargeBack !== 0 ? fmtDollar(m.xl.chargeBack) : '—'}</td>
                           <td style={{ ...diffCellStyle(m.diffs.chargeBack), color: C.text, background: m.diffs.chargeBack && m.diffs.chargeBack !== 'equal' ? undefined : 'rgba(248,113,113,0.04)' }}>{m.sys.chargeBack !== 0 ? fmtDollar(m.sys.chargeBack) : '—'}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap', background: 'rgba(248,113,113,0.04)' }}>{fmtDate(m.xl.chargeBackDate)}</td>
+                          {(() => {
+                            const xlNet  = (m.xl.carrierAdvance  || 0) - (m.xl.chargeBack  || 0);
+                            const sysNet = (m.sys.carrierAdvance || 0) - (m.sys.chargeBack || 0);
+                            const cell = v => ({
+                              padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, fontSize: 11,
+                              color: v > 0 ? C.green : v < 0 ? C.red : C.muted, fontWeight: 700,
+                              background: 'rgba(74,222,128,0.06)', whiteSpace: 'nowrap',
+                            });
+                            return (
+                              <>
+                                <td style={{ ...cell(xlNet),  borderLeft: `2px solid ${C.border}` }}>{(m.xl.carrierAdvance  || m.xl.chargeBack)  ? fmtDollar(xlNet)  : '—'}</td>
+                                <td style={{ ...cell(sysNet), borderLeft: `1px solid ${C.border}` }}>{(m.sys.carrierAdvance || m.sys.chargeBack) ? fmtDollar(sysNet) : '—'}</td>
+                              </>
+                            );
+                          })()}
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `2px solid ${C.border}`, whiteSpace: 'nowrap', background: 'rgba(248,113,113,0.04)' }}>{fmtDate(m.xl.chargeBackDate)}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap', background: 'rgba(248,113,113,0.04)' }}>{fmtDate(m.sys.chargeBackDate)}</td>
                         </tr>
                         );
