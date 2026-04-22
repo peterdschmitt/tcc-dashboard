@@ -701,6 +701,9 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
               });
 
               const grandTotal = summaryRow('TOTAL', Object.keys(statusMap), C.accent, false);
+              // Active - In Force is the baseline for the % column
+              const activeInForceCount = statusMap['Active - In Force']?._totals?.count || 0;
+              const pctOfActive = n => activeInForceCount > 0 ? ((n / activeInForceCount) * 100).toFixed(0) + '%' : '—';
 
               const thS = { padding: '6px 6px', fontSize: 8, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, background: C.surface, borderBottom: `1px solid ${C.border}` };
               const tdS = { padding: '4px 6px', fontSize: 9, fontFamily: C.mono };
@@ -713,6 +716,7 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
                       <tr>
                         <th style={{ ...thS, textAlign: 'left' }}>Status</th>
                         <th style={{ ...thS, textAlign: 'right' }}>#</th>
+                        <th style={{ ...thS, textAlign: 'right' }} title="This row's count as a percentage of Active - In Force policies">% of Active</th>
                         <th style={{ ...thS, textAlign: 'right' }} title="Paid / Unpaid">Paid / Unpaid</th>
                         <th style={{ ...thS, textAlign: 'right' }}>Received</th>
                         <th style={{ ...thS, textAlign: 'right' }}>Balance</th>
@@ -729,6 +733,9 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
                             {r.isCategory ? '' : (STATUS_ICONS[r.label] + ' ')}{r.label}
                           </td>
                           <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 800 : 600, color: r.isCategory ? r.color : C.text }}>{r.count}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400, color: r.label === 'Active - In Force' ? C.green : r.isCategory ? r.color : C.muted }}>
+                            {pctOfActive(r.count)}
+                          </td>
                           <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400 }}>
                             <span style={{ color: C.green }}>{r.paid}</span>
                             <span style={{ color: C.muted }}> / </span>
@@ -745,6 +752,7 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
                         <tr style={{ background: `${C.accent}15`, borderTop: `2px solid ${C.accent}` }}>
                           <td style={{ ...tdS, color: C.accent, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>Total</td>
                           <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: C.text }}>{grandTotal.count}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: C.muted }}>{pctOfActive(grandTotal.count)}</td>
                           <td style={{ ...tdS, textAlign: 'right', fontWeight: 700 }}>
                             <span style={{ color: C.green }}>{grandTotal.paid}</span>
                             <span style={{ color: C.muted }}> / </span>
