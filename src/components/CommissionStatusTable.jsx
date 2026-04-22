@@ -228,6 +228,7 @@ export default function CommissionStatusTable() {
                   <SortTh label="Clawback" field="totalClawback" align="right" />
                   <SortTh label="Net Recv" field="netReceived" align="right" />
                   <SortTh label="Balance" field="balance" align="right" />
+                  <SortTh label="Submit" field="submitDate" />
                   <SortTh label="Eff Date" field="effectiveDate" />
                   <th style={{ ...thStyle, textAlign: 'center' }}>Paid?</th>
                 </tr>
@@ -249,6 +250,7 @@ export default function CommissionStatusTable() {
                     <td style={{ ...tdRight, color: p.balance > 0 ? C.yellow : p.balance < 0 ? C.green : C.muted, fontWeight: 600 }}>
                       {fmtDollar(Math.round(p.balance))}
                     </td>
+                    <td style={{ ...tdStyle, fontFamily: C.mono, fontSize: 9 }}>{p.submitDate || '—'}</td>
                     <td style={{ ...tdStyle, fontFamily: C.mono, fontSize: 9 }}>{p.effectiveDate || '—'}</td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <span style={{ color: p.carrierPaid ? C.green : C.red, fontWeight: 700, fontSize: 11 }}>{p.carrierPaid ? '✓' : '✗'}</span>
