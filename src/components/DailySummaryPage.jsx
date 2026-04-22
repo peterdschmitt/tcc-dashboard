@@ -261,7 +261,7 @@ export default function DailySummaryPage({ dateRange }) {
       {/* ─── TABLE 1: DAILY OVERVIEW (ordered by importance, color-coded to thresholds) ─── */}
       {(viewData?.dailyOverview || data.dailyOverview) && Object.keys(viewData?.dailyOverview || data.dailyOverview || {}).length > 0 && (
         <Section title="Daily Overview">
-          {viewTS.dailyOverview && <p style={aiInsightStyle}>{viewTS.dailyOverview}</p>}
+          {typeof viewTS.dailyOverview === 'string' && viewTS.dailyOverview && <p style={aiInsightStyle}>{viewTS.dailyOverview}</p>}
           {(() => {
             const ov = viewData?.dailyOverview || data.dailyOverview;
             const dates = Object.keys(ov).sort();
@@ -337,8 +337,9 @@ export default function DailySummaryPage({ dateRange }) {
                       // For weekly total/avg comparison, scale goal accordingly
                       const goalCompare = m.isAvg ? m.goal : (m.goal ? m.goal * numDays : null);
 
-                      // Section divider row
+                      // Section divider row + optional per-section summary row
                       let divider = null;
+                      let sectionSummary = null;
                       if (m.section !== lastSection) {
                         lastSection = m.section;
                         divider = (
@@ -348,11 +349,30 @@ export default function DailySummaryPage({ dateRange }) {
                             </td>
                           </tr>
                         );
+                        const do_ = viewTS?.dailyOverview;
+                        const summaryText = do_ && typeof do_ === 'object' ? do_[m.section] : null;
+                        if (summaryText) {
+                          sectionSummary = (
+                            <tr key={m.section + '-sum'}>
+                              <td colSpan={dates.length + 3} style={{
+                                padding: '4px 14px 10px',
+                                fontSize: 11,
+                                color: C.muted,
+                                fontStyle: 'italic',
+                                lineHeight: 1.5,
+                                borderBottom: `1px solid ${C.border}22`,
+                              }}>
+                                {summaryText}
+                              </td>
+                            </tr>
+                          );
+                        }
                       }
 
                       return (
                         <React.Fragment key={m.key}>
                           {divider}
+                          {sectionSummary}
                           <tr>
                             <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>
                               {m.label}
