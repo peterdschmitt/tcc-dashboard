@@ -478,6 +478,7 @@ ANALYSIS RULES:
 - Prefer percentage deltas vs avg30 ("CPA 27% worse than 30-day avg") over raw numbers alone.
 - Be specific: name the agent or campaign, cite today's value and the baseline comparator.
 - Do NOT mention "policies placed" or "placement rate."
+- For dailyOverview, write SIX separate section summaries, each focused ONLY on the metrics named in its sub-prompt. Do NOT repeat the same fact in multiple sections. If the avg30 baseline is null for a metric, say "insufficient history" rather than inventing a comparison.
 - Return ONLY valid JSON — no markdown, no code fences, no extra text.`,
             },
             {
@@ -488,8 +489,16 @@ ${liveContext}
 
 For each section, follow the analysis rules AND answer the driving question.
 
-DAILY OVERVIEW — What made the best day(s) the best? What broke down on weak days? Correlate agent availability, talk time, billable calls, and conversion rate to sales output. Relate today's values to avg7/avg30; call out any z > 1.5 or best/worst-in-14. 3-4 sentences.
-${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Identify the best and worst days and explain WHY.')}
+DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overview table. Each is 1-3 sentences, grounded ONLY in the metrics listed for that section. Compare to avg7/avg30 when those baselines exist; say "insufficient history" when they do not.
+
+  availability: Agents Logged In, Avg Availability, Total Talk Time, Total Logged In.
+  sales: Sales per Agent, Sales (Apps), Billable Calls, Conversion Rate. Name the top-producing agent(s).
+  calls: Total Calls, Billable Rate. Compare both to 30-day averages; flag any driving campaign.
+  revenue: Premium, Gross Adv Revenue, Commission, Net Revenue. Compare each to its 30-day average.
+  cost: Lead Spend, CPA, RPC, Avg Premium. Lead Spend / CPA / RPC are lower-is-better; compare each to its 30-day average.
+  va: VA Calls, VA Transfers, VA Transfer Rate. If all three are zero, write "Virtual agent had no meaningful activity today." and nothing else.
+
+${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Be specific per section and do not repeat facts across sections.')}
 
 PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? Identify each campaign's delta vs its own avg30. A campaign producing above its norm is worth scaling; one spending above its norm with sales below its norm is bleeding. 3-4 sentences.
 ${buildRulePrompt('publishers', 'Identify which publishers drive sales vs which just drive spend. Calculate effective ROI. Flag any with high spend and zero sales.')}
@@ -506,7 +515,14 @@ ${buildRulePrompt('pipeline', 'Analyze the ratio of statuses. High declined = qu
 Return ONLY a JSON object:
 {
   "executive": "3-4 sentence executive summary focused on what drove the best results and what held us back. Be specific and actionable.",
-  "dailyOverview": "3-4 sentences answering: what drove the best day vs the worst day?",
+  "dailyOverview": {
+    "availability": "1-3 sentences on Agents Logged In, Avg Availability, Talk Time, Logged-in Time. Cite 30-day averages where available.",
+    "sales": "1-3 sentences on Sales per Agent, Apps, Billable Calls, Conversion Rate. Name the top producer.",
+    "calls": "1-3 sentences on Total Calls and Billable Rate vs 30-day averages.",
+    "revenue": "1-3 sentences on Premium, GAR, Commission, Net Revenue each vs its 30-day average.",
+    "cost": "1-3 sentences on Lead Spend, CPA, RPC, Avg Premium each vs its 30-day average.",
+    "va": "1-2 sentences on VA activity, or 'Virtual agent had no meaningful activity today.' if all three VA metrics are zero."
+  },
   "publishers": "3-4 sentences on publisher ROI — who produces vs who burns cash.",
   "carriers": "2-3 sentences on carrier economics and conversion.",
   "agents": "3-4 sentences on agent productivity — who converts and why.",
@@ -522,8 +538,20 @@ Return ONLY a JSON object:
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             narrative = parsed.executive || '';
+            // dailyOverview can be an object (new format) or a string (legacy / model noncompliance)
+            let dailyOverview = parsed.dailyOverview;
+            if (dailyOverview && typeof dailyOverview === 'object') {
+              const allowedKeys = ['availability', 'sales', 'calls', 'revenue', 'cost', 'va'];
+              const cleaned = {};
+              for (const k of allowedKeys) {
+                if (typeof dailyOverview[k] === 'string') cleaned[k] = dailyOverview[k];
+              }
+              dailyOverview = cleaned;
+            } else if (typeof dailyOverview !== 'string') {
+              dailyOverview = '';
+            }
             tableSummaries = {
-              dailyOverview: parsed.dailyOverview || '',
+              dailyOverview,
               publishers: parsed.publishers || '',
               carriers: parsed.carriers || '',
               agents: parsed.agents || '',
