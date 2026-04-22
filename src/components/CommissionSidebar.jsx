@@ -331,6 +331,28 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
     return { recvDelta, recvPct, appsDelta, appsPct, balDelta, balPct };
   }, [policies]);
 
+  // Per-status week-over-week: how many new apps landed in each status this week vs last week
+  const wowByStatus = useMemo(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const thisMonday = new Date(now); thisMonday.setDate(now.getDate() + mondayOffset); thisMonday.setHours(0, 0, 0, 0);
+    const lastMonday = new Date(thisMonday); lastMonday.setDate(thisMonday.getDate() - 7);
+    const thisSunday = new Date(thisMonday); thisSunday.setDate(thisMonday.getDate() + 6); thisSunday.setHours(23, 59, 59, 999);
+    const lastSunday = new Date(thisMonday); lastSunday.setDate(thisMonday.getDate() - 1); lastSunday.setHours(23, 59, 59, 999);
+
+    const out = {};
+    for (const p of policies) {
+      const s = normalizeStatusKey(p.status || 'Unknown');
+      if (!out[s]) out[s] = { thisWeek: 0, lastWeek: 0 };
+      const sd = parseDate(p.submitDate);
+      if (!sd) continue;
+      if (sd >= thisMonday && sd <= thisSunday) out[s].thisWeek++;
+      else if (sd >= lastMonday && sd <= lastSunday) out[s].lastWeek++;
+    }
+    return out;
+  }, [policies]);
+
   if (!open) return null;
 
   const { byCarrier, byStatus, totals } = grouped;
@@ -640,28 +662,106 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
 
         {!loading && policies.length > 0 && !drillDown && (
           <>
-            {/* Pie Charts */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, color: C.accent }}>Policies by Status</div>
-                <DonutChart slices={pieSlices} centerTop={String(totals.count)} centerBottom="POLICIES" />
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4, marginTop: 3, fontSize: 8.5 }}>
-                  {Object.entries(pieCounts).filter(([, v]) => v > 0).map(([label, count]) => {
-                    const colors = { Active: C.green, 'No Comm': C.cyan, Issued: C.purple, Pending: C.yellow, Canceled: C.red, Declined: C.orange, Other: C.gray };
-                    return <span key={label}><span style={{ color: colors[label] }}>●</span> {count} {label}</span>;
-                  })}
+            {/* Status Summary Table (replaces the two donut charts) */}
+            {(() => {
+              const CATEGORIES = [
+                { key: 'performing', label: 'Performing', color: C.green,
+                  statuses: ['Active - In Force', 'Active - No commission paid yet', 'Active - Past Due', 'Issued, Not yet Active'] },
+                { key: 'unknown', label: 'Unknown', color: C.yellow,
+                  statuses: ['Pending - Requirements Missing', 'Pending - Requirements MIssing', 'Pending - Agent State Appt', 'Initial Pay Failure', 'Unknown', 'not in system yet', '(No Status)'] },
+                { key: 'canceled', label: 'Canceled', color: C.red,
+                  statuses: ['Canceled', 'Cancelled', 'Declined', 'Lapsed'] },
+              ];
+
+              const statusMap = byStatus;
+              const summaryRow = (label, statuses, color, sub = false) => {
+                const stData = statuses.filter(s => statusMap[s]).map(s => statusMap[s]);
+                if (stData.length === 0) return null;
+                const count = stData.reduce((a, d) => a + d._totals.count, 0);
+                const paid = stData.reduce((a, d) => a + d._totals.paid, 0);
+                const recv = stData.reduce((a, d) => a + d._totals.received, 0);
+                const bal = stData.reduce((a, d) => a + d._totals.balance, 0);
+                const deltaThis = statuses.reduce((a, s) => a + (wowByStatus[s]?.thisWeek || 0), 0);
+                const deltaLast = statuses.reduce((a, s) => a + (wowByStatus[s]?.lastWeek || 0), 0);
+                const delta = deltaThis - deltaLast;
+                return { label, count, paid, unpaid: count - paid, recv, bal, delta, color, sub };
+              };
+
+              const rows = [];
+              CATEGORIES.forEach(cat => {
+                // Header row for category
+                const head = summaryRow(cat.label, cat.statuses, cat.color, false);
+                if (!head) return;
+                rows.push({ ...head, isCategory: true });
+                // Per-status sub-rows
+                cat.statuses.forEach(s => {
+                  const sub = summaryRow(s, [s], STATUS_COLORS[s] || cat.color, true);
+                  if (sub) rows.push(sub);
+                });
+              });
+
+              const grandTotal = summaryRow('TOTAL', Object.keys(statusMap), C.accent, false);
+
+              const thS = { padding: '6px 6px', fontSize: 8, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, background: C.surface, borderBottom: `1px solid ${C.border}` };
+              const tdS = { padding: '4px 6px', fontSize: 9, fontFamily: C.mono };
+
+              return (
+                <div style={{ marginBottom: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, overflow: 'hidden' }}>
+                  <div style={{ padding: '7px 8px', background: C.surface, borderBottom: `1px solid ${C.border}`, fontSize: 9, fontWeight: 700, color: C.accent, textTransform: 'uppercase', letterSpacing: 1 }}>Book Health</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thS, textAlign: 'left' }}>Status</th>
+                        <th style={{ ...thS, textAlign: 'right' }}>#</th>
+                        <th style={{ ...thS, textAlign: 'right' }} title="Paid / Unpaid">Paid / Unpaid</th>
+                        <th style={{ ...thS, textAlign: 'right' }}>Received</th>
+                        <th style={{ ...thS, textAlign: 'right' }}>Balance</th>
+                        <th style={{ ...thS, textAlign: 'right' }} title="New apps this week vs last week (by submission date)">Δ WoW</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} style={{
+                          background: r.isCategory ? `${r.color}10` : 'transparent',
+                          borderTop: r.isCategory ? `2px solid ${r.color}` : `1px solid ${C.border}22`,
+                        }}>
+                          <td style={{ ...tdS, color: r.isCategory ? r.color : C.text, fontWeight: r.isCategory ? 800 : 400, paddingLeft: r.sub ? 14 : 6, textTransform: r.isCategory ? 'uppercase' : 'none', letterSpacing: r.isCategory ? 1 : 0, fontSize: r.isCategory ? 10 : 9 }}>
+                            {r.isCategory ? '' : (STATUS_ICONS[r.label] + ' ')}{r.label}
+                          </td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 800 : 600, color: r.isCategory ? r.color : C.text }}>{r.count}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400 }}>
+                            <span style={{ color: C.green }}>{r.paid}</span>
+                            <span style={{ color: C.muted }}> / </span>
+                            <span style={{ color: C.red }}>{r.unpaid}</span>
+                          </td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400, color: r.recv > 0 ? C.green : r.recv < 0 ? C.red : C.muted }}>{fmtDollar(r.recv)}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400, color: r.bal > 0 ? C.yellow : r.bal < 0 ? C.red : C.muted }}>{fmtDollar(r.bal)}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: r.isCategory ? 700 : 400, color: r.delta > 0 ? C.green : r.delta < 0 ? C.red : C.muted }}>
+                            {r.delta === 0 ? '—' : (r.delta > 0 ? '+' : '') + r.delta}
+                          </td>
+                        </tr>
+                      ))}
+                      {grandTotal && (
+                        <tr style={{ background: `${C.accent}15`, borderTop: `2px solid ${C.accent}` }}>
+                          <td style={{ ...tdS, color: C.accent, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>Total</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: C.text }}>{grandTotal.count}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 700 }}>
+                            <span style={{ color: C.green }}>{grandTotal.paid}</span>
+                            <span style={{ color: C.muted }}> / </span>
+                            <span style={{ color: C.red }}>{grandTotal.unpaid}</span>
+                          </td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: C.green }}>{fmtDollar(grandTotal.recv)}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: C.yellow }}>{fmtDollar(grandTotal.bal)}</td>
+                          <td style={{ ...tdS, textAlign: 'right', fontWeight: 800, color: grandTotal.delta > 0 ? C.green : grandTotal.delta < 0 ? C.red : C.muted }}>
+                            {grandTotal.delta === 0 ? '—' : (grandTotal.delta > 0 ? '+' : '') + grandTotal.delta}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, color: C.accent }}>Commission $</div>
-                <DonutChart slices={dollarSlices} centerTop={fmtDollar(totals.expected)} centerBottom="EXPECTED" />
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4, marginTop: 3, fontSize: 8.5 }}>
-                  <span><span style={{ color: C.green }}>●</span> {fmtDollar(totals.received)} Recv</span>
-                  <span><span style={{ color: C.red }}>●</span> {fmtDollar(totals.clawback)} Clawback</span>
-                  <span><span style={{ color: C.yellow }}>●</span> {fmtDollar(totals.balance)} Owed</span>
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* WoW */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
