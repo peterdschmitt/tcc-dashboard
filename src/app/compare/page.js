@@ -261,6 +261,8 @@ export default function ComparePage() {
         // System side maps: carrierAdvance stays; chargeBack stays. GAR uses gar. netRevenue = carrierAdvance - chargeBack
         const sys = {
           submissionDate: m.submissionDate, effectiveDate: m.effectiveDate,
+          agent: m.agent, client: m.client, carrier: m.carrier, product: m.product,
+          status: m.status || '',
           premium: m.premium, commission: m.commission, gar: m.gar,
           carrierAdvance: m.carrierAdvance, chargeBack: m.chargeBack,
           advanceDate: m.advanceDate, chargeBackDate: m.chargeBackDate,
@@ -304,6 +306,7 @@ export default function ComparePage() {
         sys: {
           submissionDate: r.submissionDate, effectiveDate: r.effectiveDate,
           agent: r.agent, client: r.client, carrier: r.carrier, product: r.product,
+          status: r.status || '',
           premium: r.premium, commission: r.commission, gar: r.gar,
           carrierAdvance: r.carrierAdvance, chargeBack: r.chargeBack,
           advanceDate: r.advanceDate, chargeBackDate: r.chargeBackDate, netRevenue: r.netReceived,
@@ -343,6 +346,7 @@ export default function ComparePage() {
         switch (key) {
           case 'agent':          return p(row.xl?.agent || row.sys?.agent);
           case 'client':         return p(row.xl?.client || row.sys?.client);
+          case 'status':         return p(row.sys?.status || row.xl?.status);
           case 'carrier':        return p(row.xl?.carrier || row.sys?.carrier);
           case 'product':        return p(row.xl?.product || row.sys?.product);
           case 'submit':         return p(row.xl?.date || row.sys?.submissionDate);
@@ -501,6 +505,7 @@ export default function ComparePage() {
                             {sortable && <Sortable k="source" style={{ fontSize: 9 }}>SOURCE</Sortable>}
                             <Sortable k="agent">Agent</Sortable>
                             <Sortable k="client">Client</Sortable>
+                            <Sortable k="status">Status</Sortable>
                             <Sortable k="carrier">Carrier</Sortable>
                             <Sortable k="product">Product</Sortable>
                             <Sortable k="submit">Submit</Sortable>
@@ -508,32 +513,81 @@ export default function ComparePage() {
                             <SortableGroup k="premium"        colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>PREMIUM</SortableGroup>
                             <SortableGroup k="commission"     colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>COMMISSION</SortableGroup>
                             <SortableGroup k="gar"            colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>GAR</SortableGroup>
-                            <SortableGroup k="carrierAdvance" colSpan={2} color={C.green}  extraStyle={{ borderLeft: `2px solid ${C.border}` }}>CARRIER ADVANCE</SortableGroup>
+                            <SortableGroup k="carrierAdvance" colSpan={2} color={C.green}  extraStyle={{ borderLeft: `2px solid ${C.border}`, background: 'rgba(74,222,128,0.08)' }}>CARRIER ADVANCE</SortableGroup>
                             <SortableGroup k="annlSpread"     colSpan={2} color={C.accent} extraStyle={{ borderLeft: `2px solid ${C.border}` }}>ANNL SPREAD<br/><span style={{ fontSize: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>GAR − Advance</span></SortableGroup>
-                            <SortableGroup k="advanceDate"    colSpan={2} color={C.green}  extraStyle={{ borderLeft: `1px solid ${C.border}` }}>PAID DATE</SortableGroup>
+                            <SortableGroup k="advanceDate"    colSpan={2} color={C.green}  extraStyle={{ borderLeft: `1px solid ${C.border}`, background: 'rgba(74,222,128,0.08)' }}>PAID DATE</SortableGroup>
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from submission date to system paid date">DAYS<br/>Submit→Paid</th>
                             <th rowSpan={2} style={{ ...thBase, textAlign: 'right', borderLeft: `1px solid ${C.border}`, color: C.accent, fontSize: 9 }} title="Days from effective date to system paid date">DAYS<br/>Eff→Paid</th>
-                            <SortableGroup k="chargeBack"     colSpan={2} color={C.red}    extraStyle={{ borderLeft: `2px solid ${C.border}` }}>CHARGE BACK</SortableGroup>
-                            <SortableGroup k="cbDate"         colSpan={2} color={C.red}    extraStyle={{ borderLeft: `1px solid ${C.border}` }}>CB DATE</SortableGroup>
+                            <SortableGroup k="chargeBack"     colSpan={2} color={C.red}    extraStyle={{ borderLeft: `2px solid ${C.border}`, background: 'rgba(248,113,113,0.08)' }}>CHARGE BACK</SortableGroup>
+                            <SortableGroup k="cbDate"         colSpan={2} color={C.red}    extraStyle={{ borderLeft: `1px solid ${C.border}`, background: 'rgba(248,113,113,0.08)' }}>CB DATE</SortableGroup>
                           </tr>
                         );
                       })()}
                       <tr style={{ background: C.surface }}>
-                        {[
-                          'Tracker','TCC Sales',     // Premium (from sales tracker)
-                          'Tracker','TCC Sales',     // Commission
-                          'Tracker','TCC Sales',     // GAR
-                          'Tracker','Carrier Stmts', // Carrier Advance — from ledger
-                          'Tracker','TCC',           // AnnL Spread (= GAR - Advance, computed each side)
-                          'Tracker','Carrier Stmts', // Paid Date — from ledger
-                          'Tracker','Carrier Stmts', // Charge Back — from ledger
-                          'Tracker','Carrier Stmts', // CB Date — from ledger
-                        ].map((lbl, i) => (
-                          <th key={i} style={{ ...thSub, borderLeft: (i % 2 === 0) ? `2px solid ${C.border}` : `1px solid ${C.border}` }}>{lbl}</th>
-                        ))}
+                        {(() => {
+                          const stmtShade = 'rgba(74,222,128,0.06)';   // green-tinted — Carrier Advance / Paid Date
+                          const cbShade   = 'rgba(248,113,113,0.06)';  // red-tinted — Charge Back / CB Date
+                          const subs = [
+                            { lbl:'Tracker',       bg:null,       },   // Premium
+                            { lbl:'TCC Sales',     bg:null,       },
+                            { lbl:'Tracker',       bg:null,       },   // Commission
+                            { lbl:'TCC Sales',     bg:null,       },
+                            { lbl:'Tracker',       bg:null,       },   // GAR
+                            { lbl:'TCC Sales',     bg:null,       },
+                            { lbl:'Tracker',       bg:stmtShade,  },   // Carrier Advance
+                            { lbl:'Carrier Stmts', bg:stmtShade,  },
+                            { lbl:'Tracker',       bg:null,       },   // AnnL Spread
+                            { lbl:'TCC',           bg:null,       },
+                            { lbl:'Tracker',       bg:stmtShade,  },   // Paid Date
+                            { lbl:'Carrier Stmts', bg:stmtShade,  },
+                            { lbl:'Tracker',       bg:cbShade,    },   // Charge Back
+                            { lbl:'Carrier Stmts', bg:cbShade,    },
+                            { lbl:'Tracker',       bg:cbShade,    },   // CB Date
+                            { lbl:'Carrier Stmts', bg:cbShade,    },
+                          ];
+                          return subs.map((s, i) => (
+                            <th key={i} style={{ ...thSub, borderLeft: (i % 2 === 0) ? `2px solid ${C.border}` : `1px solid ${C.border}`, background: s.bg || C.surface }}>{s.lbl}</th>
+                          ));
+                        })()}
                       </tr>
                     </thead>
                     <tbody>
+                      {(() => {
+                        const t = rowsToShow.reduce((a, m) => ({
+                          xlPrem: a.xlPrem + (m.xl?.premium || 0),          sysPrem: a.sysPrem + (m.sys?.premium || 0),
+                          xlComm: a.xlComm + (m.xl?.commission || 0),       sysComm: a.sysComm + (m.sys?.commission || 0),
+                          xlGar:  a.xlGar  + (m.xl?.gar || 0),              sysGar:  a.sysGar  + (m.sys?.gar || 0),
+                          xlAdv:  a.xlAdv  + (m.xl?.carrierAdvance || 0),   sysAdv:  a.sysAdv  + (m.sys?.carrierAdvance || 0),
+                          xlCb:   a.xlCb   + (m.xl?.chargeBack || 0),       sysCb:   a.sysCb   + (m.sys?.chargeBack || 0),
+                        }), { xlPrem:0, sysPrem:0, xlComm:0, sysComm:0, xlGar:0, sysGar:0, xlAdv:0, sysAdv:0, xlCb:0, sysCb:0 });
+                        const tdTotal = { padding: '8px 10px', textAlign: 'right', fontFamily: C.mono, fontSize: 11, fontWeight: 800, color: C.accent, whiteSpace: 'nowrap', borderBottom: `2px solid ${C.accent}`, background: 'rgba(91,159,255,0.07)' };
+                        const skipCols = viewMode === 'all' ? 8 : 7; // Source + Agent + Client + Status + Carrier + Product + Submit + Effective
+                        return (
+                          <tr>
+                            <td colSpan={skipCols} style={{ padding: '8px 10px', fontSize: 10, fontWeight: 800, color: C.accent, textTransform: 'uppercase', letterSpacing: 1.2, borderBottom: `2px solid ${C.accent}`, background: 'rgba(91,159,255,0.07)' }}>
+                              TOTALS ({rowsToShow.length} {rowsToShow.length === 1 ? 'row' : 'rows'})
+                            </td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}` }}>{fmtDollar(t.xlPrem)}</td>
+                            <td style={tdTotal}>{fmtDollar(t.sysPrem)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}` }}>{fmtDollar(t.xlComm)}</td>
+                            <td style={tdTotal}>{fmtDollar(t.sysComm)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}` }}>{fmtDollar(t.xlGar, 0)}</td>
+                            <td style={tdTotal}>{fmtDollar(t.sysGar, 0)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}`, background: 'rgba(74,222,128,0.10)', color: C.green }}>{fmtDollar(t.xlAdv)}</td>
+                            <td style={{ ...tdTotal, background: 'rgba(74,222,128,0.10)', color: C.green }}>{fmtDollar(t.sysAdv)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}` }}>{fmtDollar(t.xlGar - t.xlAdv, 0)}</td>
+                            <td style={tdTotal}>{fmtDollar(t.sysGar - t.sysAdv, 0)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `1px solid ${C.border}`, background: 'rgba(74,222,128,0.10)' }}></td>
+                            <td style={{ ...tdTotal, background: 'rgba(74,222,128,0.10)' }}></td>
+                            <td style={{ ...tdTotal, borderLeft: `1px solid ${C.border}` }}></td>
+                            <td style={tdTotal}></td>
+                            <td style={{ ...tdTotal, borderLeft: `2px solid ${C.border}`, background: 'rgba(248,113,113,0.10)', color: C.red }}>{fmtDollar(t.xlCb)}</td>
+                            <td style={{ ...tdTotal, background: 'rgba(248,113,113,0.10)', color: C.red }}>{fmtDollar(t.sysCb)}</td>
+                            <td style={{ ...tdTotal, borderLeft: `1px solid ${C.border}`, background: 'rgba(248,113,113,0.10)' }}></td>
+                            <td style={{ ...tdTotal, background: 'rgba(248,113,113,0.10)' }}></td>
+                          </tr>
+                        );
+                      })()}
                       {rowsToShow.map((m, i) => {
                         const primary = m.xl.agent ? m.xl : m.sys; // fall back to sys for onlySystem rows
                         const showSource = viewMode === 'all';
@@ -548,6 +602,7 @@ export default function ComparePage() {
                           )}
                           <td style={tdBase}>{primary.agent || '—'}</td>
                           <td style={{ ...tdBase, color: C.accent, fontWeight: 600 }}>{primary.client || '—'}</td>
+                          <td style={{ ...tdBase, color: C.muted, fontSize: 10 }} title={m.sys?.status || ''}>{(m.sys?.status || m.xl?.status || '') || '—'}</td>
                           <td style={tdBase}>{primary.carrier || '—'}</td>
                           <td style={{ ...tdBase, color: C.muted, fontSize: 10, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={primary.product}>{primary.product || '—'}</td>
                           <td style={tdBase}>{fmtDate(m.xl.date || m.sys.submissionDate)}</td>
@@ -558,8 +613,8 @@ export default function ComparePage() {
                           <td style={{ ...diffCellStyle(m.diffs.commission), color: C.text }}>{fmtDollar(m.sys.commission)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.gar), borderLeft: `2px solid ${C.border}` }}>{fmtDollar(m.xl.gar, 0)}</td>
                           <td style={{ ...diffCellStyle(m.diffs.gar), color: C.text }}>{fmtDollar(m.sys.gar, 0)}</td>
-                          <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), borderLeft: `2px solid ${C.border}` }}>{m.xl.carrierAdvance > 0 ? fmtDollar(m.xl.carrierAdvance) : '—'}</td>
-                          <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), color: C.text }}>{m.sys.carrierAdvance > 0 ? fmtDollar(m.sys.carrierAdvance) : '—'}</td>
+                          <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), borderLeft: `2px solid ${C.border}`, background: m.diffs.carrierAdvance && m.diffs.carrierAdvance !== 'equal' ? undefined : 'rgba(74,222,128,0.04)' }}>{m.xl.carrierAdvance > 0 ? fmtDollar(m.xl.carrierAdvance) : '—'}</td>
+                          <td style={{ ...diffCellStyle(m.diffs.carrierAdvance), color: C.text, background: m.diffs.carrierAdvance && m.diffs.carrierAdvance !== 'equal' ? undefined : 'rgba(74,222,128,0.04)' }}>{m.sys.carrierAdvance > 0 ? fmtDollar(m.sys.carrierAdvance) : '—'}</td>
                           {(() => {
                             const xlSpread  = (m.xl.gar || 0)  - (m.xl.carrierAdvance  || 0);
                             const sysSpread = (m.sys.gar || 0) - (m.sys.carrierAdvance || 0);
@@ -574,8 +629,8 @@ export default function ComparePage() {
                               </>
                             );
                           })()}
-                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.advanceDate)}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.advanceDate)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap', background: 'rgba(74,222,128,0.04)' }}>{fmtDate(m.xl.advanceDate)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap', background: 'rgba(74,222,128,0.04)' }}>{fmtDate(m.sys.advanceDate)}</td>
                           {(() => {
                             const dSubmit = daysBetween(m.sys.submissionDate, m.sys.advanceDate);
                             const dEff = daysBetween(m.sys.effectiveDate, m.sys.advanceDate);
@@ -586,10 +641,10 @@ export default function ComparePage() {
                               </>
                             );
                           })()}
-                          <td style={{ ...diffCellStyle(m.diffs.chargeBack), borderLeft: `2px solid ${C.border}` }}>{m.xl.chargeBack !== 0 ? fmtDollar(m.xl.chargeBack) : '—'}</td>
-                          <td style={{ ...diffCellStyle(m.diffs.chargeBack), color: C.text }}>{m.sys.chargeBack !== 0 ? fmtDollar(m.sys.chargeBack) : '—'}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{fmtDate(m.xl.chargeBackDate)}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap' }}>{fmtDate(m.sys.chargeBackDate)}</td>
+                          <td style={{ ...diffCellStyle(m.diffs.chargeBack), borderLeft: `2px solid ${C.border}`, background: m.diffs.chargeBack && m.diffs.chargeBack !== 'equal' ? undefined : 'rgba(248,113,113,0.04)' }}>{m.xl.chargeBack !== 0 ? fmtDollar(m.xl.chargeBack) : '—'}</td>
+                          <td style={{ ...diffCellStyle(m.diffs.chargeBack), color: C.text, background: m.diffs.chargeBack && m.diffs.chargeBack !== 'equal' ? undefined : 'rgba(248,113,113,0.04)' }}>{m.sys.chargeBack !== 0 ? fmtDollar(m.sys.chargeBack) : '—'}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, borderLeft: `1px solid ${C.border}`, whiteSpace: 'nowrap', background: 'rgba(248,113,113,0.04)' }}>{fmtDate(m.xl.chargeBackDate)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: C.muted, fontSize: 10, whiteSpace: 'nowrap', background: 'rgba(248,113,113,0.04)' }}>{fmtDate(m.sys.chargeBackDate)}</td>
                         </tr>
                         );
                       })}

@@ -111,6 +111,7 @@ export async function GET(request) {
         leadSource: (sr['Lead Source'] || '').trim(),
         carrier,
         product,
+        status: (sr['Policy Status'] || sr['Placed?'] || '').trim(),
         isSalaried,
         isAsEarned,
         advanceMonths,
