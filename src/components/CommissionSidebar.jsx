@@ -463,9 +463,14 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
         statuses: ['Pending - Requirements Missing', 'Pending - Requirements MIssing', 'Pending - Agent State Appt', 'Initial Pay Failure', 'Unknown', 'not in system yet', '(No Status)'],
       },
       {
-        key: 'canceled', label: 'Canceled / Lost', color: C.red,
-        desc: 'Will not pay or already clawed back',
-        statuses: ['Canceled', 'Cancelled', 'Declined', 'Lapsed'],
+        key: 'canceled', label: 'Canceled / Lapsed', color: C.red,
+        desc: 'Was active, then canceled — often triggers chargebacks',
+        statuses: ['Canceled', 'Cancelled', 'Lapsed'],
+      },
+      {
+        key: 'declined', label: 'Declined', color: C.orange,
+        desc: 'Carrier rejected — never took effect, no payout',
+        statuses: ['Declined'],
       },
     ];
 
@@ -669,8 +674,10 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
                   statuses: ['Active - In Force', 'Active - No commission paid yet', 'Active - Past Due', 'Issued, Not yet Active'] },
                 { key: 'unknown', label: 'Unknown', color: C.yellow,
                   statuses: ['Pending - Requirements Missing', 'Pending - Requirements MIssing', 'Pending - Agent State Appt', 'Initial Pay Failure', 'Unknown', 'not in system yet', '(No Status)'] },
-                { key: 'canceled', label: 'Canceled', color: C.red,
-                  statuses: ['Canceled', 'Cancelled', 'Declined', 'Lapsed'] },
+                { key: 'canceled', label: 'Canceled / Lapsed', color: C.red,
+                  statuses: ['Canceled', 'Cancelled', 'Lapsed'] },
+                { key: 'declined', label: 'Declined', color: C.orange,
+                  statuses: ['Declined'] },
               ];
 
               const statusMap = byStatus;
