@@ -472,10 +472,11 @@ Sales per Agent goal: 2.5/day. Commission goal: 30% of GAR.
 
 ANALYSIS RULES:
 - Do NOT just restate numbers. Identify CAUSES and CORRELATIONS.
-- When a day had high sales, explain what was different (more agents? better availability? specific publisher producing? specific carrier converting?).
-- When a day was weak, explain what broke down (low availability? expensive leads with no conversions? specific publisher underperforming?).
-- Compare the best vs worst and explain the gap.
-- Be specific: cite actual numbers AND goals when relevant.
+- Use the COMPANY/AGENT/CAMPAIGN BASELINES block: always compare today to avg7/avg30, call out z-scores, and flag "best/worst in 14" events.
+- When a day had high sales, explain what was different using the baseline deltas (more agents available vs their 30-day norm? a campaign spiked conversion vs its avg30?).
+- When a day was weak, explain what broke down in baseline terms (which agent's availability dropped vs their norm; which campaign went from producing to burning cash).
+- Prefer percentage deltas vs avg30 ("CPA 27% worse than 30-day avg") over raw numbers alone.
+- Be specific: name the agent or campaign, cite today's value and the baseline comparator.
 - Do NOT mention "policies placed" or "placement rate."
 - Return ONLY valid JSON — no markdown, no code fences, no extra text.`,
             },
@@ -487,16 +488,16 @@ ${liveContext}
 
 For each section, follow the analysis rules AND answer the driving question.
 
-DAILY OVERVIEW — What made the best day(s) the best? What broke down on weak days? Correlate agent availability, talk time, billable calls, and conversion rate to sales output. 3-4 sentences.
+DAILY OVERVIEW — What made the best day(s) the best? What broke down on weak days? Correlate agent availability, talk time, billable calls, and conversion rate to sales output. Relate today's values to avg7/avg30; call out any z > 1.5 or best/worst-in-14. 3-4 sentences.
 ${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Identify the best and worst days and explain WHY.')}
 
-PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? 3-4 sentences.
+PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? Identify each campaign's delta vs its own avg30. A campaign producing above its norm is worth scaling; one spending above its norm with sales below its norm is bleeding. 3-4 sentences.
 ${buildRulePrompt('publishers', 'Identify which publishers drive sales vs which just drive spend. Calculate effective ROI. Flag any with high spend and zero sales.')}
 
 CARRIER BREAKDOWN — Which carriers convert best? Which generate the most GAR per sale? Are we leaning on the right carriers? 2-3 sentences.
 ${buildRulePrompt('carriers', 'Identify which carriers produce the best economics (highest GAR, best conversion). Flag carriers with poor conversion rates.')}
 
-AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? 3-4 sentences.
+AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? For each top agent, compare today's apps/premium/availPct to their avg30. Flag agents having a materially worse day than their own baseline. 3-4 sentences.
 ${buildRulePrompt('agents', 'Rank agents by productivity (sales per hour available). Correlate talk time and availability to output. Flag agents with high availability but low sales.')}
 
 POLICY STATUS PIPELINE — What does the status mix tell us about lead quality and agent effectiveness? 2-3 sentences.
