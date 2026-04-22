@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
+import {
+  buildCompanyRow, buildAgentRows, buildCampaignRows, writeSnapshots,
+} from '@/lib/snapshots';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
 const AI_CACHE_TAB = process.env.AI_CACHE_TAB || 'AI Summary Cache';
@@ -187,6 +190,24 @@ export async function GET(request) {
     }, cg, cm);
 
     const allAlerts = [...companyAlerts, ...agentAlerts];
+
+    // ─── SNAPSHOT WRITE (daily mode only, single-day requests) ───
+    if (mode === 'daily' && startDate === endDate) {
+      try {
+        const metricsForSnap = {
+          apps, placed: placed.length, totalCalls, billable, billableRate,
+          totalPremium, totalGAR, totalLeadSpend, totalComm, netRevenue,
+          cpa, rpc, closeRate, placementRate, premCost, avgPremium,
+        };
+        const companyRow = buildCompanyRow(startDate, metricsForSnap);
+        const agentRows = buildAgentRows(startDate, byAgent, agentPerf);
+        const campaignRows = buildCampaignRows(startDate, byCampaign);
+        await writeSnapshots(startDate, companyRow, agentRows, campaignRows);
+        console.log(`[daily-summary] Wrote snapshots for ${startDate}`);
+      } catch (e) {
+        console.warn('[daily-summary] Snapshot write failed:', e.message);
+      }
+    }
 
     // ─── TABLE 1: DAILY OVERVIEW (metrics x days) ───
     const allDates = [...new Set([...calls.map(c => c.date), ...policies.map(p => p.submitDate)])].filter(Boolean).sort();
