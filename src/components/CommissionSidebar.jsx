@@ -207,6 +207,38 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
   const [groupBy, setGroupBy] = useState('overview'); // 'overview' | 'carrier' | 'status'
   const [drillDown, setDrillDown] = useState(null); // { title, policies }
 
+  // Resizable sidebar width (persisted in localStorage)
+  const [width, setWidth] = useState(520);
+  const [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = parseInt(window.localStorage.getItem('commissionSidebarWidth') || '0', 10);
+      if (saved && saved >= 320 && saved <= 1400) setWidth(saved);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e) => {
+      // Right-anchored panel: width = viewport - mouseX
+      const w = Math.max(320, Math.min(window.innerWidth - 80, window.innerWidth - e.clientX));
+      setWidth(w);
+    };
+    const onUp = () => {
+      setResizing(false);
+      try { window.localStorage.setItem('commissionSidebarWidth', String(width)); } catch {}
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing, width]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -615,11 +647,26 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, width: 520, height: '100vh', zIndex: 60,
+      position: 'fixed', top: 0, right: 0, width, height: '100vh', zIndex: 60,
       background: C.bg, borderLeft: `1px solid ${C.border}`, overflowY: 'auto',
-      transition: 'transform 0.2s ease', transform: open ? 'translateX(0)' : 'translateX(100%)',
+      transition: resizing ? 'none' : 'transform 0.2s ease',
+      transform: open ? 'translateX(0)' : 'translateX(100%)',
       fontFamily: C.mono, fontSize: 11, color: C.muted,
     }}>
+      {/* Drag handle on the LEFT edge — wider hitbox with a visible line on hover/active */}
+      <div
+        onMouseDown={(e) => { e.preventDefault(); setResizing(true); }}
+        onDoubleClick={() => { setWidth(520); try { window.localStorage.setItem('commissionSidebarWidth', '520'); } catch {} }}
+        title="Drag to resize · double-click to reset"
+        style={{
+          position: 'absolute', top: 0, left: 0, width: 6, height: '100%',
+          cursor: 'col-resize', zIndex: 61,
+          background: resizing ? C.accent : 'transparent',
+          borderLeft: resizing ? `2px solid ${C.accent}` : 'none',
+        }}
+        onMouseEnter={e => { if (!resizing) e.currentTarget.style.background = `${C.accent}33`; }}
+        onMouseLeave={e => { if (!resizing) e.currentTarget.style.background = 'transparent'; }}
+      />
       <div style={{ padding: 12 }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
