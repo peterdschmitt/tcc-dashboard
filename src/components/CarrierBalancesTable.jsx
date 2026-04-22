@@ -58,16 +58,43 @@ export default function CarrierBalancesTable() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build per-carrier, per-policy view using the latest ledger entry for each policy
+  // Build per-carrier, per-policy view.
+  // Carriers like American Amicable send a NEW advance each statement rather than
+  // a cumulative running total — so Received and Chargebacks must be SUMMED across
+  // every entry. Outstanding Balance is the CURRENT position, so we take the
+  // latest statement's reported balance per policy.
   const carrierData = useMemo(() => {
-    // Group entries by carrier → policy, keep latest per policy
     const byCarrier = {};
     for (const e of entries) {
       const carrier = e.carrier || 'Unknown';
       if (!byCarrier[carrier]) byCarrier[carrier] = {};
       const pn = e.policyNumber || '(no policy #)';
-      if (!byCarrier[carrier][pn] || (e.statementDate || '') > (byCarrier[carrier][pn].statementDate || '')) {
-        byCarrier[carrier][pn] = e;
+      if (!byCarrier[carrier][pn]) {
+        byCarrier[carrier][pn] = {
+          policyNumber: pn, carrier,
+          insuredName: e.insuredName, agent: e.agent, matchedPolicy: e.matchedPolicy,
+          totalComm: 0, totalChargeback: 0, totalRecovery: 0,
+          premium: e.premium || 0,
+          outstandingBalance: e.outstandingBalance || 0,
+          latestStatementDate: e.statementDate || '',
+          latestStatementFile: e.statementFile || '',
+          entryCount: 0,
+        };
+      }
+      const agg = byCarrier[carrier][pn];
+      const amt = e.commissionAmount || 0;
+      // Sum commissionAmount across every entry (positive = advance, negative = chargeback adjustment)
+      if (amt > 0) agg.totalComm += amt;
+      else if (amt < 0) agg.totalChargeback += Math.abs(amt);
+      agg.totalChargeback += (e.chargebackAmount || 0);   // explicit chargeback column
+      agg.totalRecovery  += (e.recoveryAmount  || 0);
+      agg.entryCount++;
+      // Overwrite outstandingBalance + latest metadata with the newest statement
+      if ((e.statementDate || '') >= agg.latestStatementDate) {
+        agg.outstandingBalance   = e.outstandingBalance || 0;
+        agg.latestStatementDate  = e.statementDate || '';
+        agg.latestStatementFile  = e.statementFile || '';
+        agg.premium              = e.premium || agg.premium;
       }
     }
 
@@ -75,9 +102,9 @@ export default function CarrierBalancesTable() {
     const carriers = Object.entries(byCarrier).map(([carrier, policyMap]) => {
       const policies = Object.values(policyMap);
       const totalOutstanding = policies.reduce((s, p) => s + (p.outstandingBalance || 0), 0);
-      const totalComm = policies.reduce((s, p) => s + (p.commissionAmount || 0), 0);
-      const totalChargeback = policies.reduce((s, p) => s + (p.chargebackAmount || 0), 0);
-      const totalRecovery = policies.reduce((s, p) => s + (p.recoveryAmount || 0), 0);
+      const totalComm = policies.reduce((s, p) => s + (p.totalComm || 0), 0);
+      const totalChargeback = policies.reduce((s, p) => s + (p.totalChargeback || 0), 0);
+      const totalRecovery = policies.reduce((s, p) => s + (p.totalRecovery || 0), 0);
       const totalPremium = policies.reduce((s, p) => s + (p.premium || 0), 0);
 
       // Latest statement info
