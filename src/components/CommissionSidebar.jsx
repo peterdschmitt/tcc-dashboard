@@ -130,7 +130,16 @@ function PolicyDrillDown({ policies, title, onBack }) {
 
   const sorted = [...policies].sort((a, b) => {
     let va = a[sortKey], vb = b[sortKey];
-    if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    // Booleans sort true-first when desc, false-first when asc
+    if (typeof va === 'boolean' || typeof vb === 'boolean') {
+      const na = va ? 1 : 0, nb = vb ? 1 : 0;
+      return sortDir === 'asc' ? na - nb : nb - na;
+    }
+    // Carrier field may be freeform text — normalize via getCarrierGroup
+    if (sortKey === 'carrier') { va = getCarrierGroup(va); vb = getCarrierGroup(vb); }
+    if (typeof va === 'string' || typeof vb === 'string') {
+      return sortDir === 'asc' ? String(va || '').localeCompare(String(vb || '')) : String(vb || '').localeCompare(String(va || ''));
+    }
     return sortDir === 'asc' ? (va || 0) - (vb || 0) : (vb || 0) - (va || 0);
   });
 
@@ -155,10 +164,12 @@ function PolicyDrillDown({ policies, title, onBack }) {
             <tr style={{ borderBottom: `1px solid ${C.border}` }}>
               <SortTh label="Policy #" field="policyNumber" />
               <SortTh label="Insured" field="insuredName" />
+              <SortTh label="Carrier" field="carrier" />
               <SortTh label="Premium" field="premium" align="right" />
               <SortTh label="Received" field="netReceived" align="right" />
               <SortTh label="Balance" field="balance" align="right" />
-              <th style={{ ...thStyle, textAlign: 'center' }}>Paid?</th>
+              <SortTh label="Paid?" field="carrierPaid" align="center" />
+              <SortTh label="Submit" field="submitDate" />
               <SortTh label="Eff Date" field="effectiveDate" />
             </tr>
           </thead>
@@ -167,6 +178,7 @@ function PolicyDrillDown({ policies, title, onBack }) {
               <tr key={i}>
                 <td style={{ ...tdStyle, color: C.text, fontFamily: C.mono }}>{p.policyNumber || '—'}</td>
                 <td style={{ ...tdStyle, color: C.text }}>{p.insuredName || '—'}</td>
+                <td style={{ ...tdStyle, color: C.muted }}>{getCarrierGroup(p.carrier)}</td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontFamily: C.mono }}>{fmtDollarFull(p.premium)}</td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontFamily: C.mono, color: p.netReceived > 0 ? C.green : p.netReceived < 0 ? C.red : C.muted }}>
                   {p.entries > 0 ? fmtDollarFull(p.netReceived) : '—'}
@@ -177,6 +189,7 @@ function PolicyDrillDown({ policies, title, onBack }) {
                 <td style={{ ...tdStyle, textAlign: 'center' }}>
                   <span style={{ color: p.carrierPaid ? C.green : C.red, fontWeight: 700, fontSize: 8 }}>{p.carrierPaid ? '✓' : '✗'}</span>
                 </td>
+                <td style={{ ...tdStyle, fontFamily: C.mono }}>{p.submitDate || '—'}</td>
                 <td style={{ ...tdStyle, fontFamily: C.mono }}>{p.effectiveDate || '—'}</td>
               </tr>
             ))}
