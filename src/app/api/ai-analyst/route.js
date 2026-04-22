@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { google } from 'googleapis';
 import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
+import {
+  isConverselyEnabled,
+  fetchAllLatestReports,
+  fetchSingleReportById,
+} from '@/lib/conversely-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -633,7 +638,7 @@ function getHistoryDays(question) {
 // ─── DRIVE ACCESS ────────────────────────────────────────────────
 
 /** Fetch file list from Drive folder (metadata only, no content) */
-async function fetchFileList() {
+async function fetchFileListFromDrive() {
   const folderId = process.env.AI_REPORTS_FOLDER_ID;
   if (!folderId) return [];
 
@@ -650,8 +655,21 @@ async function fetchFileList() {
   return listRes.data.files || [];
 }
 
-/** Fetch a single report by ID */
-async function fetchSingleReport(docId) {
+/** Dispatch: Conversely API when enabled, else Drive folder. */
+async function fetchFileList() {
+  if (isConverselyEnabled()) {
+    try {
+      const reports = await fetchAllLatestReports();
+      return reports.map(r => ({ id: r.id, name: r.title, modifiedTime: r.modifiedTime }));
+    } catch (err) {
+      console.warn('[ai-analyst] Conversely fetchFileList failed, falling back to Drive:', err.message);
+    }
+  }
+  return fetchFileListFromDrive();
+}
+
+/** Fetch a single report by Drive doc ID */
+async function fetchSingleReportFromDrive(docId) {
   const auth = getGoogleAuth();
   const drive = google.drive({ version: 'v3', auth });
 
@@ -671,17 +689,20 @@ async function fetchSingleReport(docId) {
   };
 }
 
-/** Fetch all reports from Drive folder */
-async function fetchReports() {
-  const now = Date.now();
-  if (reportCache.data && now - reportCache.ts < CACHE_TTL) {
-    return reportCache.data;
+/** Dispatch: cvai-* IDs route to Conversely API; everything else to Drive. */
+async function fetchSingleReport(docId) {
+  if (typeof docId === 'string' && docId.startsWith('cvai-')) {
+    const report = await fetchSingleReportById(docId);
+    if (report) return report;
+    throw new Error(`Conversely report not found for id ${docId}`);
   }
+  return fetchSingleReportFromDrive(docId);
+}
 
+/** Fetch all reports from Drive folder */
+async function fetchReportsFromDrive() {
   const folderId = process.env.AI_REPORTS_FOLDER_ID;
-  if (!folderId) {
-    return [];
-  }
+  if (!folderId) return [];
 
   const auth = getGoogleAuth();
   const drive = google.drive({ version: 'v3', auth });
@@ -717,7 +738,28 @@ async function fetchReports() {
     })
   );
 
-  const result = reports.filter(Boolean);
+  return reports.filter(Boolean);
+}
+
+/** Dispatch: Conversely API when enabled (with Drive fallback on error), else Drive. */
+async function fetchReports() {
+  const now = Date.now();
+  if (reportCache.data && now - reportCache.ts < CACHE_TTL) {
+    return reportCache.data;
+  }
+
+  let result = [];
+  if (isConverselyEnabled()) {
+    try {
+      result = await fetchAllLatestReports();
+    } catch (err) {
+      console.warn('[ai-analyst] Conversely fetchReports failed, falling back to Drive:', err.message);
+      result = await fetchReportsFromDrive();
+    }
+  } else {
+    result = await fetchReportsFromDrive();
+  }
+
   reportCache = { data: result, ts: now };
 
   // Fire-and-forget: archive today's metrics if not already done
@@ -923,8 +965,9 @@ export async function GET(request) {
     const reports = await fetchReports();
 
     if (!reports.length) {
+      const source = isConverselyEnabled() ? 'CONVERSELY.AI agents' : 'AI_REPORTS_FOLDER_ID Drive folder';
       return NextResponse.json({
-        insights: 'No reports are currently available. Please ensure the AI_REPORTS_FOLDER_ID environment variable is set and the Drive folder contains Google Docs.',
+        insights: `No reports are currently available from ${source}.`,
         suggestedQuestions: [],
       });
     }

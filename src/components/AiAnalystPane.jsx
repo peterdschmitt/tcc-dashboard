@@ -74,6 +74,7 @@ const CATEGORIES = [
   { id: 'sales_execution', label: 'Sales Execution' },
   { id: 'profitability', label: 'Profitability' },
   { id: 'funnel_health', label: 'Funnel Health' },
+  { id: 'mix_product', label: 'Mix & Product' },
 ];
 
 const MIN_TOP_HEIGHT = 120;
