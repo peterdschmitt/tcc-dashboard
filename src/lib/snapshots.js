@@ -269,11 +269,12 @@ export async function readCampaignSeries(asOfDate, campaign, metric) {
 
 /** Return { agents: [names], campaigns: [codes] } for rows on `date`. */
 export async function readEntitiesOnDate(date) {
-  const [agentsRows, campaignRows] = await Promise.all([
-    readSnapshotTab(SNAP_AGENTS_TAB, date),
-    readSnapshotTab(SNAP_CAMPAIGNS_TAB, date),
+  const sheetId = process.env.GOALS_SHEET_ID;
+  const [agentRows, campaignRows] = await Promise.all([
+    fetchSheet(sheetId, SNAP_AGENTS_TAB, 60).catch(() => []),
+    fetchSheet(sheetId, SNAP_CAMPAIGNS_TAB, 60).catch(() => []),
   ]);
-  const agents = [...new Set(agentsRows.filter(r => r.date === date).map(r => r.agent))];
+  const agents = [...new Set(agentRows.filter(r => r.date === date).map(r => r.agent))];
   const campaigns = [...new Set(campaignRows.filter(r => r.date === date).map(r => r.campaign))];
   return { agents, campaigns };
 }
