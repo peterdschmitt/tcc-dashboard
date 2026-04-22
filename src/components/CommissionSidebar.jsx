@@ -415,8 +415,26 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
 
   // Overview: each status as a row, split into Paid and Unpaid sub-rows
   const renderOverviewView = () => {
-    const statusOrder = Object.entries(byStatus).sort((a, b) => statusSortIndex(a[0]) - statusSortIndex(b[0]));
-    return statusOrder.map(([status, data]) => {
+    // Three business-state buckets for understanding the book of business
+    const CATEGORIES = [
+      {
+        key: 'performing', label: 'Performing', color: C.green,
+        desc: 'Paying now or expected to pay',
+        statuses: ['Active - In Force', 'Active - No commission paid yet', 'Active - Past Due', 'Issued, Not yet Active'],
+      },
+      {
+        key: 'unknown', label: 'Unknown / In Process', color: C.yellow,
+        desc: 'Awaiting resolution — could go either way',
+        statuses: ['Pending - Requirements Missing', 'Pending - Requirements MIssing', 'Pending - Agent State Appt', 'Initial Pay Failure', 'Unknown', 'not in system yet', '(No Status)'],
+      },
+      {
+        key: 'canceled', label: 'Canceled / Lost', color: C.red,
+        desc: 'Will not pay or already clawed back',
+        statuses: ['Canceled', 'Cancelled', 'Declined', 'Lapsed'],
+      },
+    ];
+
+    const renderStatusRow = ([status, data]) => {
       const t = data._totals;
       const sc = STATUS_COLORS[status] || C.gray;
       const icon = STATUS_ICONS[status] || '◯';
@@ -466,7 +484,76 @@ export default function CommissionSidebar({ open, onClose, onNavigateTab }) {
           </tr>
         </tbody>
       );
+    };
+
+    // Group statuses into the three buckets, track leftovers
+    const statusMap = Object.fromEntries(Object.entries(byStatus));
+    const used = new Set();
+    const output = [];
+
+    CATEGORIES.forEach(cat => {
+      const catStatuses = cat.statuses
+        .filter(s => statusMap[s])
+        .map(s => { used.add(s); return [s, statusMap[s]]; });
+      if (catStatuses.length === 0) return;
+
+      // Bucket totals
+      const bt = catStatuses.reduce((a, [, d]) => ({
+        count: a.count + d._totals.count,
+        paid: a.paid + d._totals.paid,
+        unpaid: a.unpaid + d._totals.unpaid,
+        received: a.received + d._totals.received,
+        balance: a.balance + d._totals.balance,
+      }), { count: 0, paid: 0, unpaid: 0, received: 0, balance: 0 });
+
+      // Bucket header
+      output.push(
+        <tbody key={'cat-' + cat.key}>
+          <tr>
+            <td colSpan="4" style={{
+              padding: '10px 6px 6px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase',
+              letterSpacing: 1.5, color: cat.color, borderTop: `3px solid ${cat.color}`,
+              background: `${cat.color}15`,
+            }}>
+              {cat.label}
+              <span style={{ color: C.muted, fontWeight: 400, fontSize: 8, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>— {cat.desc}</span>
+            </td>
+          </tr>
+        </tbody>
+      );
+
+      // Individual status rows
+      catStatuses.forEach(entry => output.push(renderStatusRow(entry)));
+
+      // Bucket grand total
+      output.push(
+        <tbody key={'cat-total-' + cat.key}>
+          <tr style={{ borderTop: `2px solid ${cat.color}`, background: `${cat.color}1a` }}>
+            <td style={{ ...tdStyle, fontWeight: 800, color: cat.color, fontSize: 10, padding: '6px 4px', textTransform: 'uppercase', letterSpacing: 1 }}>
+              {cat.label} Total ({bt.paid} paid / {bt.unpaid} unpaid)
+            </td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: C.text, fontSize: 11 }}>{bt.count}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: bt.received > 0 ? C.green : bt.received < 0 ? C.red : C.muted, fontFamily: C.mono, fontSize: 11 }}>{fmtDollarFull(Math.round(bt.received))}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: bt.balance > 0 ? C.yellow : bt.balance < 0 ? C.red : C.muted, fontFamily: C.mono, fontSize: 11 }}>{fmtDollarFull(Math.round(bt.balance))}</td>
+          </tr>
+        </tbody>
+      );
     });
+
+    // Uncategorized leftover (shouldn't normally happen, but safety net)
+    const leftovers = Object.entries(byStatus)
+      .filter(([s]) => !used.has(s))
+      .sort((a, b) => statusSortIndex(a[0]) - statusSortIndex(b[0]));
+    if (leftovers.length) {
+      output.push(
+        <tbody key="cat-other">
+          <tr><td colSpan="4" style={{ padding: '10px 6px 6px', fontWeight: 800, fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: 1.5, borderTop: `3px solid ${C.border}` }}>Other</td></tr>
+        </tbody>
+      );
+      leftovers.forEach(entry => output.push(renderStatusRow(entry)));
+    }
+
+    return output;
   };
 
   const pieCounts = statusPieCounts;
