@@ -375,6 +375,7 @@ PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls
 CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toFixed(0)} premium, $${c.gar.toFixed(0)} GAR, Conv ${c.conversionRate.toFixed(1)}%`).join('; ')}
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
 ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}
+VIRTUAL AGENT: ${vaCalls.length} calls, ${vaCalls.filter(c => c.transferConfirmation).length} transfers (${vaCalls.length > 0 ? ((vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length) * 100).toFixed(1) : '0.0'}% transfer rate)
 ${baselineBlock ? '\n' + baselineBlock : ''}`;
 
     // ─── LOAD AI ANALYSIS RULES ───
@@ -496,7 +497,7 @@ DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overv
   calls: Total Calls, Billable Rate. Compare both to 30-day averages; flag any driving campaign.
   revenue: Premium, Gross Adv Revenue, Commission, Net Revenue. Compare each to its 30-day average.
   cost: Lead Spend, CPA, RPC, Avg Premium. Lead Spend / CPA / RPC are lower-is-better; compare each to its 30-day average.
-  va: VA Calls, VA Transfers, VA Transfer Rate. If all three are zero, write "Virtual agent had no meaningful activity today." and nothing else.
+  va: VA Calls, VA Transfers, VA Transfer Rate — use the exact numbers from the "VIRTUAL AGENT:" line in the data above. Describe call volume, transfer count, and transfer rate. Only write "Virtual agent had no meaningful activity today." when VIRTUAL AGENT shows 0 calls AND 0 transfers.
 
 ${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Be specific per section and do not repeat facts across sections.')}
 
@@ -521,7 +522,7 @@ Return ONLY a JSON object:
     "calls": "1-3 sentences on Total Calls and Billable Rate vs 30-day averages.",
     "revenue": "1-3 sentences on Premium, GAR, Commission, Net Revenue each vs its 30-day average.",
     "cost": "1-3 sentences on Lead Spend, CPA, RPC, Avg Premium each vs its 30-day average.",
-    "va": "1-2 sentences on VA activity, or 'Virtual agent had no meaningful activity today.' if all three VA metrics are zero."
+    "va": "1-2 sentences quoting today's VA Calls, VA Transfers, and VA Transfer Rate from the VIRTUAL AGENT line. Only use 'Virtual agent had no meaningful activity today.' if VA Calls is 0."
   },
   "publishers": "3-4 sentences on publisher ROI — who produces vs who burns cash.",
   "carriers": "2-3 sentences on carrier economics and conversion.",
