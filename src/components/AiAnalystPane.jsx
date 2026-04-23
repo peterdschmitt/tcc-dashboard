@@ -890,6 +890,21 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
 
           {/* Right: date picker + close */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <a
+              href="https://daa.converselyai.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                background: C.card, border: `1px solid ${C.accent}`, color: C.accent,
+                borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                fontFamily: C.sans, cursor: 'pointer', display: 'inline-flex',
+                alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                textDecoration: 'none',
+              }}
+              title="Open CONVERSELY.AI in a new tab"
+            >
+              Conversely ↗
+            </a>
             {availableDates.length > 0 && (
               <select
                 value={selectedDate || ''}
