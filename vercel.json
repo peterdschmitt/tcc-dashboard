@@ -20,6 +20,9 @@
     },
     "src/app/api/cron/daily-summary/route.js": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/backfill-snapshots/route.js": {
+      "maxDuration": 60
     }
   },
   "crons": [{

@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { fetchSheet, appendRow, getSheetsClient } from '@/lib/sheets';
+import {
+  buildCompanyRow, buildAgentRows, buildCampaignRows, writeSnapshots,
+  readCompanySeries, readAgentSeries, readCampaignSeries,
+} from '@/lib/snapshots';
+import { computeBaseline, buildBaselineBlock } from '@/lib/baselines';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
 const AI_CACHE_TAB = process.env.AI_CACHE_TAB || 'AI Summary Cache';
@@ -21,39 +26,60 @@ function getYesterday() {
   return et.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
-function computeAlerts(metrics, goals, companyMeta) {
+function computeAlerts(metrics, goals, companyMeta, companyBaselines = {}) {
   const alerts = [];
   const metricDefs = [
-    { key: 'apps_submitted', label: 'Apps Submitted', actual: metrics.apps },
-    { key: 'policies_placed', label: 'Policies Placed', actual: metrics.placed },
-    { key: 'total_calls', label: 'Total Calls', actual: metrics.totalCalls },
-    { key: 'billable_calls', label: 'Billable Calls', actual: metrics.billable },
-    { key: 'billable_rate', label: 'Billable Rate', actual: metrics.billableRate, isRate: true },
-    { key: 'monthly_premium', label: 'Monthly Premium', actual: metrics.totalPremium },
-    { key: 'gross_adv_revenue', label: 'Gross Adv Revenue', actual: metrics.totalGAR },
-    { key: 'lead_spend', label: 'Lead Spend', actual: metrics.totalLeadSpend },
-    { key: 'agent_commission', label: 'Agent Commission', actual: metrics.totalComm },
-    { key: 'net_revenue', label: 'Net Revenue', actual: metrics.netRevenue },
-    { key: 'cpa', label: 'CPA', actual: metrics.cpa, isRate: true },
-    { key: 'rpc', label: 'RPC', actual: metrics.rpc, isRate: true },
-    { key: 'close_rate', label: 'Close Rate', actual: metrics.closeRate, isRate: true },
-    { key: 'placement_rate', label: 'Placement Rate', actual: metrics.placementRate, isRate: true },
-    { key: 'premium_cost_ratio', label: 'Premium:Cost', actual: metrics.premCost, isRate: true },
-    { key: 'avg_premium', label: 'Avg Premium', actual: metrics.avgPremium, isRate: true },
+    { key: 'apps_submitted',     label: 'Apps Submitted',     actual: metrics.apps,          snapKey: 'apps' },
+    { key: 'policies_placed',    label: 'Policies Placed',    actual: metrics.placed,        snapKey: 'placed' },
+    { key: 'total_calls',        label: 'Total Calls',        actual: metrics.totalCalls,    snapKey: 'calls' },
+    { key: 'billable_calls',     label: 'Billable Calls',     actual: metrics.billable,      snapKey: 'billable' },
+    { key: 'billable_rate',      label: 'Billable Rate',      actual: metrics.billableRate,  snapKey: 'billableRate', isRate: true },
+    { key: 'monthly_premium',    label: 'Monthly Premium',    actual: metrics.totalPremium,  snapKey: 'premium' },
+    { key: 'gross_adv_revenue',  label: 'Gross Adv Revenue',  actual: metrics.totalGAR,      snapKey: 'gar' },
+    { key: 'lead_spend',         label: 'Lead Spend',         actual: metrics.totalLeadSpend, snapKey: 'leadSpend' },
+    { key: 'agent_commission',   label: 'Agent Commission',   actual: metrics.totalComm,     snapKey: 'commission' },
+    { key: 'net_revenue',        label: 'Net Revenue',        actual: metrics.netRevenue,    snapKey: 'netRevenue' },
+    { key: 'cpa',                label: 'CPA',                actual: metrics.cpa,           snapKey: 'cpa',         isRate: true },
+    { key: 'rpc',                label: 'RPC',                actual: metrics.rpc,           snapKey: 'rpc',         isRate: true },
+    { key: 'close_rate',         label: 'Close Rate',         actual: metrics.closeRate,     snapKey: 'closeRate',   isRate: true },
+    { key: 'placement_rate',     label: 'Placement Rate',     actual: metrics.placementRate, snapKey: 'placementRate', isRate: true },
+    { key: 'premium_cost_ratio', label: 'Premium:Cost',       actual: metrics.premCost,      snapKey: 'premCost',    isRate: true },
+    { key: 'avg_premium',        label: 'Avg Premium',        actual: metrics.avgPremium,    snapKey: 'avgPremium',  isRate: true },
   ];
 
   for (const m of metricDefs) {
-    const goal = goals[m.key];
-    if (!goal || !m.actual) continue;
     const meta = companyMeta[m.key] || {};
     const lower = meta.lower || false;
     const yellowPct = (meta.yellow || 80) / 100;
-    const ratio = lower ? goal / m.actual : m.actual / goal;
 
-    if (ratio < yellowPct) {
-      alerts.push({ metric: m.label, actual: m.actual, goal, status: 'red', lower });
-    } else if (ratio < 1) {
-      alerts.push({ metric: m.label, actual: m.actual, goal, status: 'yellow', lower });
+    // Goal-based alert (existing behavior, now tagged with kind)
+    const goal = goals[m.key];
+    if (goal && m.actual) {
+      const ratio = lower ? goal / m.actual : m.actual / goal;
+      if (ratio < yellowPct) {
+        alerts.push({ kind: 'goal-miss', metric: m.label, actual: m.actual, goal, status: 'red', lower });
+      } else if (ratio < 1) {
+        alerts.push({ kind: 'goal-miss', metric: m.label, actual: m.actual, goal, status: 'yellow', lower });
+      }
+    }
+
+    // Historical-anomaly alert (new, independent of goal)
+    const b = companyBaselines[m.snapKey];
+    if (b && b.z != null) {
+      // For "lower is better" metrics, a high positive z (spike up) is bad; for normal metrics, a low negative z (drop) is bad.
+      const badZ = lower ? b.z : -b.z;
+      if (badZ >= 1.5 || b.worstInN) {
+        alerts.push({
+          kind: 'historical-anomaly',
+          metric: m.label,
+          actual: m.actual,
+          status: badZ >= 2.5 ? 'red' : 'yellow',
+          lower,
+          z: b.z,
+          avg30: b.avg30,
+          worstInN: b.worstInN || false,
+        });
+      }
     }
   }
 
@@ -179,12 +205,78 @@ export async function GET(request) {
       }
     });
 
-    // ─── COMPANY ALERTS ───
+    // ─── SNAPSHOT WRITE (daily mode only, single-day requests) ───
+    if (mode === 'daily' && startDate === endDate) {
+      try {
+        const metricsForSnap = {
+          apps, placed: placed.length, totalCalls, billable, billableRate,
+          totalPremium, totalGAR, totalLeadSpend, totalComm, netRevenue,
+          cpa, rpc, closeRate, placementRate, premCost, avgPremium,
+        };
+        const companyRow = buildCompanyRow(startDate, metricsForSnap);
+        const agentRows = buildAgentRows(startDate, byAgent, agentPerf);
+        const campaignRows = buildCampaignRows(startDate, byCampaign);
+        await writeSnapshots(startDate, companyRow, agentRows, campaignRows);
+        console.log(`[daily-summary] Wrote snapshots for ${startDate}`);
+      } catch (e) {
+        console.warn('[daily-summary] Snapshot write failed:', e.message);
+      }
+    }
+
+    // ─── HISTORICAL BASELINES (daily mode only, single-day requests) ───
+    let baselines = { company: {}, topAgents: [], topCampaigns: [] };
+    let baselineBlock = '';
+    if (mode === 'daily' && startDate === endDate) {
+      try {
+        const asOf = startDate;
+        const companyMetrics = ['apps','placed','calls','billable','premium','gar','leadSpend','commission','netRevenue','cpa','rpc','closeRate','placementRate','billableRate','avgPremium','premCost'];
+        for (const m of companyMetrics) {
+          const series = await readCompanySeries(asOf, m);
+          baselines.company[m] = computeBaseline(series);
+        }
+
+        // Top 5 agents today by premium
+        const topAgentNames = Object.entries(byAgent)
+          .sort((a, b) => (b[1].premium || 0) - (a[1].premium || 0))
+          .slice(0, 5)
+          .map(([n]) => n);
+        const agentMetrics = ['apps','premium','gar','availPct','talkTimeSec','salesPerHour'];
+        for (const name of topAgentNames) {
+          const bl = {};
+          for (const m of agentMetrics) {
+            const s = await readAgentSeries(asOf, name, m);
+            bl[m] = computeBaseline(s);
+          }
+          baselines.topAgents.push({ agent: name, baseline: bl });
+        }
+
+        // Top 8 campaigns today by spend
+        const topCampaignCodes = Object.entries(byCampaign)
+          .sort((a, b) => (b[1].spend || 0) - (a[1].spend || 0))
+          .slice(0, 8)
+          .map(([c]) => c);
+        const campaignMetricsList = ['calls','billable','spend','sales','premium','gar','cpa','rpc','closeRate','netRevenue'];
+        for (const code of topCampaignCodes) {
+          const bl = {};
+          for (const m of campaignMetricsList) {
+            const s = await readCampaignSeries(asOf, code, m);
+            bl[m] = computeBaseline(s);
+          }
+          baselines.topCampaigns.push({ campaign: code, baseline: bl });
+        }
+
+        baselineBlock = buildBaselineBlock(baselines);
+      } catch (e) {
+        console.warn('[daily-summary] Baseline compute failed:', e.message);
+      }
+    }
+
+    // ─── COMPANY ALERTS (after baselines so anomaly signal is available) ───
     const companyAlerts = computeAlerts({
       apps, placed: placed.length, totalCalls, billable, billableRate,
       totalPremium, totalGAR, totalLeadSpend, totalComm, netRevenue,
       cpa, rpc, closeRate, placementRate, premCost, avgPremium,
-    }, cg, cm);
+    }, cg, cm, baselines.company);
 
     const allAlerts = [...companyAlerts, ...agentAlerts];
 
@@ -282,7 +374,8 @@ AGENTS: ${Object.entries(byAgent).map(([n, a]) => `${n}: ${a.apps} apps, $${a.pr
 PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls, ${c.billable} billable (${c.billableRate.toFixed(1)}%), $${c.spend.toFixed(0)} spend, RPC $${c.rpc.toFixed(2)}, CPA $${c.cpa.toFixed(0)}, ${c.placed || 0} sales, $${(c.premium || 0).toFixed(0)} premium, $${(c.gar || 0).toFixed(0)} GAR`).join('; ')}
 CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toFixed(0)} premium, $${c.gar.toFixed(0)} GAR, Conv ${c.conversionRate.toFixed(1)}%`).join('; ')}
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
-${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}`;
+${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}
+${baselineBlock ? '\n' + baselineBlock : ''}`;
 
     // ─── LOAD AI ANALYSIS RULES ───
     let aiRules = {};
@@ -379,11 +472,13 @@ Sales per Agent goal: 2.5/day. Commission goal: 30% of GAR.
 
 ANALYSIS RULES:
 - Do NOT just restate numbers. Identify CAUSES and CORRELATIONS.
-- When a day had high sales, explain what was different (more agents? better availability? specific publisher producing? specific carrier converting?).
-- When a day was weak, explain what broke down (low availability? expensive leads with no conversions? specific publisher underperforming?).
-- Compare the best vs worst and explain the gap.
-- Be specific: cite actual numbers AND goals when relevant.
+- Use the COMPANY/AGENT/CAMPAIGN BASELINES block: always compare today to avg7/avg30, call out z-scores, and flag "best/worst in 14" events.
+- When a day had high sales, explain what was different using the baseline deltas (more agents available vs their 30-day norm? a campaign spiked conversion vs its avg30?).
+- When a day was weak, explain what broke down in baseline terms (which agent's availability dropped vs their norm; which campaign went from producing to burning cash).
+- Prefer percentage deltas vs avg30 ("CPA 27% worse than 30-day avg") over raw numbers alone.
+- Be specific: name the agent or campaign, cite today's value and the baseline comparator.
 - Do NOT mention "policies placed" or "placement rate."
+- For dailyOverview, write SIX separate section summaries, each focused ONLY on the metrics named in its sub-prompt. Do NOT repeat the same fact in multiple sections. If the avg30 baseline is null for a metric, say "insufficient history" rather than inventing a comparison.
 - Return ONLY valid JSON — no markdown, no code fences, no extra text.`,
             },
             {
@@ -394,16 +489,24 @@ ${liveContext}
 
 For each section, follow the analysis rules AND answer the driving question.
 
-DAILY OVERVIEW — What made the best day(s) the best? What broke down on weak days? Correlate agent availability, talk time, billable calls, and conversion rate to sales output. 3-4 sentences.
-${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Identify the best and worst days and explain WHY.')}
+DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overview table. Each is 1-3 sentences, grounded ONLY in the metrics listed for that section. Compare to avg7/avg30 when those baselines exist; say "insufficient history" when they do not.
 
-PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? 3-4 sentences.
+  availability: Agents Logged In, Avg Availability, Total Talk Time, Total Logged In.
+  sales: Sales per Agent, Sales (Apps), Billable Calls, Conversion Rate. Name the top-producing agent(s).
+  calls: Total Calls, Billable Rate. Compare both to 30-day averages; flag any driving campaign.
+  revenue: Premium, Gross Adv Revenue, Commission, Net Revenue. Compare each to its 30-day average.
+  cost: Lead Spend, CPA, RPC, Avg Premium. Lead Spend / CPA / RPC are lower-is-better; compare each to its 30-day average.
+  va: VA Calls, VA Transfers, VA Transfer Rate. If all three are zero, write "Virtual agent had no meaningful activity today." and nothing else.
+
+${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Be specific per section and do not repeat facts across sections.')}
+
+PUBLISHER PERFORMANCE — Which publishers are actually producing sales and revenue? Which are burning spend with nothing to show? What is the ROI by publisher? Identify each campaign's delta vs its own avg30. A campaign producing above its norm is worth scaling; one spending above its norm with sales below its norm is bleeding. 3-4 sentences.
 ${buildRulePrompt('publishers', 'Identify which publishers drive sales vs which just drive spend. Calculate effective ROI. Flag any with high spend and zero sales.')}
 
 CARRIER BREAKDOWN — Which carriers convert best? Which generate the most GAR per sale? Are we leaning on the right carriers? 2-3 sentences.
 ${buildRulePrompt('carriers', 'Identify which carriers produce the best economics (highest GAR, best conversion). Flag carriers with poor conversion rates.')}
 
-AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? 3-4 sentences.
+AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? For each top agent, compare today's apps/premium/availPct to their avg30. Flag agents having a materially worse day than their own baseline. 3-4 sentences.
 ${buildRulePrompt('agents', 'Rank agents by productivity (sales per hour available). Correlate talk time and availability to output. Flag agents with high availability but low sales.')}
 
 POLICY STATUS PIPELINE — What does the status mix tell us about lead quality and agent effectiveness? 2-3 sentences.
@@ -412,7 +515,14 @@ ${buildRulePrompt('pipeline', 'Analyze the ratio of statuses. High declined = qu
 Return ONLY a JSON object:
 {
   "executive": "3-4 sentence executive summary focused on what drove the best results and what held us back. Be specific and actionable.",
-  "dailyOverview": "3-4 sentences answering: what drove the best day vs the worst day?",
+  "dailyOverview": {
+    "availability": "1-3 sentences on Agents Logged In, Avg Availability, Talk Time, Logged-in Time. Cite 30-day averages where available.",
+    "sales": "1-3 sentences on Sales per Agent, Apps, Billable Calls, Conversion Rate. Name the top producer.",
+    "calls": "1-3 sentences on Total Calls and Billable Rate vs 30-day averages.",
+    "revenue": "1-3 sentences on Premium, GAR, Commission, Net Revenue each vs its 30-day average.",
+    "cost": "1-3 sentences on Lead Spend, CPA, RPC, Avg Premium each vs its 30-day average.",
+    "va": "1-2 sentences on VA activity, or 'Virtual agent had no meaningful activity today.' if all three VA metrics are zero."
+  },
   "publishers": "3-4 sentences on publisher ROI — who produces vs who burns cash.",
   "carriers": "2-3 sentences on carrier economics and conversion.",
   "agents": "3-4 sentences on agent productivity — who converts and why.",
@@ -428,8 +538,20 @@ Return ONLY a JSON object:
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             narrative = parsed.executive || '';
+            // dailyOverview can be an object (new format) or a string (legacy / model noncompliance)
+            let dailyOverview = parsed.dailyOverview;
+            if (dailyOverview && typeof dailyOverview === 'object') {
+              const allowedKeys = ['availability', 'sales', 'calls', 'revenue', 'cost', 'va'];
+              const cleaned = {};
+              for (const k of allowedKeys) {
+                if (typeof dailyOverview[k] === 'string') cleaned[k] = dailyOverview[k];
+              }
+              dailyOverview = cleaned;
+            } else if (typeof dailyOverview !== 'string') {
+              dailyOverview = '';
+            }
             tableSummaries = {
-              dailyOverview: parsed.dailyOverview || '',
+              dailyOverview,
               publishers: parsed.publishers || '',
               carriers: parsed.carriers || '',
               agents: parsed.agents || '',
@@ -508,6 +630,7 @@ Return ONLY a JSON object:
       alerts: allAlerts,
       narrative,
       tableSummaries,
+      baselines,
       // Table data
       dailyOverview,
       byCarrier,

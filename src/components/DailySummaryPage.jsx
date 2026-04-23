@@ -20,11 +20,24 @@ const fmtTime = sec => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-function KPI({ label, value, color }) {
+function DeltaChip({ baseline, lower = false }) {
+  if (!baseline || baseline.deltaPct == null) return null;
+  const pct = baseline.deltaPct * 100;
+  const isGood = lower ? pct <= 0 : pct >= 0;
+  const color = Math.abs(pct) < 5 ? C.muted : (isGood ? C.green : C.red);
+  const arrow = pct >= 0 ? '↑' : '↓';
+  return (
+    <span style={{ color, fontSize: 10, marginLeft: 6, fontFamily: C.sans, fontWeight: 500 }}>
+      {arrow}{Math.abs(pct).toFixed(0)}% vs 30d
+    </span>
+  );
+}
+
+function KPI({ label, value, color, chip }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', flex: '1 1 140px', minWidth: 140 }}>
       <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: color || C.text, marginTop: 4, fontFamily: C.mono }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || C.text, marginTop: 4, fontFamily: C.mono }}>{value}{chip}</div>
     </div>
   );
 }
@@ -219,152 +232,171 @@ export default function DailySummaryPage({ dateRange }) {
 
       {/* KPI Row — NO "Placed" (irrelevant for daily/weekly performance reviews) */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <KPI label="Apps Submitted" value={fmt(viewSales.total)} />
-        <KPI label="Total Calls" value={fmt(viewCalls.total)} />
-        <KPI label="Billable Calls" value={fmt(viewCalls.billable)} />
-        <KPI label="Billable Rate" value={fmtP(viewFinancials.billableRate)} />
-        <KPI label="CPA" value={fmtD(viewFinancials.cpa)} />
-        <KPI label="Gross Revenue" value={fmtD(viewFinancials.gar)} color={C.green} />
-        <KPI label="Net Revenue" value={fmtD(viewFinancials.netRevenue)} color={viewFinancials.netRevenue >= 0 ? C.green : C.red} />
-        <KPI label="Lead Spend" value={fmtD(viewFinancials.leadSpend)} color={C.yellow} />
-        <KPI label="Close Rate" value={fmtP(viewFinancials.closeRate)} />
-        <KPI label="Avg Premium" value={fmtD(viewFinancials.avgPremium)} />
-        <KPI label="Prem:Cost" value={viewFinancials.premCost > 0 ? viewFinancials.premCost.toFixed(2) + 'x' : '—'} />
-        <KPI label="RPC" value={fmtD(viewFinancials.rpc, 2)} />
+        <KPI label="Apps Submitted" value={fmt(viewSales.total)}
+             chip={<DeltaChip baseline={data.baselines?.company?.apps} />} />
+        <KPI label="Total Calls" value={fmt(viewCalls.total)}
+             chip={<DeltaChip baseline={data.baselines?.company?.calls} />} />
+        <KPI label="Billable Calls" value={fmt(viewCalls.billable)}
+             chip={<DeltaChip baseline={data.baselines?.company?.billable} />} />
+        <KPI label="Billable Rate" value={fmtP(viewFinancials.billableRate)}
+             chip={<DeltaChip baseline={data.baselines?.company?.billableRate} />} />
+        <KPI label="CPA" value={fmtD(viewFinancials.cpa)}
+             chip={<DeltaChip baseline={data.baselines?.company?.cpa} lower />} />
+        <KPI label="Gross Revenue" value={fmtD(viewFinancials.gar)} color={C.green}
+             chip={<DeltaChip baseline={data.baselines?.company?.gar} />} />
+        <KPI label="Net Revenue" value={fmtD(viewFinancials.netRevenue)} color={viewFinancials.netRevenue >= 0 ? C.green : C.red}
+             chip={<DeltaChip baseline={data.baselines?.company?.netRevenue} />} />
+        <KPI label="Lead Spend" value={fmtD(viewFinancials.leadSpend)} color={C.yellow}
+             chip={<DeltaChip baseline={data.baselines?.company?.leadSpend} lower />} />
+        <KPI label="Close Rate" value={fmtP(viewFinancials.closeRate)}
+             chip={<DeltaChip baseline={data.baselines?.company?.closeRate} />} />
+        <KPI label="Avg Premium" value={fmtD(viewFinancials.avgPremium)}
+             chip={<DeltaChip baseline={data.baselines?.company?.avgPremium} />} />
+        <KPI label="Prem:Cost" value={viewFinancials.premCost > 0 ? viewFinancials.premCost.toFixed(2) + 'x' : '—'}
+             chip={<DeltaChip baseline={data.baselines?.company?.premCost} />} />
+        <KPI label="RPC" value={fmtD(viewFinancials.rpc, 2)}
+             chip={<DeltaChip baseline={data.baselines?.company?.rpc} lower />} />
       </div>
 
-      {/* ─── TABLE 1: DAILY OVERVIEW (ordered by importance, color-coded to thresholds) ─── */}
-      {(viewData?.dailyOverview || data.dailyOverview) && Object.keys(viewData?.dailyOverview || data.dailyOverview || {}).length > 0 && (
-        <Section title="Daily Overview">
-          {viewTS.dailyOverview && <p style={aiInsightStyle}>{viewTS.dailyOverview}</p>}
-          {(() => {
-            const ov = viewData?.dailyOverview || data.dailyOverview;
-            const dates = Object.keys(ov).sort();
-            const numDays = dates.length || 1;
-            const dayNames = dates.map(d => {
-              const dt = new Date(d + 'T12:00:00');
-              return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            });
+      {/* ─── SIX STANDALONE SECTIONS (Availability, Sales, Calls, Revenue, Cost, VA) ─── */}
+      {(viewData?.dailyOverview || data.dailyOverview) && Object.keys(viewData?.dailyOverview || data.dailyOverview || {}).length > 0 && (() => {
+        const ov = viewData?.dailyOverview || data.dailyOverview;
+        const dates = Object.keys(ov).sort();
+        const numDays = dates.length || 1;
+        const dayNames = dates.map(d => {
+          const dt = new Date(d + 'T12:00:00');
+          return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        });
 
-            // Threshold color: green ≥100%, yellow 80-99%, red <80%
-            // For "lower is better": invert (goal/actual)
-            const thresholdColor = (val, goal, lower) => {
-              if (!goal || val == null) return C.text;
-              const ratio = lower ? (val === 0 ? 2 : goal / val) : val / goal;
-              if (ratio >= 1) return C.green;
-              if (ratio >= 0.8) return C.yellow;
-              return C.red;
-            };
+        const thresholdColor = (val, goal, lower) => {
+          if (!goal || val == null) return C.text;
+          const ratio = lower ? (val === 0 ? 2 : goal / val) : val / goal;
+          if (ratio >= 1) return C.green;
+          if (ratio >= 0.8) return C.yellow;
+          return C.red;
+        };
 
-            // Ordered by importance — Availability → Sales → Conversion → Calls → Revenue → Cost → VA
-            const metrics = [
-              // ─ AGENT AVAILABILITY (foundation of everything) ─
-              { key: 'agentCount', label: 'Agents Logged In', format: fmt, section: 'availability' },
-              { key: 'availPct', label: 'Avg Availability', format: fmtP, goal: 70, isAvg: true, section: 'availability' },
-              { key: 'talkTimeSec', label: 'Total Talk Time', format: fmtTime, section: 'availability' },
-              { key: 'loggedInSec', label: 'Total Logged In', format: fmtTime, section: 'availability' },
-              // ─ SALES & CONVERSION ─
-              { key: 'salesPerAgent', label: 'Sales per Agent', format: v => v != null ? v.toFixed(1) : '—', goal: 2.5, isAvg: true, section: 'sales' },
-              { key: 'sales', label: 'Sales (Apps)', format: fmt, goal: 5, section: 'sales' },
-              { key: 'billables', label: 'Billable Calls', format: fmt, goal: 35, section: 'sales' },
-              { key: 'closeRate', label: 'Conversion Rate', format: fmtP, goal: 22.5, isAvg: true, section: 'sales' },
-              // ─ CALLS ─
-              { key: 'calls', label: 'Total Calls', format: fmt, goal: 50, section: 'calls' },
-              { key: 'billableRate', label: 'Billable Rate', format: fmtP, goal: 65, isAvg: true, section: 'calls' },
-              // ─ REVENUE ─
-              { key: 'premium', label: 'Premium', format: v => fmtD(v), goal: 500, section: 'revenue' },
-              { key: 'gar', label: 'Gross Adv Revenue', format: v => fmtD(v), goal: 4000, section: 'revenue' },
-              { key: 'commission', label: 'Commission', format: v => fmtD(v), goal: 1200, section: 'revenue' },
-              { key: 'nar', label: 'Net Revenue', format: v => fmtD(v), goal: 2000, section: 'revenue' },
-              // ─ COST EFFICIENCY (lower is better) ─
-              { key: 'spend', label: 'Lead Spend', format: v => fmtD(v), goal: 1500, lower: true, section: 'cost' },
-              { key: 'cpa', label: 'CPA', format: v => fmtD(v), goal: 200, lower: true, isAvg: true, section: 'cost' },
-              { key: 'rpc', label: 'RPC', format: v => fmtD(v, 2), goal: 35, lower: true, isAvg: true, section: 'cost' },
-              { key: 'avgPremium', label: 'Avg Premium', format: v => fmtD(v), goal: 70, isAvg: true, section: 'cost' },
-              // ─ VIRTUAL AGENT ─
-              { key: 'vaCalls', label: 'VA Calls', format: fmt, goal: 100, section: 'va' },
-              { key: 'vaTransfers', label: 'VA Transfers', format: fmt, section: 'va' },
-              { key: 'vaTransferRate', label: 'VA Transfer Rate', format: fmtP, goal: 30, isAvg: true, section: 'va' },
-            ];
+        const metrics = [
+          // ─ AGENT AVAILABILITY ─
+          { key: 'agentCount', label: 'Agents Logged In', format: fmt, section: 'availability' },
+          { key: 'availPct', label: 'Avg Availability', format: fmtP, goal: 70, isAvg: true, section: 'availability' },
+          { key: 'talkTimeSec', label: 'Total Talk Time', format: fmtTime, section: 'availability' },
+          { key: 'loggedInSec', label: 'Total Logged In', format: fmtTime, section: 'availability' },
+          // ─ SALES & CONVERSION ─
+          { key: 'salesPerAgent', label: 'Sales per Agent', format: v => v != null ? v.toFixed(1) : '—', goal: 2.5, isAvg: true, section: 'sales' },
+          { key: 'sales', label: 'Sales (Apps)', format: fmt, goal: 5, section: 'sales' },
+          { key: 'billables', label: 'Billable Calls', format: fmt, goal: 35, section: 'sales' },
+          { key: 'closeRate', label: 'Conversion Rate', format: fmtP, goal: 22.5, isAvg: true, section: 'sales' },
+          // ─ CALLS ─
+          { key: 'calls', label: 'Total Calls', format: fmt, goal: 50, section: 'calls' },
+          { key: 'billableRate', label: 'Billable Rate', format: fmtP, goal: 65, isAvg: true, section: 'calls' },
+          // ─ REVENUE ─
+          { key: 'premium', label: 'Premium', format: v => fmtD(v), goal: 500, section: 'revenue' },
+          { key: 'gar', label: 'Gross Adv Revenue', format: v => fmtD(v), goal: 4000, section: 'revenue' },
+          { key: 'commission', label: 'Commission', format: v => fmtD(v), goal: 1200, section: 'revenue' },
+          { key: 'nar', label: 'Net Revenue', format: v => fmtD(v), goal: 2000, section: 'revenue' },
+          // ─ COST EFFICIENCY (lower is better) ─
+          { key: 'spend', label: 'Lead Spend', format: v => fmtD(v), goal: 1500, lower: true, section: 'cost' },
+          { key: 'cpa', label: 'CPA', format: v => fmtD(v), goal: 200, lower: true, isAvg: true, section: 'cost' },
+          { key: 'rpc', label: 'RPC', format: v => fmtD(v, 2), goal: 35, lower: true, isAvg: true, section: 'cost' },
+          { key: 'avgPremium', label: 'Avg Premium', format: v => fmtD(v), goal: 70, isAvg: true, section: 'cost' },
+          // ─ VIRTUAL AGENT ─
+          { key: 'vaCalls', label: 'VA Calls', format: fmt, goal: 100, section: 'va' },
+          { key: 'vaTransfers', label: 'VA Transfers', format: fmt, section: 'va' },
+          { key: 'vaTransferRate', label: 'VA Transfer Rate', format: fmtP, goal: 30, isAvg: true, section: 'va' },
+        ];
 
-            // Section divider labels
-            const sectionLabels = { availability: 'Agent Availability', sales: 'Sales & Conversion', calls: 'Call Volume', revenue: 'Revenue', cost: 'Cost Efficiency', va: 'Virtual Agent' };
-            let lastSection = '';
+        const sectionDefs = [
+          { key: 'availability', title: isWeekly ? 'Weekly Agent Availability' : 'Agent Availability' },
+          { key: 'sales',        title: isWeekly ? 'Weekly Sales & Conversion' : 'Sales & Conversion' },
+          { key: 'calls',        title: isWeekly ? 'Weekly Call Volume' : 'Call Volume' },
+          { key: 'revenue',      title: isWeekly ? 'Weekly Revenue' : 'Revenue' },
+          { key: 'cost',         title: isWeekly ? 'Weekly Cost Efficiency' : 'Cost Efficiency' },
+          { key: 'va',           title: isWeekly ? 'Weekly Virtual Agent' : 'Virtual Agent' },
+        ];
 
-            return (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>Metric</th>
-                      {dayNames.map((d, i) => (
-                        <th key={i} style={{ padding: '6px 10px', color: C.accent, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>{d}</th>
-                      ))}
-                      <th style={{ padding: '6px 10px', color: C.text, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>{dates.length > 1 ? 'Total/Avg' : 'Total'}</th>
-                      <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>Goal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metrics.map(m => {
-                      const vals = dates.map(d => ov[d]?.[m.key] || 0);
-                      const total = vals.reduce((s, v) => s + v, 0);
-                      const summary = m.isAvg ? total / numDays : total;
-                      // For weekly total/avg comparison, scale goal accordingly
-                      const goalCompare = m.isAvg ? m.goal : (m.goal ? m.goal * numDays : null);
+        const dailyOverviewSummaries = viewTS?.dailyOverview;
+        const legacyString = typeof dailyOverviewSummaries === 'string' ? dailyOverviewSummaries : null;
 
-                      // Section divider row
-                      let divider = null;
-                      if (m.section !== lastSection) {
-                        lastSection = m.section;
-                        divider = (
-                          <tr key={m.section + '-div'}>
-                            <td colSpan={dates.length + 3} style={{ padding: '8px 10px 4px', fontSize: 8, fontWeight: 700, color: C.accent, textTransform: 'uppercase', letterSpacing: 1, borderBottom: `1px solid ${C.border}44` }}>
-                              {sectionLabels[m.section]}
-                            </td>
-                          </tr>
-                        );
-                      }
+        const renderSectionTable = (sectionKey) => {
+          const rows = metrics.filter(m => m.section === sectionKey);
+          return (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>Metric</th>
+                    {dayNames.map((d, i) => (
+                      <th key={i} style={{ padding: '6px 10px', color: C.accent, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>{d}</th>
+                    ))}
+                    <th style={{ padding: '6px 10px', color: C.text, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>{dates.length > 1 ? 'Total/Avg' : 'Total'}</th>
+                    <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', textAlign: 'center', borderBottom: `1px solid ${C.border}` }}>Goal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(m => {
+                    const vals = dates.map(d => ov[d]?.[m.key] || 0);
+                    const total = vals.reduce((s, v) => s + v, 0);
+                    const summary = m.isAvg ? total / numDays : total;
+                    const goalCompare = m.isAvg ? m.goal : (m.goal ? m.goal * numDays : null);
 
-                      return (
-                        <React.Fragment key={m.key}>
-                          {divider}
-                          <tr>
-                            <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>
-                              {m.label}
-                              {m.lower && <span style={{ fontSize: 8, color: C.muted, marginLeft: 4 }}>↓</span>}
-                            </td>
-                            {vals.map((v, i) => (
-                              <td key={i} style={{
-                                padding: '5px 10px',
-                                color: m.goal ? thresholdColor(v, m.goal, m.lower) : C.text,
-                                fontSize: 11, fontFamily: C.mono, textAlign: 'center',
-                                borderBottom: `1px solid ${C.border}22`,
-                              }}>
-                                {m.format(v)}
-                              </td>
-                            ))}
-                            <td style={{
-                              padding: '5px 10px',
-                              color: goalCompare ? thresholdColor(summary, goalCompare, m.lower) : C.accent,
-                              fontSize: 11, fontFamily: C.mono, textAlign: 'center', fontWeight: 700,
-                              borderBottom: `1px solid ${C.border}22`,
-                            }}>
-                              {m.format(summary)}
-                            </td>
-                            <td style={{ padding: '5px 10px', color: C.muted, fontSize: 10, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>
-                              {m.goal ? (m.key === 'closeRate' || m.key === 'billableRate' || m.key === 'vaTransferRate' ? m.goal + '%' : m.key === 'avgPremium' || m.key === 'cpa' || m.key === 'rpc' || m.key === 'spend' || m.key === 'premium' || m.key === 'gar' || m.key === 'commission' || m.key === 'nar' ? '$' + m.goal.toLocaleString() : m.goal) : '—'}
-                            </td>
-                          </tr>
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-        </Section>
-      )}
+                    return (
+                      <tr key={m.key}>
+                        <td style={{ padding: '5px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>
+                          {m.label}
+                          {m.lower && <span style={{ fontSize: 8, color: C.muted, marginLeft: 4 }}>↓</span>}
+                        </td>
+                        {vals.map((v, i) => (
+                          <td key={i} style={{
+                            padding: '5px 10px',
+                            color: m.goal ? thresholdColor(v, m.goal, m.lower) : C.text,
+                            fontSize: 11, fontFamily: C.mono, textAlign: 'center',
+                            borderBottom: `1px solid ${C.border}22`,
+                          }}>
+                            {m.format(v)}
+                          </td>
+                        ))}
+                        <td style={{
+                          padding: '5px 10px',
+                          color: goalCompare ? thresholdColor(summary, goalCompare, m.lower) : C.accent,
+                          fontSize: 11, fontFamily: C.mono, textAlign: 'center', fontWeight: 700,
+                          borderBottom: `1px solid ${C.border}22`,
+                        }}>
+                          {m.format(summary)}
+                        </td>
+                        <td style={{ padding: '5px 10px', color: C.muted, fontSize: 10, fontFamily: C.mono, textAlign: 'center', borderBottom: `1px solid ${C.border}22` }}>
+                          {m.goal ? (m.key === 'closeRate' || m.key === 'billableRate' || m.key === 'vaTransferRate' ? m.goal + '%' : m.key === 'avgPremium' || m.key === 'cpa' || m.key === 'rpc' || m.key === 'spend' || m.key === 'premium' || m.key === 'gar' || m.key === 'commission' || m.key === 'nar' ? '$' + m.goal.toLocaleString() : m.goal) : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+
+        return (
+          <>
+            {legacyString && (
+              <Section title={isWeekly ? 'Weekly Daily Overview' : 'Daily Overview'}>
+                <p style={aiInsightStyle}>{legacyString}</p>
+              </Section>
+            )}
+            {sectionDefs.map(s => {
+              const narrative = dailyOverviewSummaries && typeof dailyOverviewSummaries === 'object'
+                ? dailyOverviewSummaries[s.key]
+                : null;
+              return (
+                <Section key={s.key} title={s.title}>
+                  {narrative && <p style={aiInsightStyle}>{narrative}</p>}
+                  {renderSectionTable(s.key)}
+                </Section>
+              );
+            })}
+          </>
+        );
+      })()}
 
       {/* ─── TABLE 2: PUBLISHER PERFORMANCE ─── */}
       <Section title={isWeekly ? "Weekly Publisher Performance" : "Publisher Performance"}>
