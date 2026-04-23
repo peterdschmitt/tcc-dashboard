@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useVoiceMode } from '@/hooks/useVoiceMode';
 import InsightHero from './InsightHero';
+import DeepDiveCard from './shared/DeepDiveCard';
 
 const isPlacedPolicy = p => ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(p.placed);
 
@@ -76,6 +77,7 @@ const CATEGORIES = [
   { id: 'profitability', label: 'Profitability' },
   { id: 'funnel_health', label: 'Funnel Health' },
   { id: 'mix_product', label: 'Mix & Product' },
+  { id: 'agent_deep_dive', label: 'Agent Deep Dive' },
 ];
 
 const MIN_TOP_HEIGHT = 120;
@@ -102,6 +104,59 @@ function formatInsightText(text) {
     const bulletIndent = isBullet ? { paddingLeft: 16, textIndent: -10 } : {};
     return <div key={i} style={{ marginBottom: 4, ...bulletIndent }}>{parts.length > 0 ? parts : content}</div>;
   });
+}
+
+function AgentDeepDiveView() {
+  const [bundle, setBundle] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch('/api/agent-deep-dive')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setBundle(d); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) return <LoadingSkeleton />;
+  const entities = bundle?.entities || [];
+  const pending = bundle?.pending || [];
+  if (!entities.length && !pending.length) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', height: '100%', color: C.muted,
+        fontSize: 12, fontFamily: C.mono, textAlign: 'center',
+      }}>
+        No agent deep-dive analyses available.
+      </div>
+    );
+  }
+
+  const ordered = [...entities].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const orderedPending = [...pending].sort((a, b) => (a || '').localeCompare(b || ''));
+
+  return (
+    <div>
+      <p style={{ margin: '0 0 14px', fontSize: 11, color: C.muted, fontStyle: 'italic' }}>
+        Per-agent qualitative coaching analysis (run {bundle?.runDate || '—'}). {entities.length} of {entities.length + pending.length} agents analyzed. Click to expand.
+      </p>
+      {ordered.map((e, i) => (
+        <DeepDiveCard key={e.name || `a-${i}`} entity={e} defaultOpen={false} />
+      ))}
+      {orderedPending.map((name, i) => (
+        <div key={`p-${name || i}`} style={{ background: C.bg, border: `1px dashed ${C.border}`, borderRadius: 6, marginBottom: 8, padding: '10px 14px', opacity: 0.6 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.muted }}>{name}</div>
+          <div style={{ fontSize: 11, color: C.muted, fontStyle: 'italic', marginTop: 2 }}>
+            No analysis run yet for this agent.
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function TypingIndicator() {
@@ -240,6 +295,10 @@ function Fmt({ text, lineKey }) {
 function classifyLine(trimmed, prevType) {
   if (!trimmed) return 'blank';
 
+  // Markdown ATX headers: # → h1, ## or ### → h2
+  if (/^#\s+/.test(trimmed)) return 'h1-md';
+  if (/^#{2,3}\s+/.test(trimmed)) return 'h2-md';
+
   // H1: Major sections — longer descriptive titles, often with parens qualifier
   // e.g. "Campaign performance (4 rows: Lead Performance by Campaign)"
   // e.g. "Executive read on Volume & Capacity (Are we getting enough...)"
@@ -299,9 +358,9 @@ function buildReportContent(content) {
     prevType = type;
 
     // --- H1: Large bold section header with bottom border ---
-    if (type === 'h1') {
+    if (type === 'h1' || type === 'h1-md') {
       const id = `sec-${sectionIdx++}`;
-      const title = trimmed.replace(/\*\*/g, '');
+      const title = trimmed.replace(/^#\s+/, '').replace(/\*\*/g, '');
       tocEntries.push({ id, title });
       elements.push(
         <h2 key={i} id={id} style={{
@@ -317,9 +376,10 @@ function buildReportContent(content) {
     }
 
     // --- H2: Bold sub-heading, numbered or plain ---
-    if (type === 'h2') {
-      const numMatch = trimmed.match(/^(\d+)\)\s+(.+)/);
-      const display = numMatch ? `${numMatch[1]}) ${numMatch[2]}` : trimmed;
+    if (type === 'h2' || type === 'h2-md') {
+      const stripped = trimmed.replace(/^#{2,3}\s+/, '');
+      const numMatch = stripped.match(/^(\d+)\)\s+(.+)/);
+      const display = numMatch ? `${numMatch[1]}) ${numMatch[2]}` : stripped;
       elements.push(
         <h3 key={i} style={{
           fontSize: 18, fontWeight: 700, color: C.text, fontFamily: C.sans,
@@ -871,7 +931,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
           }}
         >
           {/* Section nav sidebar (when report is loaded) */}
-          {reportContent && tocEntries.length > 0 && (
+          {selectedCategory !== 'agent_deep_dive' && reportContent && tocEntries.length > 0 && (
             <div style={{
               width: 200, minWidth: 200, borderRight: `1px solid ${C.border}`,
               overflow: 'auto', padding: '12px 8px', flexShrink: 0,
@@ -932,7 +992,11 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
               </div>
             )}
 
-            {selectedCategory && !reportLoading && reportContent && renderedElements && (
+            {selectedCategory === 'agent_deep_dive' && (
+              <AgentDeepDiveView />
+            )}
+
+            {selectedCategory && selectedCategory !== 'agent_deep_dive' && !reportLoading && reportContent && renderedElements && (
               <>
                 <InsightHero category={selectedCategory} date={selectedDate} />
                 {renderedElements}

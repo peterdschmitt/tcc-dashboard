@@ -6,6 +6,9 @@ import {
   isConverselyEnabled,
   fetchAllLatestReports,
   fetchSingleReportById,
+  fetchAgentDeepDive,
+  AGENT_DEEP_DIVE_ID,
+  AGENT_DEEP_DIVE_CATEGORY,
 } from '@/lib/conversely-api';
 
 export const dynamic = 'force-dynamic';
@@ -74,6 +77,7 @@ let archivedToday = null;
 // --- Report type classification ---
 function classifyReport(title) {
   const t = (title || '').toLowerCase();
+  if (t.includes('agent deep dive')) return 'agent_deep_dive';
   if (t.includes('funnel analyzer')) return 'funnel_analyzer';
   if (t.includes('lead quality')) return 'lead_quality';
   if (t.includes('volume') && t.includes('capacity')) return 'volume_capacity';
@@ -93,6 +97,7 @@ const REPORT_TYPE_LABELS = {
   profitability: 'Profitability',
   funnel_health: 'Funnel Health',
   mix_product: 'Mix & Product',
+  agent_deep_dive: 'Agent Deep Dive',
   other: 'Other',
 };
 
@@ -105,10 +110,11 @@ const CATEGORIES = [
   { id: 'profitability', label: 'Profitability', icon: '💰' },
   { id: 'funnel_health', label: 'Funnel Health', icon: '🏥' },
   { id: 'mix_product', label: 'Mix & Product', icon: '🧩' },
+  { id: 'agent_deep_dive', label: 'Agent Deep Dive', icon: '👤' },
 ];
 
 // --- Tab → relevant report types ---
-const ALL_REPORT_TYPES = ['funnel_analyzer', 'lead_quality', 'volume_capacity', 'sales_execution', 'profitability', 'funnel_health', 'mix_product'];
+const ALL_REPORT_TYPES = ['funnel_analyzer', 'lead_quality', 'volume_capacity', 'sales_execution', 'profitability', 'funnel_health', 'mix_product', 'agent_deep_dive'];
 const TAB_REPORTS = {
   daily: ALL_REPORT_TYPES,
   publishers: ALL_REPORT_TYPES,
@@ -659,8 +665,21 @@ async function fetchFileListFromDrive() {
 async function fetchFileList() {
   if (isConverselyEnabled()) {
     try {
-      const reports = await fetchAllLatestReports();
-      return reports.map(r => ({ id: r.id, name: r.title, modifiedTime: r.modifiedTime }));
+      const [reports, deepDive] = await Promise.all([
+        fetchAllLatestReports(),
+        fetchAgentDeepDive().catch(() => null),
+      ]);
+      const files = reports.map(r => ({ id: r.id, name: r.title, modifiedTime: r.modifiedTime }));
+      if (deepDive && deepDive.entities?.length) {
+        const label = REPORT_TYPE_LABELS[AGENT_DEEP_DIVE_CATEGORY] || 'Agent Deep Dive';
+        const dateLabel = deepDive.runDate || '';
+        files.push({
+          id: `cvai-${AGENT_DEEP_DIVE_ID}`,
+          name: dateLabel ? `${label} — ${dateLabel}` : label,
+          modifiedTime: deepDive.runDate || null,
+        });
+      }
+      return files;
     } catch (err) {
       console.warn('[ai-analyst] Conversely fetchFileList failed, falling back to Drive:', err.message);
     }

@@ -12,6 +12,10 @@ const CATEGORY_TO_AGENT_ID = {
   funnel_analyzer: 25,
 };
 
+// Per-agent deep-dive analyst (entity-batch). Returns one analysis per call-center agent.
+export const AGENT_DEEP_DIVE_ID = 41;
+export const AGENT_DEEP_DIVE_CATEGORY = 'agent_deep_dive';
+
 const AGENT_ID_TO_CATEGORY = Object.fromEntries(
   Object.entries(CATEGORY_TO_AGENT_ID).map(([cat, id]) => [id, cat])
 );
@@ -24,6 +28,7 @@ const CATEGORY_LABELS = {
   profitability: 'Profitability',
   funnel_health: 'Funnel Health',
   mix_product: 'Mix & Product',
+  agent_deep_dive: 'Agent Deep Dive',
 };
 
 export function isConverselyEnabled() {
@@ -112,12 +117,136 @@ export async function fetchAllLatestReports(opts = {}) {
   return reports;
 }
 
-// Fetch a single report by the synthetic ID we hand to the client (cvai-<agentId>).
+// Fetch the latest-by-entity bundle for an entity-batch agent. Returns
+// { runDate, dataStartDate, dataEndDate, entityLabel, entities: [{ entityName, resultMessage, createdAt }] }
+// or null if no completed run exists.
+export async function fetchLatestByEntity(agentId, opts = {}) {
+  const data = await callApi(`/api/external/agents/${agentId}/results/latest-by-entity`, {
+    run_date: opts.runDate,
+  });
+  if (!data || !data.success) return null;
+  return {
+    agent: data.agent || null,
+    runDate: data.run_date || null,
+    dataStartDate: data.data_start_date || null,
+    dataEndDate: data.data_end_date || null,
+    entityLabel: data.agent?.entity_label || null,
+    entityCount: data.entity_count || 0,
+    entities: (data.entities || []).map(e => ({
+      entityName: e.entity_name || null,
+      resultMessage: e.result_message || '',
+      resultData: e.result_data || null,
+      executionTimeSeconds: e.execution_time_seconds ?? null,
+      createdAt: e.created_at || null,
+    })),
+  };
+}
+
+// Fetch the Agent Deep Dive bundle. Thin wrapper over fetchLatestByEntity for
+// the well-known agent ID 41. Returns null on any error so callers can degrade gracefully.
+export async function fetchAgentDeepDive(opts = {}) {
+  if (!isConverselyEnabled()) return null;
+  try {
+    return await fetchLatestByEntity(AGENT_DEEP_DIVE_ID, opts);
+  } catch (err) {
+    console.warn('[conversely] fetchAgentDeepDive failed:', err.message);
+    return null;
+  }
+}
+
+// Fetch the list of entity names an agent knows about (its saved entity_query
+// universe). Returns [] on error.
+export async function fetchAgentEntities(agentId) {
+  if (!isConverselyEnabled()) return [];
+  try {
+    const data = await callApi(`/api/external/agents/${agentId}/entities`);
+    return Array.isArray(data?.entities) ? data.entities : [];
+  } catch (err) {
+    console.warn(`[conversely] fetchAgentEntities(${agentId}) failed:`, err.message);
+    return [];
+  }
+}
+
+// Combined fetch: returns the latest-by-entity bundle plus the entity universe,
+// so callers can render placeholder cards for agents that haven't been analyzed yet.
+export async function fetchAgentDeepDiveWithUniverse(opts = {}) {
+  if (!isConverselyEnabled()) return null;
+  const [bundle, universe] = await Promise.all([
+    fetchAgentDeepDive(opts),
+    fetchAgentEntities(AGENT_DEEP_DIVE_ID),
+  ]);
+  if (!bundle && (!universe || !universe.length)) return null;
+  const analyzed = new Set((bundle?.entities || []).map(e => e.entityName).filter(Boolean));
+  const pending = universe.filter(name => !analyzed.has(name));
+  return {
+    ...(bundle || { entities: [], runDate: null }),
+    universe,
+    pending,
+  };
+}
+
+// Fetch a single report by the synthetic ID we hand to the client.
+// Shapes:
+//   cvai-<agentId>                      -> aggregate (non-entity) report
+//   cvai-<agentId>:<entityName>         -> one entity's result from a latest-by-entity bundle
 // Returns null when the ID isn't a Conversely ID so the caller can fall back to Drive.
 export async function fetchSingleReportById(id) {
   if (!id || !id.startsWith('cvai-')) return null;
-  const agentId = parseInt(id.slice('cvai-'.length), 10);
-  if (!agentId || !AGENT_ID_TO_CATEGORY[agentId]) return null;
+  const rest = id.slice('cvai-'.length);
+  const colonIdx = rest.indexOf(':');
+
+  // Entity-specific ID: cvai-<agentId>:<entityName>
+  if (colonIdx > -1) {
+    const agentId = parseInt(rest.slice(0, colonIdx), 10);
+    const entityName = rest.slice(colonIdx + 1);
+    if (!agentId || !entityName) return null;
+    const bundle = await fetchLatestByEntity(agentId);
+    if (!bundle) return null;
+    const match = bundle.entities.find(e => e.entityName === entityName);
+    if (!match) return null;
+    const label = CATEGORY_LABELS[AGENT_DEEP_DIVE_CATEGORY] || 'Agent Deep Dive';
+    return {
+      id,
+      title: `${label} — ${entityName} — ${bundle.runDate || ''}`,
+      type: AGENT_DEEP_DIVE_CATEGORY,
+      modifiedTime: match.createdAt || bundle.runDate || null,
+      content: match.resultMessage || '',
+      runDate: bundle.runDate,
+      dataStartDate: bundle.dataStartDate,
+      dataEndDate: bundle.dataEndDate,
+      entityName,
+      agentId,
+    };
+  }
+
+  // Aggregate ID: cvai-<agentId>
+  const agentId = parseInt(rest, 10);
+  if (!agentId) return null;
+
+  // Deep-dive agent: concatenate all entities into a single report so the
+  // existing single-report viewer + TOC renders them naturally.
+  if (agentId === AGENT_DEEP_DIVE_ID) {
+    const bundle = await fetchLatestByEntity(agentId);
+    if (!bundle || !bundle.entities.length) return null;
+    const label = CATEGORY_LABELS[AGENT_DEEP_DIVE_CATEGORY] || 'Agent Deep Dive';
+    const content = bundle.entities
+      .map(e => `# ${e.entityName || 'Unknown Agent'}\n\n${e.resultMessage || ''}`)
+      .join('\n\n---\n\n');
+    return {
+      id,
+      title: bundle.runDate ? `${label} — ${bundle.runDate}` : label,
+      type: AGENT_DEEP_DIVE_CATEGORY,
+      modifiedTime: bundle.runDate || null,
+      content,
+      runDate: bundle.runDate,
+      dataStartDate: bundle.dataStartDate,
+      dataEndDate: bundle.dataEndDate,
+      entityName: null,
+      agentId,
+    };
+  }
+
+  if (!AGENT_ID_TO_CATEGORY[agentId]) return null;
   const result = await fetchLatestResultForAgent(agentId);
   return toReport(AGENT_ID_TO_CATEGORY[agentId], agentId, result);
 }

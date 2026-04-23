@@ -6,6 +6,7 @@ import {
   readCompanySeries, readAgentSeries, readCampaignSeries,
 } from '@/lib/snapshots';
 import { computeBaseline, buildBaselineBlock } from '@/lib/baselines';
+import { fetchAgentDeepDive } from '@/lib/conversely-api';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
 const AI_CACHE_TAB = process.env.AI_CACHE_TAB || 'AI Summary Cache';
@@ -94,6 +95,7 @@ export async function GET(request) {
     const date = startDate === endDate ? startDate : `${startDate} to ${endDate}`;
     const mode = searchParams.get('mode') || (startDate !== endDate ? 'weekly' : 'daily');
     const source = searchParams.get('source') || process.env.SALES_TAB_NAME || 'Sheet1';
+    const forceRegen = searchParams.get('force') === '1';
     const baseUrl = getBaseUrl();
     console.log('[daily-summary] baseUrl:', baseUrl);
 
@@ -305,6 +307,7 @@ export async function GET(request) {
       const totalLoggedIn = dayPerf.reduce((s, a) => s + (a.loggedIn || 0), 0);
       const totalAvailable = dayPerf.reduce((s, a) => s + (a.available || 0), 0);
       const totalTalkTime = dayPerf.reduce((s, a) => s + (a.talkTime || 0), 0);
+      const totalPaused = dayPerf.reduce((s, a) => s + (a.paused || 0), 0);
       const agentCount = dayPerf.length;
 
       dailyOverview[d] = {
@@ -312,6 +315,8 @@ export async function GET(request) {
         availPct: totalLoggedIn > 0 ? (totalAvailable / totalLoggedIn * 100) : 0,
         talkTimeSec: totalTalkTime,
         loggedInSec: totalLoggedIn,
+        pausedSec: totalPaused,
+        pausePct: totalLoggedIn > 0 ? (totalPaused / totalLoggedIn * 100) : 0,
         salesPerAgent: agentCount > 0 ? dayPolicies.length / agentCount : 0,
         calls: dayCalls.length,
         sales: dayPolicies.length,
@@ -365,6 +370,41 @@ export async function GET(request) {
     // Get all unique statuses
     const allStatuses = [...new Set(policies.map(p => p.placed || p.outcome || 'Unknown'))].sort();
 
+    // ─── AGENT DEEP DIVE (Conversely agent 41, per-agent qualitative analysis) ───
+    // Request the run matching our report date when possible; fall back to latest.
+    let agentDeepDive = null;
+    if (mode === 'daily' && startDate === endDate) {
+      try {
+        let bundle = await fetchAgentDeepDive({ runDate: startDate });
+        if (!bundle || !bundle.entities?.length) {
+          bundle = await fetchAgentDeepDive();
+        }
+        if (bundle && bundle.entities?.length) {
+          agentDeepDive = {
+            runDate: bundle.runDate,
+            dataStartDate: bundle.dataStartDate,
+            dataEndDate: bundle.dataEndDate,
+            entityLabel: bundle.entityLabel,
+            entities: bundle.entities.map(e => ({
+              name: e.entityName,
+              content: e.resultMessage,
+            })),
+          };
+        }
+      } catch (e) {
+        console.warn('[daily-summary] Agent deep dive fetch failed:', e.message);
+      }
+    }
+
+    const deepDiveBlock = agentDeepDive
+      ? `\nAGENT DEEP DIVE (run ${agentDeepDive.runDate || '?'}, ${agentDeepDive.entities.length} agents):\n` +
+        agentDeepDive.entities.map(e => {
+          // Keep per-agent summary compact (first ~600 chars) for the LLM prompt.
+          const snippet = (e.content || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+          return `- ${e.name}: ${snippet}${(e.content || '').length > 600 ? '…' : ''}`;
+        }).join('\n')
+      : '';
+
     // ─── BUILD NARRATIVE CONTEXT ───
     const liveContext = `DAILY SUMMARY DATA for ${date}:
 SALES: ${apps} apps submitted
@@ -376,7 +416,7 @@ CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toF
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
 ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}
 VIRTUAL AGENT: ${vaCalls.length} calls, ${vaCalls.filter(c => c.transferConfirmation).length} transfers (${vaCalls.length > 0 ? ((vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length) * 100).toFixed(1) : '0.0'}% transfer rate)
-${baselineBlock ? '\n' + baselineBlock : ''}`;
+${baselineBlock ? '\n' + baselineBlock : ''}${deepDiveBlock}`;
 
     // ─── LOAD AI ANALYSIS RULES ───
     let aiRules = {};
@@ -436,7 +476,7 @@ ${baselineBlock ? '\n' + baselineBlock : ''}`;
 
     // Check cache first
     let cacheHit = false;
-    if (cacheSheetId) {
+    if (cacheSheetId && !forceRegen) {
       try {
         const cached = await fetchSheet(cacheSheetId, AI_CACHE_TAB, 300);
         const row = cached.find(r => r['Date'] === cacheKey && r['Mode'] === mode);
@@ -492,7 +532,13 @@ For each section, follow the analysis rules AND answer the driving question.
 
 DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overview table. Each is 1-3 sentences, grounded ONLY in the metrics listed for that section. Compare to avg7/avg30 when those baselines exist; say "insufficient history" when they do not.
 
-  availability: Agents Logged In, Avg Availability, Total Talk Time, Total Logged In.
+  availability: Agents Logged In, Avg Availability, Total Talk Time, Total Logged In, Total Pause Time, Pause %.
+    REQUIRED FRAMING for the availability section:
+    1. LEAD WITH THE CONSTRAINT. If Agents Logged In is below the 7-day average (or below 3 when no baseline exists), the headline is understaffing — name it first, before any per-agent stats. Example opener: "Only N agent(s) logged in — staffing was the constraint today."
+    2. ALWAYS COMPUTE UTILIZATION = Total Talk Time ÷ Total Logged In, expressed as a percentage. State it explicitly. Available-but-idle is wasted shift; flag <60% utilization as soft demand or routing failure, >85% as a capacity ceiling.
+    3. ALWAYS REPORT PAUSE. State Total Pause Time and Pause % of logged-in time. Flag pause % above 30% as elevated and above 50% as a serious shift-discipline issue. Pause directly subtracts from available capacity, so a high pause % on an understaffed day compounds the constraint.
+    4. CONNECT TO OUTCOMES in one clause. Low staffing → call capacity ceiling → sales ceiling. Low utilization → demand or routing problem. High utilization with low sales → execution problem. High pause + low staffing → magnified capacity loss. Pick the implied causal chain and state it.
+    5. BANNED FILLER (do not write any of these): "positive indicator", "agent engagement", "for broader context", "indicates", "strong" (without a comparator), "robust", "healthy" (without a number). Strip any sentence whose only purpose is to label something good or bad — every sentence must add a number, a comparison, or a causal claim.
   sales: Sales per Agent, Sales (Apps), Billable Calls, Conversion Rate. Name the top-producing agent(s).
   calls: Total Calls, Billable Rate. Compare both to 30-day averages; flag any driving campaign.
   revenue: Premium, Gross Adv Revenue, Commission, Net Revenue. Compare each to its 30-day average.
@@ -507,7 +553,7 @@ ${buildRulePrompt('publishers', 'Identify which publishers drive sales vs which 
 CARRIER BREAKDOWN — Which carriers convert best? Which generate the most GAR per sale? Are we leaning on the right carriers? 2-3 sentences.
 ${buildRulePrompt('carriers', 'Identify which carriers produce the best economics (highest GAR, best conversion). Flag carriers with poor conversion rates.')}
 
-AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? For each top agent, compare today's apps/premium/availPct to their avg30. Flag agents having a materially worse day than their own baseline. 3-4 sentences.
+AGENT ACTIVITY — Who is the top producer and why? Who is underperforming relative to their availability? Is there a correlation between talk time and sales? For each top agent, compare today's apps/premium/availPct to their avg30. Flag agents having a materially worse day than their own baseline. If the AGENT DEEP DIVE block is present, weave in the qualitative observations (coaching, call quality, notable patterns) for the named agents — do NOT just restate the metrics. 3-4 sentences.
 ${buildRulePrompt('agents', 'Rank agents by productivity (sales per hour available). Correlate talk time and availability to output. Flag agents with high availability but low sales.')}
 
 POLICY STATUS PIPELINE — What does the status mix tell us about lead quality and agent effectiveness? 2-3 sentences.
@@ -632,6 +678,7 @@ Return ONLY a JSON object:
       narrative,
       tableSummaries,
       baselines,
+      agentDeepDive,
       // Table data
       dailyOverview,
       byCarrier,

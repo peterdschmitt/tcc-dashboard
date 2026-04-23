@@ -16,6 +16,7 @@ import PeriodRevenueTable from './PeriodRevenueTable';
 import CarrierBalancesTable from './CarrierBalancesTable';
 // VoiceAgent moved to page.js to persist across loading states
 import DatePicker from './shared/DatePicker';
+import DeepDiveCard from './shared/DeepDiveCard';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -3503,9 +3504,58 @@ function AgentPerformanceTab({ dateRange, calls, policies }) {
           ]} rows={daily.sort((a, b) => b.date.localeCompare(a.date) || a.rep.localeCompare(b.rep))} />
         </Section>
       )}
+
+      <AgentDeepDivePanel agents={agents} />
     </>
   );
 }
+
+function AgentDeepDivePanel({ agents }) {
+  const [bundle, setBundle] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/agent-deep-dive')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setBundle(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const entities = bundle?.entities || [];
+  const pending = bundle?.pending || [];
+  if (!entities.length && !pending.length) return null;
+
+  // Sort by whether the entity appears in today's agent list first
+  const activeAgentNames = new Set((agents || []).map(a => a.rep));
+  const ordered = [...entities].sort((a, b) => {
+    const aIn = activeAgentNames.has(a.name) ? 0 : 1;
+    const bIn = activeAgentNames.has(b.name) ? 0 : 1;
+    if (aIn !== bIn) return aIn - bIn;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const orderedPending = [...pending].sort((a, b) => (a || '').localeCompare(b || ''));
+
+  return (
+    <Section title="Agent Deep Dive" rightContent={<span style={{ fontSize: 10, color: C.muted }}>{entities.length} of {entities.length + pending.length} agents analyzed (run {bundle?.runDate || '—'})</span>}>
+      <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontStyle: 'italic' }}>
+        Per-agent qualitative coaching analysis from Conversely. Click to expand.
+      </p>
+      {ordered.map((e, i) => (
+        <DeepDiveCard key={e.name || `a-${i}`} entity={e} defaultOpen={false} />
+      ))}
+      {orderedPending.map((name, i) => (
+        <div key={`p-${name || i}`} style={{ background: C.bg, border: `1px dashed ${C.border}`, borderRadius: 6, marginBottom: 8, padding: '10px 14px', opacity: 0.6 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.muted }}>{name}</div>
+          <div style={{ fontSize: 11, color: C.muted, fontStyle: 'italic', marginTop: 2 }}>
+            No analysis run yet for this agent.
+          </div>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 // ─── MAIN DASHBOARD ──────────────────────────────────
 export default function Dashboard({ data, allTimePolicies, goals, vaData, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource, activeTab, setActiveTab, voiceDrillTarget, setVoiceDrillTarget, aiPaneOpen, setAiPaneOpen, voiceTileTarget, setVoiceTileTarget, voicePanelOpen }) {
   if (loading || !data) {

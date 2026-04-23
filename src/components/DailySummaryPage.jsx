@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import DeepDiveCard from './shared/DeepDiveCard';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -30,6 +31,17 @@ function DeltaChip({ baseline, lower = false }) {
     <span style={{ color, fontSize: 10, marginLeft: 6, fontFamily: C.sans, fontWeight: 500 }}>
       {arrow}{Math.abs(pct).toFixed(0)}% vs 30d
     </span>
+  );
+}
+
+function PendingDeepDiveCard({ name }) {
+  return (
+    <div style={{ background: C.bg, border: `1px dashed ${C.border}`, borderRadius: 6, marginBottom: 8, padding: '10px 14px', opacity: 0.6 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.muted }}>{name}</div>
+      <div style={{ fontSize: 11, color: C.muted, fontStyle: 'italic', marginTop: 2 }}>
+        No analysis run yet for this agent.
+      </div>
+    </div>
   );
 }
 
@@ -500,6 +512,13 @@ export default function DailySummaryPage({ dateRange }) {
         ) : null;
       })()}
 
+      {/* ─── AGENT DEEP DIVE (Conversely agent 41) ─── */}
+      <AgentDeepDiveSection
+        embedded={viewData?.agentDeepDive || data.agentDeepDive}
+        todaysAgents={Object.keys(viewSales.byAgent || {})}
+        isWeekly={isWeekly}
+      />
+
       {/* ─── TABLE 5: POLICY STATUS PIPELINE ─── */}
       {(viewData?.statusPipeline || data.statusPipeline) && (viewData?.statusPipeline || data.statusPipeline).statuses?.length > 0 && (
         <Section title="Policy Status Pipeline">
@@ -593,5 +612,50 @@ export default function DailySummaryPage({ dateRange }) {
       </>
       )}
     </div>
+  );
+}
+
+function AgentDeepDiveSection({ embedded, todaysAgents = [], isWeekly = false }) {
+  const [bundle, setBundle] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/agent-deep-dive')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setBundle(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const entities = bundle?.entities?.length ? bundle.entities : (embedded?.entities || []);
+  const universe = bundle?.universe || [];
+  const pending = bundle?.pending || universe.filter(n => !entities.some(e => e.name === n));
+  const runDate = bundle?.runDate || embedded?.runDate;
+
+  if (!entities.length && !pending.length) return null;
+
+  const todaysSet = new Set(todaysAgents);
+  const orderedEntities = [...entities].sort((a, b) => {
+    const aIn = todaysSet.has(a.name) ? 0 : 1;
+    const bIn = todaysSet.has(b.name) ? 0 : 1;
+    if (aIn !== bIn) return aIn - bIn;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const orderedPending = [...pending].sort((a, b) => (a || '').localeCompare(b || ''));
+
+  return (
+    <Section title={isWeekly ? 'Weekly Agent Deep Dive' : 'Agent Deep Dive'}>
+      <p style={{ margin: '0 0 12px', fontSize: 11, color: C.muted, fontStyle: 'italic' }}>
+        Per-agent qualitative analysis from Conversely (run {runDate || '—'}).
+        {' '}
+        {entities.length} of {entities.length + pending.length} agents analyzed. Click to expand.
+      </p>
+      {orderedEntities.map((e, i) => (
+        <DeepDiveCard key={e.name || `a-${i}`} entity={e} defaultOpen={false} />
+      ))}
+      {orderedPending.map((name, i) => (
+        <PendingDeepDiveCard key={`p-${name || i}`} name={name} />
+      ))}
+    </Section>
   );
 }
