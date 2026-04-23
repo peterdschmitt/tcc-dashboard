@@ -317,6 +317,7 @@ export async function GET(request) {
         loggedInSec: totalLoggedIn,
         pausedSec: totalPaused,
         pausePct: totalLoggedIn > 0 ? (totalPaused / totalLoggedIn * 100) : 0,
+        appsPerTalkHour: totalTalkTime > 0 ? (dayPolicies.length / (totalTalkTime / 3600)) : 0,
         salesPerAgent: agentCount > 0 ? dayPolicies.length / agentCount : 0,
         calls: dayCalls.length,
         sales: dayPolicies.length,
@@ -407,7 +408,11 @@ export async function GET(request) {
 
     // ─── BUILD NARRATIVE CONTEXT ───
     const liveContext = `DAILY SUMMARY DATA for ${date}:
-SALES: ${apps} apps submitted
+SALES: ${apps} apps submitted${(() => {
+  const totalTalkSec = agentPerf.reduce((s, a) => s + (a.talkTime || 0), 0);
+  const apph = totalTalkSec > 0 ? (apps / (totalTalkSec / 3600)).toFixed(2) : '0.00';
+  return ` (${apph} apps/talk-hour)`;
+})()}
 FINANCIALS: CPA $${cpa.toFixed(2)}, GAR $${totalGAR.toFixed(0)}, Net Revenue $${netRevenue.toFixed(0)}, Lead Spend $${totalLeadSpend.toFixed(0)}, Commission $${totalComm.toFixed(0)}, Avg Premium $${avgPremium.toFixed(2)}, Prem:Cost ${premCost.toFixed(2)}x
 CALLS: ${totalCalls} total, ${billable} billable (${billableRate.toFixed(1)}%), Close Rate ${closeRate.toFixed(1)}%
 AGENTS: ${Object.entries(byAgent).map(([n, a]) => `${n}: ${a.apps} apps, $${a.premium.toFixed(0)} premium, $${a.gar.toFixed(0)} GAR, $${a.commission.toFixed(0)} commission`).join('; ')}
@@ -538,8 +543,17 @@ DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overv
     2. ALWAYS COMPUTE UTILIZATION = Total Talk Time ÷ Total Logged In, expressed as a percentage. State it explicitly. Available-but-idle is wasted shift; flag <60% utilization as soft demand or routing failure, >85% as a capacity ceiling.
     3. ALWAYS REPORT PAUSE. State Total Pause Time and Pause % of logged-in time. Flag pause % above 30% as elevated and above 50% as a serious shift-discipline issue. Pause directly subtracts from available capacity, so a high pause % on an understaffed day compounds the constraint.
     4. CONNECT TO OUTCOMES in one clause. Low staffing → call capacity ceiling → sales ceiling. Low utilization → demand or routing problem. High utilization with low sales → execution problem. High pause + low staffing → magnified capacity loss. Pick the implied causal chain and state it.
-    5. BANNED FILLER (do not write any of these): "positive indicator", "agent engagement", "for broader context", "indicates", "strong" (without a comparator), "robust", "healthy" (without a number). Strip any sentence whose only purpose is to label something good or bad — every sentence must add a number, a comparison, or a causal claim.
-  sales: Sales per Agent, Sales (Apps), Billable Calls, Conversion Rate. Name the top-producing agent(s).
+    5. ALWAYS REFERENCE 30-DAY BASELINES. The COMPANY/AGENT/CAMPAIGN BASELINES block above carries avg7 and avg30 for agentCount, availPct, talkTimeSec, loggedInSec. For each number you cite, also state how it compares vs the 30d avg with a percentage delta (e.g., "1 agent logged in vs 30d avg of 3.2 = -69%"). If a baseline is null/missing, say "insufficient history" rather than omitting the comparison.
+    6. BANNED FILLER (do not write any of these): "positive indicator", "agent engagement", "for broader context", "indicates", "strong" (without a comparator), "robust", "healthy" (without a number). Strip any sentence whose only purpose is to label something good or bad — every sentence must add a number, a comparison, or a causal claim.
+  sales: Sales (Apps), Apps/Talk-Hour, Billable Calls, Conversion Rate, Total Premium, Avg Premium per App. Name top-producing agent(s).
+    REQUIRED FRAMING for the sales section:
+    1. LEAD WITH GOAL DELTA + PREMIUM. Open with apps vs goal as a percent (e.g., "4 apps vs 5 goal = -20%") AND total premium generated. Raw counts without goal context are noise.
+    2. ALWAYS DECOMPOSE THE FUNNEL. Sales = Billable Calls × Close Rate. State which side was the constraint today: low billable + on-target close = supply problem (lead capacity). On-target billable + low close = execution problem (rep skill / qualification). Both low = compounded. Both high = the day worked.
+    3. APPS/TALK-HOUR IS THE PRIMARY PRODUCTIVITY METRIC. Always state company-wide Apps/Talk-Hour and the top agent's individual figure. This isolates rep efficiency from how much time was on shift. Flag <0.5 as low, >1.5 as high.
+    4. ECONOMICS TIE-IN. State Avg Premium per App. Flag if it dropped >10% vs 30d (suggests cherry-picking low-quality leads or product mix shift toward cheaper plans).
+    5. ALWAYS REFERENCE 30-DAY BASELINES. The COMPANY/AGENT/CAMPAIGN BASELINES block above carries avg7 and avg30 for every metric (apps, billables, closeRate, premium, avgPremium, etc.). For each number you cite, also state how it compares vs 30d avg or 30d total — explicitly, with a percentage delta. Example: "billable calls 18 (-49% vs goal 35; -41% vs 30d avg of 31)." If a baseline is null/missing for that metric, say "insufficient history" rather than skipping the comparison.
+    6. DO NOT FLAG NEAR-TARGET METRICS. A close rate within ±2 percentage points of goal is on-target — do NOT call it "below goal" or "potential for improvement."
+    7. BANNED FILLER (do not write any of these): "indicating potential for improvement", "slightly below", "aligning with", "in line with", "consistent with expectations", "room for growth", "trending in the right direction". Strip any sentence whose only purpose is to label a metric good or bad — every sentence must add a number, ratio, or causal claim.
   calls: Total Calls, Billable Rate. Compare both to 30-day averages; flag any driving campaign.
   revenue: Premium, Gross Adv Revenue, Commission, Net Revenue. Compare each to its 30-day average.
   cost: Lead Spend, CPA, RPC, Avg Premium. Lead Spend / CPA / RPC are lower-is-better; compare each to its 30-day average.

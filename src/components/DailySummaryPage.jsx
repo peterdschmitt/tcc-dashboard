@@ -299,6 +299,7 @@ export default function DailySummaryPage({ dateRange }) {
           // ─ SALES & CONVERSION ─
           { key: 'salesPerAgent', label: 'Sales per Agent', format: v => v != null ? v.toFixed(1) : '—', goal: 2.5, isAvg: true, section: 'sales' },
           { key: 'sales', label: 'Sales (Apps)', format: fmt, goal: 5, section: 'sales' },
+          { key: 'appsPerTalkHour', label: 'Apps / Talk-Hr', format: v => v != null ? v.toFixed(2) : '—', goal: 1.0, isAvg: true, section: 'sales' },
           { key: 'billables', label: 'Billable Calls', format: fmt, goal: 35, section: 'sales' },
           { key: 'closeRate', label: 'Conversion Rate', format: fmtP, goal: 22.5, isAvg: true, section: 'sales' },
           // ─ CALLS ─
