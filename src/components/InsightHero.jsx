@@ -158,7 +158,7 @@ export default function InsightHero({ category, date }) {
                   {it.text}
                   {it.severity && <Chip text={it.severity} severity={it.severity} />}
                 </div>
-                {it.evidence && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>↳ {it.evidence}</div>}
+                {it.evidence && <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic', opacity: 0.95 }}>↳ {it.evidence}</div>}
               </>
             )} />
             <Bucket title="🚨 Threshold Breaches" items={data.breaches} render={(it) => (
@@ -167,7 +167,7 @@ export default function InsightHero({ category, date }) {
                   {it.text}
                   {it.severity && <Chip text={it.severity} severity={it.severity} />}
                 </div>
-                {it.evidence && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>↳ {it.evidence}</div>}
+                {it.evidence && <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic', opacity: 0.95 }}>↳ {it.evidence}</div>}
               </>
             )} />
             <Bucket title="🎯 Actions" items={data.actions} render={(it) => (
@@ -176,7 +176,7 @@ export default function InsightHero({ category, date }) {
                   <span style={{ color: C.accent, fontFamily: C.mono, marginRight: 6 }}>{it.rank ? `${it.rank}.` : '•'}</span>
                   {it.text}
                 </div>
-                {it.evidence && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>↳ {it.evidence}</div>}
+                {it.evidence && <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic', opacity: 0.95 }}>↳ {it.evidence}</div>}
               </>
             )} />
             <Bucket title="🔁 Sustained Themes" items={data.themes} render={(it) => (
@@ -185,20 +185,20 @@ export default function InsightHero({ category, date }) {
                   {it.text}
                   {it.daysObserved && <Chip text={`${it.daysObserved} days`} severity="yellow" />}
                 </div>
-                {it.evidence && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>↳ {it.evidence}</div>}
+                {it.evidence && <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic', opacity: 0.95 }}>↳ {it.evidence}</div>}
               </>
             )} />
             <Bucket title="✓ Wins" items={data.wins} render={(it) => (
               <>
                 <div style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>{it.text}</div>
-                {it.evidence && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>↳ {it.evidence}</div>}
+                {it.evidence && <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic', opacity: 0.95 }}>↳ {it.evidence}</div>}
               </>
             )} />
             <Bucket title="💬 Examples & Quotes" items={data.examples} render={(it) => (
               <div style={{ borderLeft: `2px solid ${C.accent}44`, paddingLeft: 10 }}>
                 <div style={{ fontSize: 9, color: C.accent, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>{it.type || 'note'}</div>
                 <div style={{ fontSize: 11, color: C.text, marginTop: 3, lineHeight: 1.5 }}>{it.text}</div>
-                {it.context && <div style={{ fontSize: 10, color: C.muted, marginTop: 3, fontStyle: 'italic' }}>{it.context}</div>}
+                {it.context && <div style={{ fontSize: 10.5, color: C.text, marginTop: 3, fontStyle: 'italic', opacity: 0.85 }}>{it.context}</div>}
               </div>
             )} />
           </div>
