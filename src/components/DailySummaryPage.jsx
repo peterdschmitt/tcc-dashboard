@@ -294,6 +294,8 @@ export default function DailySummaryPage({ dateRange }) {
           { key: 'availPct', label: 'Avg Availability', format: fmtP, goal: 70, isAvg: true, section: 'availability' },
           { key: 'talkTimeSec', label: 'Total Talk Time', format: fmtTime, section: 'availability' },
           { key: 'loggedInSec', label: 'Total Logged In', format: fmtTime, section: 'availability' },
+          { key: 'pausedSec', label: 'Total Pause Time', format: fmtTime, section: 'availability' },
+          { key: 'pausePct', label: 'Pause %', format: fmtP, goal: 30, lower: true, isAvg: true, section: 'availability' },
           // ─ SALES & CONVERSION ─
           { key: 'salesPerAgent', label: 'Sales per Agent', format: v => v != null ? v.toFixed(1) : '—', goal: 2.5, isAvg: true, section: 'sales' },
           { key: 'sales', label: 'Sales (Apps)', format: fmt, goal: 5, section: 'sales' },
