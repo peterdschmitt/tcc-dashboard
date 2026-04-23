@@ -170,7 +170,7 @@ export default function DailySummaryPage({ dateRange }) {
     transition: 'all 0.2s',
   });
 
-  const aiInsightStyle = { margin: '0 0 12px', padding: '10px 14px', background: `${C.accent}0a`, border: `1px solid ${C.accent}22`, borderRadius: 6, fontSize: 12, color: C.muted, lineHeight: 1.6, fontStyle: 'italic' };
+  const aiInsightStyle = { margin: '0 0 12px', padding: '10px 14px', background: `${C.accent}0a`, border: `1px solid ${C.accent}22`, borderRadius: 6, fontSize: 12, color: C.text, lineHeight: 1.6, fontStyle: 'italic' };
 
   // Pick which dataset to render based on toggle
   const isWeekly = briefView === 'weekly';
