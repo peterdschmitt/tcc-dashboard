@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useVoiceMode } from '@/hooks/useVoiceMode';
+import InsightHero from './InsightHero';
 
 const isPlacedPolicy = p => ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(p.placed);
 
@@ -932,7 +933,10 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
             )}
 
             {selectedCategory && !reportLoading && reportContent && renderedElements && (
-              <>{renderedElements}</>
+              <>
+                <InsightHero category={selectedCategory} date={selectedDate} />
+                {renderedElements}
+              </>
             )}
           </div>
         </div>
