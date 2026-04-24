@@ -6,6 +6,7 @@ import {
   readCompanySeries, readAgentSeries, readCampaignSeries,
 } from '@/lib/snapshots';
 import { computeBaseline, buildBaselineBlock } from '@/lib/baselines';
+import { fuzzyMatchAgent } from '@/lib/utils';
 import { fetchAgentDeepDive } from '@/lib/conversely-api';
 
 const PLACED_STATUSES = ['Advance Released', 'Active - In Force', 'Submitted - Pending'];
@@ -195,6 +196,47 @@ export async function GET(request) {
 
     // ─── AGENT DIALER PERFORMANCE ───
     const agentPerf = perfData?.daily || perfData?.agents || [];
+
+    // ─── PER-AGENT NAR BREAKDOWN ───
+    // Allocate lead spend by billable calls handled. Match agent names across
+    // sources (policies use canonical names; calls/dialer may differ).
+    const agentList = Object.keys(byAgent);
+    const allocatedSpend = {};
+    calls.forEach(c => {
+      if (!c.isBillable || !c.rep) return;
+      const matched = fuzzyMatchAgent(c.rep, agentList) || c.rep;
+      allocatedSpend[matched] = (allocatedSpend[matched] || 0) + (c.cost || 0);
+    });
+    const allAgentNames = new Set([
+      ...agentList,
+      ...Object.keys(allocatedSpend),
+      ...agentPerf.map(a => fuzzyMatchAgent(a.rep, agentList) || a.rep).filter(Boolean),
+    ]);
+    const agentNarBreakdown = [];
+    allAgentNames.forEach(agent => {
+      const sales = byAgent[agent] || { apps: 0, premium: 0, gar: 0, commission: 0 };
+      const allocSpend = allocatedSpend[agent] || 0;
+      const dialer = agentPerf.find(a =>
+        a.rep === agent || (fuzzyMatchAgent(a.rep, [agent]) === agent)
+      );
+      const talkSec = dialer?.talkTime || 0;
+      const pausePct = dialer?.pausePct || 0;
+      const nar = sales.gar - sales.commission - allocSpend;
+      const narPerTalkHour = talkSec > 0 ? nar / (talkSec / 3600) : 0;
+      agentNarBreakdown.push({
+        agent,
+        nar,
+        apps: sales.apps,
+        premium: sales.premium,
+        gar: sales.gar,
+        commission: sales.commission,
+        leadSpend: allocSpend,
+        talkTimeSec: talkSec,
+        pausePct,
+        narPerTalkHour,
+      });
+    });
+    agentNarBreakdown.sort((a, b) => b.nar - a.nar);
 
     // ─── AGENT DIALER ALERTS ───
     const agentAlerts = [];
@@ -733,6 +775,7 @@ Return ONLY a JSON object:
         billableBySource,
       },
       agentPerf,
+      agentNarBreakdown,
       alerts: allAlerts,
       narrative,
       tableSummaries,

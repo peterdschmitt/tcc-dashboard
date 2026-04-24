@@ -235,6 +235,53 @@ export default function DailySummaryPage({ dateRange }) {
       {/* ─── SHARED CONTENT (renders for both views) ─── */}
       {(!isWeekly || (isWeekly && weekData && !weekLoading)) && (
       <>
+      {/* Per-Agent NAR + Activity */}
+      {(() => {
+        const rows = (viewData?.agentNarBreakdown || data.agentNarBreakdown || []);
+        if (!rows.length) return null;
+        const fmtNarHr = v => v != null && !isNaN(v) ? (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
+        return (
+          <Section title={isWeekly ? "Weekly Per-Agent NAR + Activity" : "Per-Agent NAR + Activity"}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>Agent</th>
+                  <th style={{ padding: '6px 10px', color: C.accent, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}`, fontWeight: 700 }}>NAR</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>NAR / Talk Hr</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Apps</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Premium</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>GAR</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Commission</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Lead Spend</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Talk Time</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'right', borderBottom: `1px solid ${C.border}` }}>Pause %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const narColor = r.nar > 0 ? C.green : r.nar < 0 ? C.red : C.text;
+                  const tdMono = (color = C.text, weight = 400) => ({ padding: '6px 10px', color, fontSize: 11, fontFamily: C.mono, textAlign: 'right', borderBottom: `1px solid ${C.border}22`, fontWeight: weight });
+                  return (
+                    <tr key={r.agent}>
+                      <td style={{ padding: '6px 10px', color: C.text, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}22` }}>{r.agent}</td>
+                      <td style={tdMono(narColor, 800)}>{fmtD(r.nar)}</td>
+                      <td style={tdMono(C.text)}>{fmtNarHr(r.narPerTalkHour)}</td>
+                      <td style={tdMono(C.text)}>{fmt(r.apps)}</td>
+                      <td style={tdMono(C.text)}>{fmtD(r.premium)}</td>
+                      <td style={tdMono(C.text)}>{fmtD(r.gar)}</td>
+                      <td style={tdMono(C.text)}>{fmtD(r.commission)}</td>
+                      <td style={tdMono(C.text)}>{fmtD(r.leadSpend)}</td>
+                      <td style={tdMono(C.text)}>{fmtTime(r.talkTimeSec)}</td>
+                      <td style={tdMono(r.pausePct > 50 ? C.red : r.pausePct > 30 ? C.yellow : C.text)}>{fmtP(r.pausePct)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Section>
+        );
+      })()}
+
       {/* AI Executive Summary */}
       {viewNarrative && (
         <Section title={isWeekly ? "Weekly Executive Summary" : "Executive Summary"}>
