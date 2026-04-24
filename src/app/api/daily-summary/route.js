@@ -420,7 +420,22 @@ PUBLISHERS: ${Object.entries(byCampaign).map(([n, c]) => `${n}: ${c.calls} calls
 CARRIERS: ${byCarrier.map(c => `${c.carrier}: ${c.sales} sales, $${c.premium.toFixed(0)} premium, $${c.gar.toFixed(0)} GAR, Conv ${c.conversionRate.toFixed(1)}%`).join('; ')}
 ALERTS: ${allAlerts.length === 0 ? 'All metrics on target' : allAlerts.map(a => `${a.agent ? a.agent + ' ' : ''}${a.metric}: ${typeof a.actual === 'number' ? a.actual.toFixed(1) : a.actual} vs goal ${a.goal} (${a.status.toUpperCase()})`).join('; ')}
 ${agentPerf.length > 0 ? 'AGENT DIALER: ' + agentPerf.map(a => `${a.rep}: avail ${a.availPct?.toFixed(1) || '?'}%, pause ${a.pausePct?.toFixed(1) || '?'}%, logged in ${a.loggedInStr || '?'}, talk time ${a.talkTimeStr || '?'}, ${a.dialed || 0} dials, ${a.connects || 0} connects`).join('; ') : ''}
-VIRTUAL AGENT: ${vaCalls.length} calls, ${vaCalls.filter(c => c.transferConfirmation).length} transfers (${vaCalls.length > 0 ? ((vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length) * 100).toFixed(1) : '0.0'}% transfer rate)
+VIRTUAL AGENT: ${vaCalls.length} calls, ${vaCalls.filter(c => c.transferConfirmation).length} transfers (${vaCalls.length > 0 ? ((vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length) * 100).toFixed(1) : '0.0'}% transfer rate)${vaCalls.length > 0 ? `
+VIRTUAL AGENT SCREENER FUNNEL: intent ${(vaCalls.filter(c => c.intentConfirmation).length / vaCalls.length * 100).toFixed(1)}% → DOB ${(vaCalls.filter(c => c.collectDob).length / vaCalls.length * 100).toFixed(1)}% → coverage ${(vaCalls.filter(c => c.existingCoverage).length / vaCalls.length * 100).toFixed(1)}% → budget ${(vaCalls.filter(c => c.budgetQualification).length / vaCalls.length * 100).toFixed(1)}% → state ${(vaCalls.filter(c => c.collectState).length / vaCalls.length * 100).toFixed(1)}% → transfer ${(vaCalls.filter(c => c.transferConfirmation).length / vaCalls.length * 100).toFixed(1)}%` : ''}${vaCalls.length > 0 ? `
+VIRTUAL AGENT BY CAMPAIGN: ${(() => {
+  const byCamp = {};
+  vaCalls.forEach(c => {
+    const k = c.campaign || 'Unknown';
+    if (!byCamp[k]) byCamp[k] = { calls: 0, transfers: 0 };
+    byCamp[k].calls++;
+    if (c.transferConfirmation) byCamp[k].transfers++;
+  });
+  return Object.entries(byCamp)
+    .sort((a, b) => b[1].calls - a[1].calls)
+    .slice(0, 5)
+    .map(([k, v]) => `${k}: ${v.calls} calls, ${v.transfers} transfers (${(v.transfers / v.calls * 100).toFixed(1)}%)`)
+    .join('; ');
+})()}` : ''}
 ${baselineBlock ? '\n' + baselineBlock : ''}${deepDiveBlock}`;
 
     // ─── LOAD AI ANALYSIS RULES ───
@@ -579,7 +594,15 @@ DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overv
     4. PREMIUM:COST RATIO is the bottom-line quality-of-spend metric. State it (Total Premium ÷ Lead Spend) and compare to the 2.5x goal. <2.5x = spending more than premium justifies; >2.5x = healthy spend conversion.
     5. AVG PREMIUM PER APP DUAL-DELTA. State both vs $70 goal AND vs 30d avg. Often diverges (e.g., today $62 = -12% vs goal AND +10% vs 30d avg).
     6. BANNED FILLER: "indicating inefficiencies in cost management", "showing improved revenue per call", "moderate cost pressure", "in line with cost expectations", "improved" applied to a rising cost metric. Every sentence must add a number, ratio, or causal claim.
-  va: VA Calls, VA Transfers, VA Transfer Rate — use the exact numbers from the "VIRTUAL AGENT:" line in the data above. Describe call volume, transfer count, and transfer rate. Only write "Virtual agent had no meaningful activity today." when VIRTUAL AGENT shows 0 calls AND 0 transfers.
+  va: VA Calls, VA Transfers, VA Transfer Rate, Screener Funnel (intent → DOB → coverage → budget → state → transfer). Goals: VA Calls ≥100/day, Transfer Rate ≥30%.
+    REQUIRED FRAMING for the VA section:
+    1. STATE TRANSFER RATE vs 30% goal AND vs 30d avg explicitly. Example: "27 calls × 25.9% transfer rate = 7 transfers; transfer rate is 4.1pp below the 30% goal."
+    2. ANALYZE QUALIFICATION RATES (NOT a sequential funnel). The VIRTUAL AGENT SCREENER FUNNEL line shows independent qualification flags, not sequential stages. IGNORE any stage at 0% — those are likely untracked fields, not real failures. From the NON-ZERO stages, identify the LOWEST rate as the qualification bottleneck (transfer rate excluded — that is the outcome). Example: "Tracked qualification rates: DOB 44%, Budget 44%, Transfer 26% — Budget is the binding constraint among tracked steps, dropping ~18pp into transfer." If only Transfer Rate is non-zero, just report it without funnel commentary.
+    3. NAME THE TOP CAMPAIGN by VA call volume from the VIRTUAL AGENT BY CAMPAIGN line, with its transfer rate. Flag if a single campaign drives both volume and below-average transfer rate.
+    4. CONNECT TO BILLABLE CALLS. VA transfers should funnel into billable calls — state today's VA transfers as a share of today's total billable calls (e.g., "7 VA transfers contributed to 18 billable calls = 39%").
+    5. REFERENCE 30D BASELINE on transfer rate and call volume.
+    6. ZERO-VOLUME RULE. Only say "Virtual agent had no meaningful activity today." when VIRTUAL AGENT shows 0 calls AND 0 transfers — never as a softener for low (but nonzero) activity.
+    7. BANNED FILLER: "moderate activity", "room for improvement in transfer efficiency", "transfer efficiency could be improved", "shows opportunity". Every sentence must add a number, ratio, causal claim, or stage identification.
 
 ${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Be specific per section and do not repeat facts across sections.')}
 
