@@ -36,8 +36,11 @@ function buildLiveDataContext(policies, calls, pnl, dateRange) {
   const avgPremium = apps > 0 ? totalPremium / apps : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
-  const netRevenue = totalGAR - totalLeadSpend - totalComm;
-  const premCost = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
+  const effRevenue = totalGAR * 0.70;
+  const effComm = totalComm * 0.70;
+  const netRevenue = effRevenue - totalLeadSpend - effComm;
+  const varCost = totalLeadSpend + effComm;
+  const premCost = varCost > 0 ? (effRevenue / varCost) * 100 : 0;
   const agentMap = {};
   (policies || []).forEach(p => {
     if (!agentMap[p.agent]) agentMap[p.agent] = { apps: 0, placed: 0, premium: 0 };
@@ -50,7 +53,7 @@ function buildLiveDataContext(policies, calls, pnl, dateRange) {
     const pubBillRate = p.totalCalls > 0 ? (p.billableCalls / p.totalCalls * 100) : 0;
     return `${p.campaign} (${p.vendor || ''}): ${p.totalCalls} calls, ${p.billableCalls} billable (${pubBillRate.toFixed(1)}%), $${p.leadSpend.toFixed(2)} spend, RPC $${pubRpc.toFixed(2)}, ${p.placedCount} placed`;
   }).join('\n  ');
-  return `\nLIVE DASHBOARD DATA (${dateRange?.start || ''} to ${dateRange?.end || ''}):\nThese are the exact numbers currently displayed. USE THESE NUMBERS, not report data.\n\nSUMMARY: Apps: ${apps}, Placed: ${placed.length}, Calls: ${totalCalls}, Billable: ${billable} (${billableRate.toFixed(1)}%), Premium: $${totalPremium.toFixed(2)}, GAR: $${totalGAR.toFixed(0)}, Lead Spend: $${totalLeadSpend.toFixed(0)}, Commission: $${totalComm.toFixed(0)}, Net Revenue: $${netRevenue.toFixed(0)}, CPA: $${cpa.toFixed(2)}, RPC: $${rpc.toFixed(2)}, Close Rate: ${closeRate.toFixed(1)}%, Placement Rate: ${placementRate.toFixed(1)}%, Premium:Cost: ${premCost.toFixed(2)}x, Avg Premium: $${avgPremium.toFixed(2)}\n\nAGENTS:\n  ${agentSummary || 'No agent data'}\n\nPUBLISHERS:\n  ${pubSummary || 'No publisher data'}`;
+  return `\nLIVE DASHBOARD DATA (${dateRange?.start || ''} to ${dateRange?.end || ''}):\nThese are the exact numbers currently displayed. USE THESE NUMBERS, not report data.\n\nSUMMARY: Apps: ${apps}, Placed: ${placed.length}, Calls: ${totalCalls}, Billable: ${billable} (${billableRate.toFixed(1)}%), Premium: $${totalPremium.toFixed(2)}, GAR: $${totalGAR.toFixed(0)}, Lead Spend: $${totalLeadSpend.toFixed(0)}, Commission: $${totalComm.toFixed(0)}, Net Revenue: $${netRevenue.toFixed(0)}, CPA: $${cpa.toFixed(2)}, RPC: $${rpc.toFixed(2)}, Close Rate: ${closeRate.toFixed(1)}%, Placement Rate: ${placementRate.toFixed(1)}%, Rev:Cost: ${premCost.toFixed(1)}%, Avg Premium: $${avgPremium.toFixed(2)}\n\nAGENTS:\n  ${agentSummary || 'No agent data'}\n\nPUBLISHERS:\n  ${pubSummary || 'No publisher data'}`;
 }
 
 const C = {

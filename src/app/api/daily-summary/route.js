@@ -45,7 +45,7 @@ function computeAlerts(metrics, goals, companyMeta, companyBaselines = {}) {
     { key: 'rpc',                label: 'RPC',                actual: metrics.rpc,           snapKey: 'rpc',         isRate: true },
     { key: 'close_rate',         label: 'Close Rate',         actual: metrics.closeRate,     snapKey: 'closeRate',   isRate: true },
     { key: 'placement_rate',     label: 'Placement Rate',     actual: metrics.placementRate, snapKey: 'placementRate', isRate: true },
-    { key: 'premium_cost_ratio', label: 'Premium:Cost',       actual: metrics.premCost,      snapKey: 'premCost',    isRate: true },
+    { key: 'premium_cost_ratio', label: 'Rev:Cost',           actual: metrics.premCost,      snapKey: 'premCost',    isRate: true },
     { key: 'avg_premium',        label: 'Avg Premium',        actual: metrics.avgPremium,    snapKey: 'avgPremium',  isRate: true },
   ];
 
@@ -182,8 +182,11 @@ export async function GET(request) {
     const avgPremium = apps > 0 ? totalPremium / apps : 0;
     const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
     const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
-    const netRevenue = totalGAR - totalLeadSpend - totalComm;
-    const premCost = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
+    const effRevenue = totalGAR * 0.70;
+    const effComm = totalComm * 0.70;
+    const netRevenue = effRevenue - totalLeadSpend - effComm;
+    const varCost = totalLeadSpend + effComm;
+    const premCost = varCost > 0 ? (effRevenue / varCost) * 100 : 0;
 
     // ─── CALLS BY SOURCE ───
     const callsBySource = {};

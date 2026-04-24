@@ -230,7 +230,7 @@ function SortableModalTable({ columns, rows, totals, thStyle, tdStyle, onRowClic
   );
 }
 
-function TileModal({ tileKey, policies, calls, pnl, onClose }) {
+function TileModal({ tileKey, policies, calls, pnl, goals, onClose }) {
   const [modalTab, setModalTab] = useState('campaign');
   const [drillTarget, setDrillTarget] = useState(null);
   if (!tileKey) return null;
@@ -867,21 +867,32 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
       };
     })(),
     premium_cost_ratio: (() => {
-      const pcrRows = [...pnl].filter(r => r.leadSpend > 0).sort((a, b) => {
-        const rA = a.leadSpend > 0 ? a.totalPremium / a.leadSpend : 0;
-        const rB = b.leadSpend > 0 ? b.totalPremium / b.leadSpend : 0;
+      const _cg = goals?.company || {};
+      const _effEnabled = (_cg.effectuation_enabled ?? 1) >= 1;
+      const _effRate = _effEnabled ? (_cg.effectuation_rate ?? 70) / 100 : 1;
+      const rowEffRev = r => (r.grossAdvancedRevenue || 0) * _effRate;
+      const rowEffComm = r => (r.totalCommission || 0) * _effRate;
+      const rowVarCost = r => (r.leadSpend || 0) + rowEffComm(r);
+      const pcrRows = [...pnl].filter(r => rowVarCost(r) > 0).sort((a, b) => {
+        const rA = rowVarCost(a) > 0 ? rowEffRev(a) / rowVarCost(a) : 0;
+        const rB = rowVarCost(b) > 0 ? rowEffRev(b) / rowVarCost(b) : 0;
         return rB - rA; // best ratio first
       });
-      const totalPrem  = pcrRows.reduce((s, r) => s + (r.totalPremium||0), 0);
-      const totalSpend = pcrRows.reduce((s, r) => s + (r.leadSpend||0), 0);
-      const overallRatio = totalSpend > 0 ? totalPrem / totalSpend : 0;
+      const totalPrem    = pcrRows.reduce((s, r) => s + (r.totalPremium||0), 0);
+      const totalSpend   = pcrRows.reduce((s, r) => s + (r.leadSpend||0), 0);
+      const totalComm    = pcrRows.reduce((s, r) => s + (r.totalCommission||0), 0);
+      const totalEffComm = totalComm * _effRate;
+      const totalVarCost = totalSpend + totalEffComm;
+      const totalEffRev  = pcrRows.reduce((s, r) => s + rowEffRev(r), 0);
+      const overallRatio = totalVarCost > 0 ? (totalEffRev / totalVarCost) * 100 : 0;
       return {
-        title: 'Premium:Cost Ratio — By Publisher',
-        summary: `${fmtDollar(totalPrem, 2)} premium · ${fmtDollar(totalSpend)} spend · overall ${overallRatio.toFixed(2)}x`,
+        title: 'Rev:Cost Ratio — By Publisher',
+        summary: `${fmtDollar(totalEffRev, 2)} eff. rev · ${fmtDollar(totalVarCost)} variable cost · overall ${fmtPct(overallRatio)}`,
         financials: [
-          { label: 'Premium:Cost',   value: overallRatio.toFixed(2) + 'x',  color: overallRatio >= 2.5 ? C.green : overallRatio >= 2 ? C.yellow : C.red },
-          { label: 'Total Premium',  value: fmtDollar(totalPrem, 2),         color: C.green },
-          { label: 'Total Spend',    value: fmtDollar(totalSpend),           color: C.yellow },
+          { label: 'Rev:Cost',       value: fmtPct(overallRatio),             color: overallRatio >= 45 ? C.green : overallRatio >= 35 ? C.yellow : C.red },
+          { label: 'Eff. Revenue',   value: fmtDollar(totalEffRev, 2),       color: C.green },
+          { label: 'Lead Spend',     value: fmtDollar(totalSpend),           color: C.yellow },
+          { label: 'Eff. Commission', value: fmtDollar(totalEffComm),        color: C.yellow },
         ],
         rows: pcrRows,
         columns: [
@@ -890,8 +901,9 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           { label: 'Placed',         render: r => fmt(r.placedCount||0),                                                                                               color: C.green },
           { label: 'Premium',        render: r => fmtDollar(r.totalPremium||0, 2),                                                                                     color: C.green },
           { label: 'Lead Spend',     render: r => fmtDollar(r.leadSpend||0, 2),                                                                                        color: C.yellow },
-          { label: 'Prem:Cost',      render: r => r.leadSpend > 0 ? (r.totalPremium/r.leadSpend).toFixed(2) + 'x' : '—',                                              color: r => { const v = r.leadSpend > 0 ? r.totalPremium/r.leadSpend : 0; return v >= 2.5 ? C.green : v >= 2 ? C.yellow : C.red; } },
-          { label: 'Avg Premium',    render: r => r.appCount > 0 ? fmtDollar(r.totalPremium/r.appCount, 2) : '—',                                                   color: C.muted },
+          { label: 'Eff. Comm',      render: r => fmtDollar(rowEffComm(r), 2),                                                                                          color: C.yellow },
+          { label: 'Eff. Rev',       render: r => fmtDollar(rowEffRev(r), 2),                                                                                          color: C.green },
+          { label: 'Rev:Cost',       render: r => rowVarCost(r) > 0 ? fmtPct((rowEffRev(r)/rowVarCost(r)) * 100) : '—',                                                color: r => { const v = rowVarCost(r) > 0 ? (rowEffRev(r)/rowVarCost(r)) * 100 : 0; return v >= 45 ? C.green : v >= 35 ? C.yellow : C.red; } },
           { label: 'CPA',            render: r => r.placedCount > 0 ? fmtDollar(r.leadSpend/r.placedCount) : '—',                                                     color: C.muted },
         ],
         totals: [
@@ -899,8 +911,10 @@ function TileModal({ tileKey, policies, calls, pnl, onClose }) {
           fmt(pcrRows.reduce((s,r)=>s+(r.placedCount||0),0)),
           fmtDollar(totalPrem, 2),
           fmtDollar(totalSpend, 2),
-          overallRatio.toFixed(2) + 'x',
-          '', '',
+          fmtDollar(totalEffComm, 2),
+          fmtDollar(totalEffRev, 2),
+          fmtPct(overallRatio),
+          '',
         ],
       };
     })(),
@@ -1387,8 +1401,10 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
   const effEnabled = (cg.effectuation_enabled ?? 1) >= 1;
   const effRate = effEnabled ? (cg.effectuation_rate ?? 70) / 100 : 1;
   const effRevenue = totalGAR * effRate;
-  const netRevenue = effRevenue - totalLeadSpend - totalComm;
-  const premCostRatio = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
+  const effComm = totalComm * effRate;
+  const netRevenue = effRevenue - totalLeadSpend - effComm;
+  const varCost = totalLeadSpend + effComm;
+  const premCostRatio = varCost > 0 ? (effRevenue / varCost) * 100 : 0;
 
   const m = key => meta[key] || { lower: false, yellow: 80 };
 
@@ -1405,7 +1421,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
       { label: 'Gross Adv Revenue', actual: totalGAR, dailyGoal: cg.gross_adv_revenue, key: 'gross_adv_revenue', format: v => fmtDollar(v) },
       { label: `Eff. Revenue${effEnabled ? ' (' + (effRate * 100).toFixed(0) + '%)' : ''}`, actual: effRevenue, dailyGoal: cg.eff_revenue, key: 'eff_revenue', format: v => fmtDollar(v) },
       { label: 'Lead Spend', actual: totalLeadSpend, dailyGoal: cg.lead_spend, key: 'lead_spend', format: v => fmtDollar(v) },
-      { label: 'Agent Commission', actual: totalComm, dailyGoal: cg.agent_commission, key: 'agent_commission', format: v => fmtDollar(v) },
+      { label: 'Agent Commission', actual: effComm, dailyGoal: cg.agent_commission, key: 'agent_commission', format: v => fmtDollar(v), subtext: effEnabled ? `Raw: ${fmtDollar(totalComm)}` : null },
       { label: 'Net Revenue', actual: netRevenue, dailyGoal: cg.net_revenue, key: 'net_revenue', format: v => fmtDollar(v) },
     ],
     [
@@ -1413,7 +1429,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
       { label: 'RPC', actual: rpc, dailyGoal: cg.rpc, key: 'rpc', format: v => fmtDollar(v, 2), isRate: true },
       { label: 'Close Rate', actual: closeRate, dailyGoal: cg.close_rate, key: 'close_rate', format: fmtPct, isRate: true },
       { label: 'Placement Rate', actual: placementRate, dailyGoal: cg.placement_rate, key: 'placement_rate', format: fmtPct, isRate: true },
-      { label: 'Premium:Cost', actual: premCostRatio, dailyGoal: cg.premium_cost_ratio, key: 'premium_cost_ratio', format: v => v.toFixed(2) + 'x', isRate: true },
+      { label: 'Rev:Cost', actual: premCostRatio, dailyGoal: cg.premium_cost_ratio, key: 'premium_cost_ratio', format: fmtPct, isRate: true },
       { label: 'Avg Premium', actual: avgPremium, dailyGoal: cg.avg_premium, key: 'avg_premium', format: v => fmtDollar(v, 2), isRate: true },
     ],
   ];
@@ -1422,7 +1438,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
 
   return (
     <>
-    {activeTile && <TileModal key={activeTile} tileKey={activeTile} policies={policies} calls={calls} pnl={pnl} onClose={() => setActiveTile(null)} />}
+    {activeTile && <TileModal key={activeTile} tileKey={activeTile} policies={policies} calls={calls} pnl={pnl} goals={goals} onClose={() => setActiveTile(null)} />}
     <Section title={`Goal Comparison — ${days} active day${days !== 1 ? 's' : ''}`}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rows.map((row, ri) => (
@@ -1439,7 +1455,7 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
               return (
                 <div key={g.label} onClick={isClickable ? () => setActiveTile(g.key) : undefined} style={{ background: tileBg, borderRadius: 6, padding: '10px 14px', border: `1px solid ${C.border}`, cursor: isClickable ? 'pointer' : 'default', position: 'relative' }}>
                   <div style={{ fontSize: 9, color: '#c4d5e8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{g.label}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: g.subtext ? 2 : 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 800, fontFamily: C.mono, color: tileColor, lineHeight: 1 }}>{g.format(g.actual)}</span>
                     {pctLabel && (
                       <span style={{
@@ -1448,6 +1464,9 @@ function GoalComparison({ policies: _policies, calls: _calls, pnl: _pnl, goals, 
                       }}>{pctLabel}</span>
                     )}
                   </div>
+                  {g.subtext && (
+                    <div style={{ fontSize: 10, color: C.muted, fontFamily: C.mono, marginBottom: 6 }}>{g.subtext}</div>
+                  )}
                   {periodGoal && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 6 }}>
                       {!g.isRate && (
@@ -3582,7 +3601,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth + (commSidebarOpen ? 520 : 0), transition: 'margin-right 0.2s ease' }}>
       {/* Voice-triggered tile modal */}
       {voiceTileTarget && MODAL_CONFIGS_KEYS.includes(voiceTileTarget) && (
-        <TileModal tileKey={voiceTileTarget} policies={policies} calls={calls} pnl={pnl} onClose={() => setVoiceTileTarget(null)} />
+        <TileModal tileKey={voiceTileTarget} policies={policies} calls={calls} pnl={pnl} goals={goals} onClose={() => setVoiceTileTarget(null)} />
       )}
       {/* White calendar date pickers rendered below */}
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '12px 24px', position: 'sticky', top: 0, zIndex: 50 }}>

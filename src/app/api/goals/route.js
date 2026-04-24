@@ -53,6 +53,7 @@ export async function GET() {
       apps_per_day: 'apps_submitted', policiesplaced: 'policies_placed',
       policies_per_day: 'policies_placed', premiumcost: 'premium_cost_ratio',
       premium_cost: 'premium_cost_ratio', 'premium:cost': 'premium_cost_ratio',
+      revcost: 'premium_cost_ratio', rev_cost: 'premium_cost_ratio', 'rev:cost': 'premium_cost_ratio',
     };
     // Apply aliases to both company and companyMeta
     Object.entries(goals.company).forEach(([k, v]) => {
@@ -70,7 +71,7 @@ export async function GET() {
       avg_premium: 70, apps_submitted: 5, policies_placed: 3, total_calls: 50,
       billable_calls: 35, monthly_premium: 500, gross_adv_revenue: 4000,
       eff_revenue: 2800, // gross_adv_revenue * effectuation_rate (4000 * 0.70)
-      lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 2.5,
+      lead_spend: 1500, agent_commission: 1000, net_revenue: 2000, premium_cost_ratio: 45,
       effectuation_rate: 70, effectuation_enabled: 1,
       va_calls: 100, va_transfers: 30, va_transfer_rate: 30,
       va_sales: 5, va_conversion_rate: 15,

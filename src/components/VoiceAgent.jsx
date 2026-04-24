@@ -35,8 +35,11 @@ function buildLiveDataContext(policies, calls, pnl, dateRange) {
   const avgPremium = apps > 0 ? totalPremium / apps : 0;
   const billableRate = totalCalls > 0 ? billable / totalCalls * 100 : 0;
   const rpc = totalCalls > 0 ? totalLeadSpend / totalCalls : 0;
-  const netRevenue = totalGAR - totalLeadSpend - totalComm;
-  const premCost = totalLeadSpend > 0 ? totalPremium / totalLeadSpend : 0;
+  const effRevenue = totalGAR * 0.70;
+  const effComm = totalComm * 0.70;
+  const netRevenue = effRevenue - totalLeadSpend - effComm;
+  const varCost = totalLeadSpend + effComm;
+  const premCost = varCost > 0 ? (effRevenue / varCost) * 100 : 0;
 
   // Per-agent breakdown
   const agentMap = {};
@@ -76,7 +79,7 @@ SUMMARY METRICS:
 - RPC: $${rpc.toFixed(2)}
 - Close Rate: ${closeRate.toFixed(1)}%
 - Placement Rate: ${placementRate.toFixed(1)}%
-- Premium:Cost Ratio: ${premCost.toFixed(2)}x
+- Rev:Cost Ratio: ${premCost.toFixed(1)}%
 - Avg Premium: $${avgPremium.toFixed(2)}
 
 AGENTS:
