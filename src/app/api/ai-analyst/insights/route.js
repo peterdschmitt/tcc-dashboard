@@ -5,6 +5,7 @@ import {
   isConverselyEnabled,
 } from '@/lib/conversely-api';
 import { getPriorities } from '@/lib/insight-priorities';
+import { extractMarkdownTables } from '@/lib/extract-markdown-tables';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ function getOpenAI() {
 }
 
 function buildSystemPrompt() {
-  return `You are a synthesis layer over a CONVERSELY.AI analyst report. Your job is to extract the report's most valuable findings into a structured JSON object — preserving the qualitative depth, examples, and verbatim evidence the agent already wrote.
+  return `You are a synthesis layer over a CONVERSELY.AI analyst report. Your job is to extract the report's findings into a structured JSON object — preserving the qualitative depth, examples, and verbatim evidence the agent already wrote.
 
 CRITICAL RULES
 - Do NOT summarize away the agent's specific examples, names, quotes, or numbers. Carry them through verbatim or near-verbatim into the "evidence" field of each item.
@@ -38,6 +39,15 @@ CRITICAL RULES
 - The "headline" must reference the highest-ranked priority item that has strong signal in today's report. Severity-override items (marked OVERRIDE in the priority list) jump the queue when present.
 - Down-weight any insight whose underlying segment has fewer than ~5 billable calls.
 - Prefer specifics over generalities ("HIW × Michael close rate 17% vs HIW × Kari 39% — same campaign, different outcome" beats "rep performance varies").
+
+RETURN EVERY ITEM THE REPORT CONTAINS
+For every array field below (anomalies, breaches, actions, topProblems, topOpportunities, nextWeekActions, followUpDataNeeded, themes, wins, examples): return every item the report contains. Do NOT cap, do NOT select a "top N", do NOT merge items to save space. If the report has 7 problems, return 7. If it has 12 examples, return 12. Only the "kpis" array has a soft cap of 6 for layout reasons.
+
+SECTION MAPPING
+For topProblems, topOpportunities, nextWeekActions, followUpDataNeeded: these correspond to explicit sections in the report. If the report contains a section titled "Top 3 Problems", "Top 3 Opportunities", "If I Only Did 3 Things Next Week", or "Follow-Up Data Needed" (or any clear variant of these — the number in the title may differ), extract every item from that section. Do not invent items; return an empty array if the section is absent.
+
+PRESERVE NUMERIC EVIDENCE VERBATIM
+The "lift" field in topOpportunities should carry the report's own quantification, e.g. "+1 sale, CPA $240 → $171 (-$69)". The "evidence" fields should carry specific numbers, names, and segment breakdowns verbatim from the report.
 
 OUTPUT SHAPE — return STRICT JSON matching exactly:
 {
@@ -61,6 +71,18 @@ OUTPUT SHAPE — return STRICT JSON matching exactly:
   "actions": [
     { "text": "string — imperative action", "rank": 1-3, "evidence": "string — why this action, citing the report's reasoning" }
   ],
+  "topProblems": [
+    { "rank": 1, "title": "string — the problem statement", "scope": "string — e.g. 'Overall' or 'HIW' or 'Michael P'", "evidence": "string — verbatim evidence from the report" }
+  ],
+  "topOpportunities": [
+    { "rank": 1, "title": "string — the opportunity", "lift": "string — quantified delta from the report, e.g. '+1 sale, CPA $240 → $171'", "evidence": "string — verbatim evidence" }
+  ],
+  "nextWeekActions": [
+    { "rank": 1, "action": "string — the actionable next step", "evidence": "string — why this is the next step, citing the report" }
+  ],
+  "followUpDataNeeded": [
+    { "dataNeeded": "string — what additional data is needed", "why": "string — why it matters", "currentEvidence": "string — what in today's report signals this gap" }
+  ],
   "themes": [
     { "text": "string — the recurring theme", "daysObserved": number | null, "evidence": "string — examples or quotes that illustrate the theme" }
   ],
@@ -73,10 +95,8 @@ OUTPUT SHAPE — return STRICT JSON matching exactly:
 }
 
 LIMITS
-- kpis: max 4
-- anomalies, breaches, actions: max 3 each
-- themes, wins: max 2 each
-- examples: max 4 (only include if the report has rich qualitative content like quotes, case studies, transcripts, archetypes)
+- kpis: max 6 (soft cap for layout)
+- All other arrays: NO CAP. Return every item the report contains.
 
 Return ONLY the JSON. No markdown fences, no commentary.`;
 }
@@ -108,6 +128,8 @@ async function runSynthesis({ category, date, agentId }) {
       },
       kpis: [], topAction: null, anomalies: [], breaches: [],
       actions: [], themes: [], wins: [], examples: [],
+      topProblems: [], topOpportunities: [], nextWeekActions: [], followUpDataNeeded: [],
+      evidenceTables: [], rawMarkdown: '',
       meta: { source: 'no-report', agentId, date },
     };
   }
@@ -126,7 +148,7 @@ async function runSynthesis({ category, date, agentId }) {
       }) },
     ],
     temperature: 0.2,
-    max_tokens: 2000,
+    max_tokens: 8000,
   });
   const synthesisMs = Date.now() - t0;
 
@@ -138,8 +160,12 @@ async function runSynthesis({ category, date, agentId }) {
     throw new Error(`Synthesis returned invalid JSON: ${e.message}`);
   }
 
+  const evidenceTables = extractMarkdownTables(result.result_message);
+
   return {
     ...parsed,
+    evidenceTables,
+    rawMarkdown: result.result_message,
     meta: {
       source: 'conversely',
       agentId,
@@ -147,6 +173,7 @@ async function runSynthesis({ category, date, agentId }) {
       runDate: result.run_date,
       synthesisMs,
       rawReportLength: result.result_message.length,
+      evidenceTableCount: evidenceTables.length,
       modelUsed: 'gpt-4o',
     },
   };
