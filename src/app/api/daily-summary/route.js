@@ -571,7 +571,14 @@ DAILY OVERVIEW — Write SIX short summaries, one per section of the Daily Overv
     4. AVG PREMIUM PER APP TREND. State today's avg premium and its vs-30d delta. Dropping >10% suggests cheap-plan / cherry-picked leads; rising >10% suggests a high-value day worth investigating for replicable drivers.
     5. ALWAYS REFERENCE 30-DAY BASELINES with both absolute ($) and percent delta. When avg30 baseline is null, say "insufficient history."
     6. BANNED FILLER: "mixed performance", "overall", "in the revenue space", "moderate", "adequate", "revenue generation" (bare). Every sentence must add a number, ratio, causal claim, or comparison.
-  cost: Lead Spend, CPA, RPC, Avg Premium. Lead Spend / CPA / RPC are lower-is-better; compare each to its 30-day average.
+  cost: Lead Spend, CPA, RPC, Avg Premium per App, Premium:Cost Ratio. Goals: Lead Spend ≤$1500/day, CPA ≤$200, RPC ≤$35, Avg Premium ≥$70, Premium:Cost ≥2.5x.
+    REQUIRED FRAMING for the cost section:
+    1. LOWER-IS-BETTER METRICS NEED EXPLICIT DIRECTION. Lead Spend, CPA, and RPC are all costs — going UP is BAD, going DOWN is GOOD. Never describe an increase in CPA or RPC as "improved" or "better." Always frame them as: "RPC $14.00 vs $7.15 30d avg = +96% (cost per call DOUBLED — bad)." Avg Premium and Premium:Cost are higher-is-better.
+    2. DECOMPOSE THE RATIOS. CPA = Lead Spend ÷ Apps; RPC = Lead Spend ÷ Total Calls. When CPA jumps, identify which side moved: spend up vs apps down (or both). Same for RPC. Example: "CPA $192 (+25% vs $154 30d avg) — spend held steady, apps fell 20%, so the CPA increase is denominator-driven."
+    3. ALWAYS REFERENCE GOAL AND 30D BASELINE on every cited number. Same dual-comparison pattern used in Revenue. Sign correctness: deltaPct positive = ABOVE baseline (BAD for cost metrics, GOOD for premium metrics).
+    4. PREMIUM:COST RATIO is the bottom-line quality-of-spend metric. State it (Total Premium ÷ Lead Spend) and compare to the 2.5x goal. <2.5x = spending more than premium justifies; >2.5x = healthy spend conversion.
+    5. AVG PREMIUM PER APP DUAL-DELTA. State both vs $70 goal AND vs 30d avg. Often diverges (e.g., today $62 = -12% vs goal AND +10% vs 30d avg).
+    6. BANNED FILLER: "indicating inefficiencies in cost management", "showing improved revenue per call", "moderate cost pressure", "in line with cost expectations", "improved" applied to a rising cost metric. Every sentence must add a number, ratio, or causal claim.
   va: VA Calls, VA Transfers, VA Transfer Rate — use the exact numbers from the "VIRTUAL AGENT:" line in the data above. Describe call volume, transfer count, and transfer rate. Only write "Virtual agent had no meaningful activity today." when VIRTUAL AGENT shows 0 calls AND 0 transfers.
 
 ${buildRulePrompt('dailyOverview', 'Correlate availability and talk time to sales. Be specific per section and do not repeat facts across sections.')}
