@@ -52,9 +52,12 @@ const markdownComponents = {
   ul: ({ node, ...props }) => <ul {...props} style={{ fontSize: 12, lineHeight: 1.55, color: C.text, paddingLeft: 22, margin: '6px 0' }} />,
   ol: ({ node, ...props }) => <ol {...props} style={{ fontSize: 12, lineHeight: 1.55, color: C.text, paddingLeft: 22, margin: '6px 0' }} />,
   li: ({ node, ...props }) => <li {...props} style={{ margin: '3px 0' }} />,
-  code: ({ node, inline, ...props }) => inline
-    ? <code {...props} style={{ fontFamily: C.mono, fontSize: 11, background: C.surface, padding: '1px 4px', borderRadius: 3, color: C.accent }} />
-    : <code {...props} style={{ fontFamily: C.mono, fontSize: 11, display: 'block', background: C.surface, padding: 10, borderRadius: 4, color: C.text, overflowX: 'auto' }} />,
+  code: ({ node, className, ...props }) => {
+    const isInline = !className;
+    return isInline
+      ? <code {...props} className={className} style={{ fontFamily: C.mono, fontSize: 11, background: C.surface, padding: '1px 4px', borderRadius: 3, color: C.accent }} />
+      : <code {...props} className={className} style={{ fontFamily: C.mono, fontSize: 11, display: 'block', background: C.surface, padding: 10, borderRadius: 4, color: C.text, overflowX: 'auto' }} />;
+  },
   strong: ({ node, ...props }) => <strong {...props} style={{ color: C.text, fontWeight: 700 }} />,
   hr: () => <hr style={{ border: 'none', borderTop: `1px solid ${C.border}`, margin: '16px 0' }} />,
 };
