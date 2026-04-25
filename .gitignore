@@ -11,3 +11,6 @@ env.vercel
 
 # Superpowers brainstorm artifacts (ephemeral per-session)
 .superpowers/
+
+# Git worktrees (created by superpowers:using-git-worktrees)
+.worktrees/
