@@ -5,6 +5,9 @@ import { readWatermark, readNewCallLogRows } from '@/lib/ghl/sheet-state';
 import { processBatch } from '@/lib/ghl/sync';
 
 export const maxDuration = 60;
+// Don't prerender at build time — this route makes live GHL API calls
+// and would time out the static export step.
+export const dynamic = 'force-dynamic';
 
 export async function GET(req) {
   // Auth gate

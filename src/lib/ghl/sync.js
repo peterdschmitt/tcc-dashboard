@@ -4,13 +4,14 @@ import { matchContact } from './matcher.js';
 import { buildContactPatch } from './field-mapping.js';
 import { formatNote } from './note-formatter.js';
 import { rowHash } from './row-hash.js';
-import { appendSyncLog, appendPossibleMerge, readExcludedCampaigns, readSyncedHashes, writeWatermark, parseCallLogDate } from './sheet-state.js';
+import { appendSyncLogBatch, appendPossibleMergeBatch, readExcludedCampaigns, readSyncedHashes, writeWatermark, parseCallLogDate } from './sheet-state.js';
 
 export async function processSingleRow(row, deps) {
   const { client, excludedCampaigns, syncedHashes } = deps;
   const hash = rowHash(row);
+  const timestamp = new Date().toISOString();
   const baseLogEntry = {
-    'Timestamp': new Date().toISOString(),
+    'Timestamp': timestamp,
     'Row Hash': hash,
     'Lead Id': row['Lead Id'] ?? '',
     'Phone': row['Phone'] ?? '',
@@ -23,8 +24,8 @@ export async function processSingleRow(row, deps) {
   const filterResult = shouldProcessRow(row, excludedCampaigns, syncedHashes);
   if (!filterResult.ok) {
     const action = `skipped:${filterResult.reason}`;
-    await appendSyncLog({ ...baseLogEntry, 'Tier': '', 'Action': action, 'GHL Contact ID': '', 'Error': '' });
-    return { tier: null, action, contactId: null, error: null };
+    const syncLogEntry = { ...baseLogEntry, 'Tier': '', 'Action': action, 'GHL Contact ID': '', 'Error': '' };
+    return { result: { tier: null, action, contactId: null, error: null }, syncLogEntry, possibleMergeEntry: null };
   }
 
   try {
@@ -35,6 +36,7 @@ export async function processSingleRow(row, deps) {
     });
 
     let contactId, action;
+    let possibleMergeEntry = null;
     const note = formatNote(row);
 
     if (match.tier === 1) {
@@ -58,8 +60,8 @@ export async function processSingleRow(row, deps) {
       contactId = created.id;
       action = 'created+possible-merge';
 
-      await appendPossibleMerge({
-        'Timestamp': new Date().toISOString(),
+      possibleMergeEntry = {
+        'Timestamp': timestamp,
         'Existing GHL Contact ID': match.contact.id,
         'Existing Name': `${match.contact.firstName ?? ''} ${match.contact.lastName ?? ''}`.trim(),
         'Existing Phone': match.contact.phone ?? '',
@@ -68,7 +70,7 @@ export async function processSingleRow(row, deps) {
         'New Phone': row['Phone'] ?? '',
         'State': row['State'] ?? '',
         'Reviewed': '',
-      });
+      };
 
     } else {
       // Tier 3: attempt to create. GHL native phone-dedup may catch a
@@ -98,13 +100,13 @@ export async function processSingleRow(row, deps) {
       }
     }
 
-    await appendSyncLog({ ...baseLogEntry, 'Tier': String(match.tier), 'Action': action, 'GHL Contact ID': contactId, 'Error': '' });
-    return { tier: match.tier, action, contactId, error: null };
+    const syncLogEntry = { ...baseLogEntry, 'Tier': String(match.tier), 'Action': action, 'GHL Contact ID': contactId, 'Error': '' };
+    return { result: { tier: match.tier, action, contactId, error: null }, syncLogEntry, possibleMergeEntry };
 
   } catch (err) {
     const errMsg = (err.message ?? String(err)).slice(0, 500);
-    await appendSyncLog({ ...baseLogEntry, 'Tier': '', 'Action': 'error', 'GHL Contact ID': '', 'Error': errMsg });
-    return { tier: null, action: 'error', contactId: null, error: errMsg };
+    const syncLogEntry = { ...baseLogEntry, 'Tier': '', 'Action': 'error', 'GHL Contact ID': '', 'Error': errMsg };
+    return { result: { tier: null, action: 'error', contactId: null, error: errMsg }, syncLogEntry, possibleMergeEntry: null };
   }
 }
 
@@ -118,8 +120,14 @@ export async function processBatch({ rows, client, dryRun = false, advanceWaterm
   let maxDateTs = 0;
   let maxDateStr = '';
 
+  const syncLogEntries = [];
+  const possibleMergeEntries = [];
+
   for (const row of rows) {
-    const result = await processSingleRow(row, { client, excludedCampaigns, syncedHashes, dryRun });
+    const { result, syncLogEntry, possibleMergeEntry } = await processSingleRow(row, { client, excludedCampaigns, syncedHashes, dryRun });
+    syncLogEntries.push(syncLogEntry);
+    if (possibleMergeEntry) possibleMergeEntries.push(possibleMergeEntry);
+
     if (result.action === 'created') summary.created++;
     else if (result.action === 'attached') summary.attached++;
     else if (result.action === 'created+possible-merge') { summary.created++; summary.possibleMerges++; }
@@ -141,6 +149,13 @@ export async function processBatch({ rows, client, dryRun = false, advanceWaterm
     // Add this row's hash to in-memory set so a duplicate row inside the same batch
     // (rare but possible) is caught
     syncedHashes.add(rowHash(row));
+  }
+
+  // Batch-write all sync log entries and possible merges in a single API call each.
+  // This avoids the 60-writes/min Google Sheets quota that would cap large backfills.
+  await appendSyncLogBatch(syncLogEntries);
+  if (possibleMergeEntries.length > 0) {
+    await appendPossibleMergeBatch(possibleMergeEntries);
   }
 
   if (maxDateStr && !dryRun && advanceWatermark) {

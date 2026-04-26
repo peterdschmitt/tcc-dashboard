@@ -6,6 +6,9 @@ import { processBatch } from '@/lib/ghl/sync';
 import { parseCallLogDate } from '@/lib/ghl/sheet-state';
 
 export const maxDuration = 60;
+// Don't prerender at build time — this route makes live GHL API calls
+// and would time out the static export step.
+export const dynamic = 'force-dynamic';
 
 export async function GET(req) {
   const cronSecret = process.env.CRON_SECRET;

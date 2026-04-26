@@ -50,6 +50,36 @@ export async function appendPossibleMerge(entry) {
 }
 
 /**
+ * Batch-append multiple rows to a sheet tab in a single API call.
+ * Used to avoid hitting Google Sheets' 60-writes/min quota during
+ * large backfills. Falls back to single appendRow if only one entry.
+ */
+async function appendRowsBatch(sheetId, tabName, headers, entries) {
+  if (!entries || entries.length === 0) return;
+  if (entries.length === 1) {
+    await appendRow(sheetId, tabName, headers, entries[0]);
+    return;
+  }
+  const sheets = await getSheetsClient();
+  const values = entries.map(entry => headers.map(h => entry[h] ?? ''));
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: tabName,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values },
+  });
+}
+
+export async function appendSyncLogBatch(entries) {
+  await appendRowsBatch(GOALS_SHEET(), SYNC_LOG_TAB, SYNC_LOG_HEADERS, entries);
+}
+
+export async function appendPossibleMergeBatch(entries) {
+  await appendRowsBatch(GOALS_SHEET(), POSSIBLE_MERGES_TAB, POSSIBLE_MERGES_HEADERS, entries);
+}
+
+/**
  * Parse a Call Log date string (e.g. "04/24/2026 9:17:02 AM") into a
  * Unix timestamp (ms). Returns 0 for empty/unparseable input.
  *
