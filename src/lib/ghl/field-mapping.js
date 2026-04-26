@@ -40,7 +40,11 @@ export const COMPUTED_FIELDS = [
   ['totalCallAttempts',  'Total Call Attempts'],
 ];
 
-export const ALL_CUSTOM_FIELDS = [...FIRST_FIELDS, ...LAST_FIELDS, ...COMPUTED_FIELDS];
+// Policy fields (defined in sales-mapping.js) are merged into ALL_CUSTOM_FIELDS
+// so the bootstrap script creates them in GHL alongside the call-log fields.
+import { POLICY_FIELDS } from './sales-mapping.js';
+
+export const ALL_CUSTOM_FIELDS = [...FIRST_FIELDS, ...LAST_FIELDS, ...COMPUTED_FIELDS, ...POLICY_FIELDS];
 
 const FIRST_SOURCE_COLUMNS = {
   firstLeadId: 'Lead Id',
