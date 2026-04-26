@@ -1,5 +1,6 @@
 // src/lib/ghl/client.js
 import { levenshtein } from './levenshtein.js';
+import { ALL_CUSTOM_FIELDS } from './field-mapping.js';
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-07-28';
@@ -114,6 +115,75 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     return null;
   }
 
+  function buildCustomFieldsArray(customFieldsObj) {
+    // { internalName: value, ... } → [{ id, value }, ...]
+    const out = [];
+    for (const [internalName, value] of Object.entries(customFieldsObj ?? {})) {
+      if (value === undefined || value === null || value === '') continue;
+      const id = getCustomFieldId(internalName, ALL_CUSTOM_FIELDS);
+      out.push({ id, value });
+    }
+    return out;
+  }
+
+  async function createContact({ native, customFields, tags }) {
+    const body = {
+      locationId,
+      ...native,
+      customFields: buildCustomFieldsArray(customFields),
+      tags: tags ?? [],
+    };
+    const data = await request('POST', '/contacts/', body);
+    if (data.dryRun) return { id: `dry-run-${Date.now()}`, dryRun: true };
+    return data.contact ?? data;
+  }
+
+  async function updateContact(contactId, patch, currentContact) {
+    const { customFields = {}, tags = [], removeTag, additionalPhone } = patch;
+
+    // Tags: union with existing, then remove the negation tag if present
+    const existingTags = new Set(currentContact?.tags ?? []);
+    for (const t of tags) existingTags.add(t);
+    if (removeTag) existingTags.delete(removeTag);
+
+    // Additional phones: append if not already present (normalized comparison)
+    let additionalPhones = currentContact?.additionalPhones ?? [];
+    if (additionalPhone) {
+      const target = normalizePhone(additionalPhone);
+      const primary = normalizePhone(currentContact?.phone ?? '');
+      const have = additionalPhones.map(normalizePhone);
+      if (target && target !== primary && !have.includes(target)) {
+        additionalPhones = [...additionalPhones, additionalPhone];
+      }
+    }
+
+    // totalCallAttempts: read existing from currentContact.customFields, increment
+    let totalAttempts = 1;
+    const existingCf = currentContact?.customFields ?? [];
+    await resolveCustomFields(); // ensure cache
+    const totalAttemptsId = getCustomFieldId('totalCallAttempts', ALL_CUSTOM_FIELDS);
+    const existingTotal = existingCf.find(cf => cf.id === totalAttemptsId);
+    if (existingTotal && !isNaN(parseInt(existingTotal.value))) {
+      totalAttempts = parseInt(existingTotal.value) + 1;
+    }
+    customFields.totalCallAttempts = String(totalAttempts);
+
+    const body = {
+      customFields: buildCustomFieldsArray(customFields),
+      tags: [...existingTags],
+      additionalPhones,
+    };
+
+    const data = await request('PUT', `/contacts/${contactId}`, body);
+    if (data.dryRun) return { id: contactId, dryRun: true };
+    return data.contact ?? data;
+  }
+
+  async function addNote(contactId, body) {
+    const data = await request('POST', `/contacts/${contactId}/notes`, { body, contactId });
+    return data;
+  }
+
   return {
     request,
     locationId,
@@ -123,6 +193,8 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     normalizePhone,
     searchByPhone,
     searchByNameAndState,
-    // methods added in subsequent tasks
+    createContact,
+    updateContact,
+    addNote,
   };
 }
