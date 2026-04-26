@@ -1,4 +1,6 @@
 // src/lib/ghl/client.js
+import { levenshtein } from './levenshtein.js';
+
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-07-28';
 const INTER_CALL_DELAY_MS = 50;
@@ -96,6 +98,22 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     return null;
   }
 
+  async function searchByNameAndState(firstName, lastName, state) {
+    if (!firstName || !lastName || !state) return null;
+    const query = `${firstName} ${lastName}`;
+    const data = await request('GET', `/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(query)}`);
+    const contacts = data.contacts ?? [];
+    const targetState = state.toLowerCase();
+    for (const c of contacts) {
+      const cState = (c.state ?? '').toLowerCase();
+      if (cState !== targetState) continue;
+      if (levenshtein(c.firstName ?? '', firstName) > 1) continue;
+      if (levenshtein(c.lastName  ?? '', lastName)  > 1) continue;
+      return c;
+    }
+    return null;
+  }
+
   return {
     request,
     locationId,
@@ -104,6 +122,7 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     getCustomFieldId,
     normalizePhone,
     searchByPhone,
+    searchByNameAndState,
     // methods added in subsequent tasks
   };
 }
