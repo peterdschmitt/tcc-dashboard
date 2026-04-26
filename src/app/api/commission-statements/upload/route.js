@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { rebuildStatementRecords } from '@/lib/statement-records-io';
+import { dedupLedger } from '@/lib/commission-statements-dedup';
 
 export async function POST(request) {
   try {
@@ -233,7 +234,13 @@ export async function POST(request) {
     }
 
     let rebuildResult = null;
+    let dedupResult = null;
     if (!dryRun) {
+      try {
+        dedupResult = await dedupLedger();
+      } catch (e) {
+        console.error('[dedup] auto-dedup failed (non-fatal):', e.message);
+      }
       try {
         rebuildResult = await rebuildStatementRecords();
       } catch (e) {
@@ -257,6 +264,7 @@ export async function POST(request) {
       cancellationAlerts,
       agentSummary: parsed.agentSummary || [],
       statementRecordsRebuild: rebuildResult,
+      ledgerDedup: dedupResult,
     });
   } catch (error) {
     console.error('[upload] Error:', error);
