@@ -47,10 +47,30 @@ test('groupLedgerByHolder: separate holders get separate buckets', () => {
   assert.equal(m.get('smith|john').length, 1);
 });
 
-test('groupLedgerByHolder: blank insured name uses fallback bucket', () => {
+test('groupLedgerByHolder: blank insured name uses per-policy unmatched bucket', () => {
   const m = groupLedgerByHolder(sampleLedger);
-  // empty key (|) is the unmatched bucket
+  // C3 row has blank insuredName → bucket key is `|<policyNumber>`
+  assert.equal(m.get('|C3').length, 1);
+  // legacy bare `|` bucket is no longer used when policyNumber is present
+  assert.equal(m.has('|'), false);
+});
+
+test('groupLedgerByHolder: blank insured name AND blank policy → bare | bucket', () => {
+  const m = groupLedgerByHolder([{ insuredName: '', policyNumber: '' }]);
   assert.equal(m.get('|').length, 1);
+});
+
+test('groupLedgerByHolder: distinct blank-name policies do NOT merge into one bucket', () => {
+  const ledger = [
+    { insuredName: '', policyNumber: 'POL-A' },
+    { insuredName: '', policyNumber: 'POL-B' },
+    { insuredName: '', policyNumber: 'POL-C' },
+  ];
+  const m = groupLedgerByHolder(ledger);
+  assert.equal(m.size, 3); // three distinct unmatched buckets, not one merged
+  assert.equal(m.get('|POL-A').length, 1);
+  assert.equal(m.get('|POL-B').length, 1);
+  assert.equal(m.get('|POL-C').length, 1);
 });
 
 test('groupLedgerByHolder: insuredName as "Last, First" parses correctly', () => {
@@ -182,4 +202,57 @@ test('buildPeriodRows: net impact = adv + comm − chgbk + rec', () => {
   const rows = buildPeriodRows('doe|jane', multiLineStatement);
   const apr = rows.find(r => r['Statement File'] === 'aig-apr.pdf');
   assert.equal(apr['Net Impact'], -400);
+});
+
+import { periodFromFile } from './statement-records.js';
+
+test('periodFromFile: M.D.YY format extracts year-month', () => {
+  assert.equal(periodFromFile('TA As Earned 1.30.26.xls'), '2026-01');
+});
+
+test('periodFromFile: M.D.YYYY format extracts year-month', () => {
+  assert.equal(periodFromFile('TA As Earned 12.5.2026.xls'), '2026-12');
+});
+
+test('periodFromFile: ISO date in filename', () => {
+  assert.equal(periodFromFile('report-2026-03-15.pdf'), '2026-03');
+});
+
+test('periodFromFile: YYYY-MM in filename', () => {
+  assert.equal(periodFromFile('Advances_2026-04_summary.csv'), '2026-04');
+});
+
+test('periodFromFile: no recognizable date returns empty string', () => {
+  assert.equal(periodFromFile('random_file_no_date.pdf'), '');
+});
+
+test('periodFromFile: empty/null input returns empty string', () => {
+  assert.equal(periodFromFile(''), '');
+  assert.equal(periodFromFile(null), '');
+  assert.equal(periodFromFile(undefined), '');
+});
+
+test('buildPeriodRows: falls back to filename when statementDate is blank', () => {
+  const ledger = [
+    { insuredName: 'Jane Doe', policyNumber: 'A1', carrier: 'TA',
+      statementFile: 'TA As Earned 1.30.26.xls', statementDate: '',
+      premium: 50, advanceAmount: 100, commissionAmount: 0, chargebackAmount: 0,
+      recoveryAmount: 0, outstandingBalance: 100, notes: '' },
+  ];
+  const rows = buildPeriodRows('doe|jane', ledger);
+  assert.equal(rows[0]['Statement Period'], '2026-01');
+});
+
+test('buildHolderRow: First/Last Period also fall back to filename when dates blank', () => {
+  const ledger = [
+    { insuredName: 'X', policyNumber: 'P1', carrier: 'TA',
+      statementFile: 'TA As Earned 1.30.26.xls', statementDate: '',
+      commissionAmount: 0, advanceAmount: 50, chargebackAmount: 0, recoveryAmount: 0, outstandingBalance: 50 },
+    { insuredName: 'X', policyNumber: 'P1', carrier: 'TA',
+      statementFile: 'TA as earned 3.31.26.xls', statementDate: '',
+      commissionAmount: 0, advanceAmount: 50, chargebackAmount: 0, recoveryAmount: 0, outstandingBalance: 100 },
+  ];
+  const row = buildHolderRow('x|', ledger, [], '2026-04-26T00:00:00Z');
+  assert.equal(row['First Period'], '2026-01');
+  assert.equal(row['Last Period'], '2026-03');
 });

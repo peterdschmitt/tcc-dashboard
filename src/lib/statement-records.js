@@ -56,7 +56,13 @@ export function groupLedgerByHolder(ledgerRows) {
   const map = new Map();
   for (const row of ledgerRows) {
     const { first, last } = splitInsuredName(row.insuredName);
-    const key = buildHolderKey(first, last);
+    let key = buildHolderKey(first, last);
+    // Without this, all blank-name rows merge into one bucket, mixing
+    // distinct policies under different real people. Disambiguate by policy #.
+    if (key === '|') {
+      const policy = String(row.policyNumber || '').trim();
+      if (policy) key = `|${policy}`;
+    }
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(row);
   }
@@ -72,6 +78,33 @@ function periodFromDate(d) {
   const u = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (u) return `${u[3]}-${u[1].padStart(2, '0')}`;
   return '';
+}
+
+// Carrier statement filenames often embed the period, e.g.
+// "TA As Earned 1.30.26.xls", "Advances_2026-04_summary.csv".
+// Used as a fallback when the ledger's Statement Date column is empty.
+export function periodFromFile(fileName) {
+  const s = String(fileName || '');
+  if (!s) return '';
+  // M.D.YY or M.D.YYYY anywhere in filename
+  const dot = s.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b/);
+  if (dot) {
+    const month = dot[1].padStart(2, '0');
+    const yearRaw = dot[3];
+    const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
+    return `${year}-${month}`;
+  }
+  // ISO date YYYY-MM-DD
+  const iso = s.match(/(\d{4})-(\d{2})-\d{2}/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  // YYYY-MM (must NOT be followed by another digit — that would imply YYYY-MMXX)
+  const ym = s.match(/(\d{4})-(\d{2})(?!\d)/);
+  if (ym) return `${ym[1]}-${ym[2]}`;
+  return '';
+}
+
+function periodFor(statementDate, statementFile) {
+  return periodFromDate(statementDate) || periodFromFile(statementFile);
 }
 
 function expectedNetForSalesRow(sr) {
@@ -117,7 +150,7 @@ export function buildPeriodRows(holderKey, ledgerRows) {
       'Insured Name': sample.insuredName || '',
       'Policy #': sample.policyNumber || '',
       'Carrier': sample.carrier || '',
-      'Statement Period': periodFromDate(sample.statementDate),
+      'Statement Period': periodFor(sample.statementDate, sample.statementFile),
       'Statement Date': sample.statementDate || '',
       'Statement File': sample.statementFile || '',
       'Statement File ID': sample.statementFileId || '',
@@ -140,7 +173,7 @@ export function buildHolderRow(holderKey, ledgerRows, salesRows, lastRebuiltIso)
   const policies = [...new Set(ledgerRows.map(r => r.policyNumber).filter(Boolean))];
   const carriers = [...new Set(ledgerRows.map(r => r.carrier).filter(Boolean))];
   const statementFiles = [...new Set(ledgerRows.map(r => r.statementFile).filter(Boolean))];
-  const periods = ledgerRows.map(r => periodFromDate(r.statementDate)).filter(Boolean).sort();
+  const periods = ledgerRows.map(r => periodFor(r.statementDate, r.statementFile)).filter(Boolean).sort();
 
   const totalAdvances = ledgerRows.reduce((s, r) => s + (parseFloat(r.advanceAmount) || 0), 0);
   const totalCommissions = ledgerRows.reduce((s, r) => s + (parseFloat(r.commissionAmount) || 0), 0);
