@@ -39,6 +39,9 @@
     "src/app/api/cron/ghl-sync/route.js": {
       "maxDuration": 60
     },
+    "src/app/api/cron/ghl-sales-sync/route.js": {
+      "maxDuration": 60
+    },
     "src/app/api/ghl-backfill/route.js": {
       "maxDuration": 60
     }
@@ -61,5 +64,8 @@
   }, {
     "path": "/api/cron/ghl-sync",
     "schedule": "*/10 * * * *"
+  }, {
+    "path": "/api/cron/ghl-sales-sync",
+    "schedule": "5-59/10 * * * *"
   }]
 }
