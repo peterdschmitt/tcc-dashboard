@@ -9,6 +9,7 @@ import {
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
+import { rebuildStatementRecords } from '@/lib/statement-records-io';
 
 export async function POST(request) {
   try {
@@ -231,6 +232,14 @@ export async function POST(request) {
       invalidateCache(salesSheetId, statementsTab);
     }
 
+    let rebuildResult = null;
+    if (!dryRun) {
+      try {
+        rebuildResult = await rebuildStatementRecords();
+      } catch (e) {
+        console.error('[statement-records] rebuild failed (non-fatal):', e.message);
+      }
+    }
     return NextResponse.json({
       success: true, dryRun, statementId,
       carrier: parsed.carrier, payPeriod: parsed.payPeriod,
@@ -247,6 +256,7 @@ export async function POST(request) {
       },
       cancellationAlerts,
       agentSummary: parsed.agentSummary || [],
+      statementRecordsRebuild: rebuildResult,
     });
   } catch (error) {
     console.error('[upload] Error:', error);

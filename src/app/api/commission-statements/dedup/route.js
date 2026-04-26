@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { fetchSheet, getSheetsClient, invalidateCache } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
+import { rebuildStatementRecords } from '@/lib/statement-records-io';
 
 /**
  * GET  /api/commission-statements/dedup          — preview duplicates (dry run)
@@ -185,11 +186,18 @@ export async function POST() {
     invalidateCache(salesSheetId, ledgerTab);
     console.log(`[dedup] Removed ${removed} duplicate rows from ${ledgerTab} (${dataRows.length} → ${uniqueRows.length})`);
 
+    let rebuildResult = null;
+    try {
+      rebuildResult = await rebuildStatementRecords();
+    } catch (e) {
+      console.error('[statement-records] rebuild failed (non-fatal):', e.message);
+    }
     return NextResponse.json({
       message: `Removed ${removed} duplicate rows`,
       removed,
       before: dataRows.length,
       after: uniqueRows.length,
+      statementRecordsRebuild: rebuildResult,
     });
   } catch (error) {
     console.error('[dedup] POST error:', error);

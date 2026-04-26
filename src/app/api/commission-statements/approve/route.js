@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { readRawSheet, getSheetsClient, writeCell, invalidateCache } from '@/lib/sheets';
 import { NextResponse } from 'next/server';
+import { rebuildStatementRecords } from '@/lib/statement-records-io';
 
 export async function POST(request) {
   try {
@@ -127,11 +128,18 @@ export async function POST(request) {
     invalidateCache(salesSheetId, salesTab);
 
     const successCount = results.filter(r => r.success).length;
+    let rebuildResult = null;
+    try {
+      rebuildResult = await rebuildStatementRecords();
+    } catch (e) {
+      console.error('[statement-records] rebuild failed (non-fatal):', e.message);
+    }
     return NextResponse.json({
       success: true,
       updated: successCount,
       errors: results.filter(r => !r.success),
       results,
+      statementRecordsRebuild: rebuildResult,
     });
   } catch (error) {
     console.error('[commission-approve] Error:', error);

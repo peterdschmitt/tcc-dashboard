@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { fetchSheet, getSheetsClient, invalidateCache } from '@/lib/sheets';
 import { fuzzyMatchPolicyholder } from '@/lib/utils';
 import { NextResponse } from 'next/server';
+import { rebuildStatementRecords } from '@/lib/statement-records-io';
 
 /**
  * Re-matches every ledger row against the current sales tracker.
@@ -157,7 +158,13 @@ export async function POST() {
     invalidateCache(salesSheetId, ledgerTab);
 
     console.log(`[rematch] Updated ${updated} rows (${exactFixed} upgraded to exact policy match)`);
-    return NextResponse.json({ message: `Updated ${updated} rows`, updated, exactPolicyFixed: exactFixed });
+    let rebuildResult = null;
+    try {
+      rebuildResult = await rebuildStatementRecords();
+    } catch (e) {
+      console.error('[statement-records] rebuild failed (non-fatal):', e.message);
+    }
+    return NextResponse.json({ message: `Updated ${updated} rows`, updated, exactPolicyFixed: exactFixed, statementRecordsRebuild: rebuildResult });
   } catch (err) {
     console.error('[rematch] POST error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -9,6 +9,7 @@ import {
 } from '@/lib/drive-organize';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { rebuildStatementRecords } from '@/lib/statement-records-io';
 
 const SUPPORTED_EXTENSIONS = ['.pdf', '.xlsx', '.xls', '.csv'];
 
@@ -247,6 +248,12 @@ export async function POST(request) {
       }
     }
 
+    let rebuildResult = null;
+    try {
+      rebuildResult = await rebuildStatementRecords();
+    } catch (e) {
+      console.error('[statement-records] rebuild failed (non-fatal):', e.message);
+    }
     return NextResponse.json({
       success: true,
       processed: results.length,
@@ -256,6 +263,7 @@ export async function POST(request) {
         filename: r.filename, carrier: r.carrier, organizedFilename: r.organizedFilename, ...r.summary,
       })),
       errors,
+      statementRecordsRebuild: rebuildResult,
     });
   } catch (error) {
     console.error('[sync] POST error:', error);
