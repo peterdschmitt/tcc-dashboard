@@ -529,3 +529,49 @@ node --env-file=.env.local scripts/ghl-bootstrap-fields.js       # creates 28 cu
 
 ### Debugging
 Start at the `GHL Sync Log` tab — every row's outcome is logged with action, contact ID, tier, and error message. Errored rows can be retried by deleting their Sync Log entry; the row-hash dedup prevents duplicates on success.
+
+---
+
+## GHL Context (MCP + operating rules)
+
+### Location
+
+- **Active location:** `BXMHAsqFnhseDHUumJBE` — TCC Sandbox sub-account.
+  This is a *test* environment populated by `scripts/ghl-full-backfill.mjs`.
+  Production location ID is **NOT YET CONFIGURED** here. When you switch
+  to production, update this line and regenerate the PIT.
+
+### Tooling preferences
+
+- **For ad-hoc reads, queries, and one-off operations** (smart list builds,
+  contact lookups, exports, status checks): use the `ghl` MCP server.
+- **For sync code changes** (call-log → GHL, sales → GHL): work in
+  `src/lib/ghl/` — there is a hand-written client (`client.js`), field
+  mapping (`field-mapping.js`, `sales-mapping.js`), orchestrator (`sync.js`,
+  `sales-sync.js`) already in place. Don't reimplement these via MCP.
+
+### Built-in custom fields and smart lists
+
+Refer to `docs/superpowers/specs/2026-04-25-ghl-call-log-sync-design.md`
+and `docs/superpowers/specs/2026-04-25-ghl-sales-sync-v2-design.md` for
+the full list of 54 custom fields the syncs populate. The smart-list
+recipes are at `docs/superpowers/specs/2026-04-26-ghl-smart-lists-submitted-applications.md`.
+
+### Confirmation required (always ask before)
+
+- **Deleting** any contact, custom field, tag, smart list, or workflow.
+- **Sending** SMS, email, or any other outbound communication
+  (real money / customer impact).
+- **Triggering** a workflow on more than 5 contacts at once.
+- **Bulk-updating** more than 10 contacts.
+- **Modifying** existing custom fields (could break the sync).
+- **Modifying** workflow definitions or message templates.
+
+Reads of any size are fine without confirmation.
+
+### Rate limit discipline
+
+GHL enforces ~10 req/sec sustained per location, with multi-minute
+extended cool-downs when exceeded. The hand-written client uses a 250ms
+delay (4/sec) for safety. If you observe HTTP 429, **back off for at
+least 60 seconds** before retrying. Don't tight-loop.
