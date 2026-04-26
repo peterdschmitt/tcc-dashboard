@@ -4,7 +4,10 @@ import { ALL_CUSTOM_FIELDS } from './field-mapping.js';
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-07-28';
-const INTER_CALL_DELAY_MS = 50;
+// GHL's sustained rate limit is 100 requests per 10 seconds (= 10 req/sec)
+// per location. 50ms (= 20/sec) overshoots and triggers 429 cascades after
+// ~1 min of sustained traffic. 150ms (= 6.6/sec) leaves headroom.
+const INTER_CALL_DELAY_MS = 150;
 const MAX_RETRIES = 5; // 1s, 2s, 4s, 8s, 16s = 31s max backoff — survives most GHL 429 windows
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

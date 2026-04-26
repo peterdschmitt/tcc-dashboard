@@ -19,7 +19,14 @@ export async function readExcludedCampaigns() {
 
 export async function readSyncedHashes() {
   const { data } = await readRawSheet(GOALS_SHEET(), SYNC_LOG_TAB);
-  return new Set(data.map(r => r['Row Hash']).filter(Boolean));
+  // Exclude error entries so the next run retries them. A row's hash
+  // sticks in the dedup set only after a successful (non-error) outcome.
+  return new Set(
+    data
+      .filter(r => r['Action'] !== 'error')
+      .map(r => r['Row Hash'])
+      .filter(Boolean)
+  );
 }
 
 export async function readWatermark() {
