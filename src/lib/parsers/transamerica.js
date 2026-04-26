@@ -69,6 +69,13 @@ export async function parse(buffer, text, workbook) {
     if (key) colIdx[key] = i;
   });
 
+  // TA sends two report shapes — detect which one this file is so we can
+  // map the right column names. The "as earned" report uses combined
+  // Insured Name + Comm type / Comm Amount / Earned Adv Amount columns;
+  // the "advance" report uses split Insured Last/First Name + Description /
+  // Commission Amount / Advance Amount columns.
+  const isAsEarned = ('Comm type' in colIdx) || ('Earned Adv Amount' in colIdx);
+
   // Helper to get column by name
   const col = (row, name) => {
     const idx = colIdx[name];
@@ -90,18 +97,42 @@ export async function parse(buffer, text, workbook) {
     const policyNumber = col(row, 'Policy Number');
     if (!policyNumber) continue;
 
-    const insuredLast = col(row, 'Insured Last Name');
-    const insuredFirst = col(row, 'Insured First Name');
-    const description = col(row, 'Description');
-    const writingLast = col(row, 'Writing Agent Last Name');
-    const writingFirst = col(row, 'Writing Agent First Name');
-    const writingNumber = col(row, 'Writing Agent Number');
-    const commAgentLast = col(row, 'Commission Agent Last Name');
-    const commAgentFirst = col(row, 'Commission Agent First Name');
-    const commAgentNumber = col(row, 'Commission Agent Number');
+    // Insured name: as-earned report has a single combined column;
+    // advance report has split last/first columns.
+    let insuredName;
+    if (isAsEarned) {
+      insuredName = col(row, 'Insured Name');
+    } else {
+      const insuredLast = col(row, 'Insured Last Name');
+      const insuredFirst = col(row, 'Insured First Name');
+      insuredName = insuredLast + (insuredFirst ? ', ' + insuredFirst : '');
+    }
 
-    // Parse transaction date
-    let txnDate = row[colIdx['Transaction Date']];
+    // Description / transaction type column differs between reports.
+    const description = isAsEarned ? col(row, 'Comm type') : col(row, 'Description');
+
+    // Writing + commission agent: as-earned has combined "Writing Agent Name",
+    // advance has split last/first.
+    let agentName, commAgentName;
+    const writingNumber = col(row, 'Writing Agent Number');
+    const commAgentNumber = col(row, 'Commission Agent Number');
+    if (isAsEarned) {
+      agentName = col(row, 'Writing Agent Name');
+      commAgentName = col(row, 'Commission Agent Name');
+    } else {
+      const writingLast = col(row, 'Writing Agent Last Name');
+      const writingFirst = col(row, 'Writing Agent First Name');
+      const commAgentLast = col(row, 'Commission Agent Last Name');
+      const commAgentFirst = col(row, 'Commission Agent First Name');
+      agentName = (writingLast ? writingLast + (writingFirst ? ', ' + writingFirst : '') : '')
+        || (commAgentLast ? commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '') : '');
+      commAgentName = commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
+    }
+
+    // Statement date column is "Transaction Date" on advance reports,
+    // "Statement Date" on as-earned reports. Excel serial numbers in both.
+    const dateColName = isAsEarned ? 'Statement Date' : 'Transaction Date';
+    let txnDate = row[colIdx[dateColName]];
     if (typeof txnDate === 'number') {
       const d = new Date((txnDate - 25569) * 86400000);
       txnDate = d.toLocaleDateString('en-US');
@@ -110,19 +141,27 @@ export async function parse(buffer, text, workbook) {
     }
     if (!statementDate && txnDate) statementDate = txnDate;
 
-    const commPrem = colNum(row, 'Commission Premium');
-    const splitPct = colNum(row, 'Split %');
-    const commPct = colNum(row, 'Commission %');
-    const advPct = colNum(row, 'Adv %');
-    const advanceAmount = colNum(row, 'Advance Amount');
-    const commAmount = colNum(row, 'Commission Amount');
-    const netCommission = colNum(row, 'Net Commission Amount');
-    const chargeback = colNum(row, 'Writing Agent Chargeback');
-    const recovery = colNum(row, 'Writing Agent Less Recovery Amount');
-    const endingBalance = colNum(row, 'Writing Agent Ending Balance');
+    // Numeric fields — names differ between report types.
+    const commPrem = isAsEarned
+      ? colNum(row, 'Comm Premium or Gross Comm')
+      : colNum(row, 'Commission Premium');
+    const splitPct = isAsEarned ? colNum(row, 'Split%') : colNum(row, 'Split %');
+    const commPct = isAsEarned ? colNum(row, 'Comm%') : colNum(row, 'Commission %');
+    const advPct = isAsEarned ? colNum(row, 'Earned Adv %') : colNum(row, 'Adv %');
+    const commAmount = isAsEarned ? colNum(row, 'Comm Amount') : colNum(row, 'Commission Amount');
+    // For as-earned reports, "Earned Adv Amount" represents the portion of
+    // commission applied AGAINST the existing advance (not a new advance
+    // payment). Keep advanceAmount=0 for as-earned records to avoid inflating
+    // Total Advances in the rollup; the as-earned amount lives in commissionAmount.
+    const advanceAmount = isAsEarned ? 0 : colNum(row, 'Advance Amount');
+    const earnedAdvAmount = isAsEarned ? colNum(row, 'Earned Adv Amount') : 0;
+    const netCommission = isAsEarned ? 0 : colNum(row, 'Net Commission Amount');
+    const chargeback = isAsEarned ? 0 : colNum(row, 'Writing Agent Chargeback');
+    const recovery = isAsEarned ? 0 : colNum(row, 'Writing Agent Less Recovery Amount');
+    const endingBalance = isAsEarned ? 0 : colNum(row, 'Writing Agent Ending Balance');
 
-    // Determine transaction type from Description
-    let transactionType = 'advance';
+    // Determine transaction type from description / Comm type.
+    let transactionType = isAsEarned ? 'as_earned' : 'advance';
     let isCancellation = false;
     const descLower = description.toLowerCase();
     if (descLower.includes('chargeback') || descLower.includes('cancel')) {
@@ -138,11 +177,6 @@ export async function parse(buffer, text, workbook) {
 
     const amount = advanceAmount || commAmount || netCommission || 0;
     const finalAmount = isCancellation ? -Math.abs(amount) : amount;
-
-    const insuredName = insuredLast + (insuredFirst ? ', ' + insuredFirst : '');
-    const agentName = (writingLast ? writingLast + (writingFirst ? ', ' + writingFirst : '') : '')
-      || (commAgentLast ? commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '') : '');
-    const commAgentName = commAgentLast + (commAgentFirst ? ', ' + commAgentFirst : '');
 
     records.push({
       policyNumber,
@@ -171,8 +205,9 @@ export async function parse(buffer, text, workbook) {
       rawLine: JSON.stringify(row),
     });
 
-    // Aggregate agent totals
-    const agentKey = writingNumber || commAgentLast;
+    // Aggregate agent totals — fall back through writing # → commission #
+    // → commission name when both numbers are blank.
+    const agentKey = writingNumber || commAgentNumber || commAgentName;
     if (agentKey) {
       if (!agentTotals[agentKey]) {
         agentTotals[agentKey] = { agentId: agentKey, agentName: agentName, totalPaid: 0, totalRecovered: 0, netCommission: 0 };
