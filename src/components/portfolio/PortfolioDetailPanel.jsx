@@ -49,6 +49,7 @@ function TagChips({ tags }) {
 const MIN_WIDTH = 360;
 const MAX_WIDTH = 900;
 const DEFAULT_WIDTH = 480;
+const STORAGE_KEY = 'portfolio.detailPanel.width';
 
 function clampWidth(n) {
   if (typeof n !== 'number' || isNaN(n)) return DEFAULT_WIDTH;
@@ -58,7 +59,11 @@ function clampWidth(n) {
 export default function PortfolioDetailPanel({ contactId, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_WIDTH;
+    const stored = Number(window.localStorage.getItem(STORAGE_KEY));
+    return clampWidth(stored);
+  });
   const [hoverHandle, setHoverHandle] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragCleanupRef = useRef(null);
@@ -79,9 +84,11 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
+    let latestWidth = startWidth;
     const onMove = (ev) => {
       // Panel is right-anchored; dragging LEFT (smaller clientX) grows width.
-      setWidth(clampWidth(startWidth - (ev.clientX - startX)));
+      latestWidth = clampWidth(startWidth - (ev.clientX - startX));
+      setWidth(latestWidth);
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -89,6 +96,9 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
       document.body.style.userSelect = '';
       setDragging(false);
       dragCleanupRef.current = null;
+      try {
+        window.localStorage.setItem(STORAGE_KEY, String(latestWidth));
+      } catch {}
     };
     dragCleanupRef.current = onUp;
     document.addEventListener('mousemove', onMove);
