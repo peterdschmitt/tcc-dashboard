@@ -4,7 +4,7 @@
 // this tab documents what those parsers do and is the source of truth for the
 // parser regression tests (see tests/fixtures/<carrier>/).
 
-import { ensureTabExists, getSheetsClient, fetchSheet } from './sheets';
+import { ensureTabExists, getSheetsClient, fetchSheet, invalidateCache } from './sheets';
 
 export const CARRIER_PARSERS_TAB = process.env.CARRIER_PARSERS_TAB || 'Carrier Parsers';
 
@@ -127,4 +127,72 @@ export async function seedInitialCarrierRows() {
     requestBody: { values },
   });
   return { added: toAdd.length, skipped: INITIAL_CARRIER_ROWS.length - toAdd.length };
+}
+
+/**
+ * Update the verification status columns for a single carrier row.
+ * Matches by `Carrier` name (case-insensitive).
+ * No-op if the carrier isn't found in the sheet (returns { updated: false }).
+ */
+export async function updateCarrierVerificationStatus(carrier, { status, mismatchDetail = '' }) {
+  const sheetId = process.env.GOALS_SHEET_ID;
+  if (!sheetId) throw new Error('GOALS_SHEET_ID env var is required');
+
+  const sheets = await getSheetsClient();
+  const range = `'${CARRIER_PARSERS_TAB}'`;
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+  const values = res.data.values || [];
+  if (values.length < 2) return { updated: false, reason: 'no rows' };
+
+  const headerRow = values[0];
+  const colIdx = {
+    carrier: headerRow.indexOf('Carrier'),
+    lastVerified: headerRow.indexOf('Last Verified'),
+    lastStatus: headerRow.indexOf('Last Status'),
+    lastMismatch: headerRow.indexOf('Last Mismatch Detail'),
+  };
+  if (colIdx.carrier < 0 || colIdx.lastStatus < 0) {
+    throw new Error(`Carrier Parsers tab is missing required columns (Carrier or Last Status)`);
+  }
+
+  const want = String(carrier || '').trim().toLowerCase();
+  const rowNum = values.findIndex((row, i) => i > 0 && String(row[colIdx.carrier] || '').trim().toLowerCase() === want);
+  if (rowNum < 0) return { updated: false, reason: `carrier "${carrier}" not in sheet` };
+
+  // rowNum is 0-indexed in the values array; sheet rows are 1-indexed and row 1 is the header
+  const sheetRow = rowNum + 1;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Build a single-row update covering Last Verified through Last Mismatch Detail.
+  const updates = [];
+  if (colIdx.lastVerified >= 0) updates.push({ col: colIdx.lastVerified, value: today });
+  updates.push({ col: colIdx.lastStatus, value: status });
+  if (colIdx.lastMismatch >= 0) updates.push({ col: colIdx.lastMismatch, value: mismatchDetail });
+
+  // Compute the contiguous range from min col to max col in this row.
+  const minCol = Math.min(...updates.map(u => u.col));
+  const maxCol = Math.max(...updates.map(u => u.col));
+  const rowValues = new Array(maxCol - minCol + 1).fill(undefined);
+  for (const u of updates) rowValues[u.col - minCol] = u.value;
+
+  const colA = colLetter(minCol + 1);
+  const colB = colLetter(maxCol + 1);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `'${CARRIER_PARSERS_TAB}'!${colA}${sheetRow}:${colB}${sheetRow}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [rowValues] },
+  });
+  invalidateCache(sheetId, CARRIER_PARSERS_TAB);
+  return { updated: true, carrier, status };
+}
+
+function colLetter(n) {
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
