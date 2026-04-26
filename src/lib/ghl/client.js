@@ -5,7 +5,7 @@ import { ALL_CUSTOM_FIELDS } from './field-mapping.js';
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-07-28';
 const INTER_CALL_DELAY_MS = 50;
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5; // 1s, 2s, 4s, 8s, 16s = 31s max backoff — survives most GHL 429 windows
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 

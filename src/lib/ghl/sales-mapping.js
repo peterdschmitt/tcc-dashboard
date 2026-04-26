@@ -121,8 +121,14 @@ export function buildPolicyPatch(salesRecord) {
   // is missing those fields. Same pattern as buildContactPatch. dateOfBirth
   // and gender go here (not in customFields) because GHL rejects custom
   // fields whose names collide with its standard contact schema.
+  //
+  // Validation: GHL rejects malformed email with HTTP 422
+  // ("email must be an email"). Skip the field if it doesn't look like
+  // a basic name@domain.tld pattern — better to miss a field than to
+  // fail the whole contact create.
   const nativeEnrichment = {};
-  if (v('Email Address')) nativeEnrichment.email = v('Email Address');
+  const email = v('Email Address');
+  if (email && /^\S+@\S+\.\S+$/.test(email)) nativeEnrichment.email = email;
   if (v('Street Address')) nativeEnrichment.address1 = v('Street Address');
   if (v('City')) nativeEnrichment.city = v('City');
   if (v('Zip Code')) nativeEnrichment.postalCode = v('Zip Code');

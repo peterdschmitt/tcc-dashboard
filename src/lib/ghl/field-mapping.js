@@ -95,7 +95,12 @@ export function buildContactPatch(row, { isNewContact }) {
   if (isNewContact) {
     if (v('First')) native.firstName = v('First');
     if (v('Last')) native.lastName = v('Last');
-    if (v('Phone')) native.phone = v('Phone');
+    // Phone validation: GHL rejects with HTTP 400 "string supplied did not
+    // seem to be a phone number" if the value isn't recognizable. Require
+    // at least 10 digits after stripping non-numeric chars.
+    const phoneRaw = v('Phone');
+    const phoneDigits = phoneRaw.replace(/\D/g, '');
+    if (phoneDigits.length >= 10) native.phone = phoneRaw;
     if (v('State')) native.state = v('State');
     native.country = v('Country') || 'US';
     if (v('Inbound Source')) native.source = v('Inbound Source');
