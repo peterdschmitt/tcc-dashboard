@@ -62,3 +62,81 @@ export function groupLedgerByHolder(ledgerRows) {
   }
   return map;
 }
+
+function periodFromDate(d) {
+  const s = String(d || '');
+  // ISO date: YYYY-MM-DD → YYYY-MM
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}`;
+  // US date: M/D/YYYY → YYYY-MM
+  const u = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (u) return `${u[3]}-${u[1].padStart(2, '0')}`;
+  return '';
+}
+
+function expectedNetForSalesRow(sr) {
+  const premium = parseFloat(sr['Monthly Premium']) || 0;
+  const cpp = String(sr['Carrier + Product + Payout'] || '').toLowerCase();
+  const multiplier = cpp.includes('giwl') ? 1.5 : 3;
+  return premium * multiplier;
+}
+
+export function deriveStatus({ chargebacks, outstanding, variance, hasMatch }) {
+  if (!hasMatch) return 'unmatched';
+  if (chargebacks > 0) return 'chargeback';
+  if (outstanding > 0) return 'outstanding';
+  if (Math.abs(variance) > VARIANCE_THRESHOLDS.yellow) return 'variance';
+  return 'healthy';
+}
+
+export function buildHolderRow(holderKey, ledgerRows, salesRows, lastRebuiltIso) {
+  const insuredName = ledgerRows[0]?.insuredName || '';
+  const policies = [...new Set(ledgerRows.map(r => r.policyNumber).filter(Boolean))];
+  const carriers = [...new Set(ledgerRows.map(r => r.carrier).filter(Boolean))];
+  const statementFiles = [...new Set(ledgerRows.map(r => r.statementFile).filter(Boolean))];
+  const periods = ledgerRows.map(r => periodFromDate(r.statementDate)).filter(Boolean).sort();
+
+  const totalAdvances = ledgerRows.reduce((s, r) => s + (parseFloat(r.advanceAmount) || 0), 0);
+  const totalCommissions = ledgerRows.reduce((s, r) => s + (parseFloat(r.commissionAmount) || 0), 0);
+  const totalChargebacks = ledgerRows.reduce((s, r) => s + (parseFloat(r.chargebackAmount) || 0), 0);
+  const totalRecoveries = ledgerRows.reduce((s, r) => s + (parseFloat(r.recoveryAmount) || 0), 0);
+  const netTotal = totalAdvances + totalCommissions - totalChargebacks + totalRecoveries;
+
+  // Outstanding balance from the most recent ledger row (by statementDate desc).
+  const sortedDesc = [...ledgerRows].sort((a, b) => String(b.statementDate || '').localeCompare(String(a.statementDate || '')));
+  const outstandingBalance = parseFloat(sortedDesc[0]?.outstandingBalance) || 0;
+
+  const hasMatch = salesRows.length > 0;
+  const expectedNet = hasMatch ? salesRows.reduce((s, sr) => s + expectedNetForSalesRow(sr), 0) : '';
+  const variance = hasMatch ? netTotal - expectedNet : '';
+  const agents = hasMatch ? [...new Set(salesRows.map(sr => sr['Agent']).filter(Boolean))].join(', ') : '';
+
+  const status = deriveStatus({
+    chargebacks: totalChargebacks,
+    outstanding: outstandingBalance,
+    variance: typeof variance === 'number' ? variance : 0,
+    hasMatch,
+  });
+
+  return {
+    'Holder Key': holderKey,
+    'Insured Name': insuredName,
+    'Policies': policies.join(', '),
+    'Policy Count': policies.length,
+    'Carriers': carriers.join(', '),
+    'Statement Count': statementFiles.length,
+    'First Period': periods[0] || '',
+    'Last Period': periods[periods.length - 1] || '',
+    'Total Advances': totalAdvances,
+    'Total Commissions': totalCommissions,
+    'Total Chargebacks': totalChargebacks,
+    'Total Recoveries': totalRecoveries,
+    'Net Total': netTotal,
+    'Outstanding Balance': outstandingBalance,
+    'Expected Net': expectedNet,
+    'Variance': variance,
+    'Agents': agents,
+    'Status': status,
+    'Last Rebuilt': lastRebuiltIso,
+  };
+}
