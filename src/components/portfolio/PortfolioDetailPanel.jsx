@@ -13,6 +13,39 @@ function statusColor(s) {
   return C.muted;
 }
 
+function fmtDate(v, withTime = false) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '—';
+  return withTime ? d.toLocaleString() : d.toLocaleDateString();
+}
+
+function Field({ label, value, span }) {
+  return (
+    <div style={{ gridColumn: span === 'full' ? '1 / -1' : 'auto' }}>
+      <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 }}>
+        {label}
+      </div>
+      <div style={{ color: C.text, fontSize: 13, fontFamily: 'monospace', wordBreak: 'break-word' }}>
+        {value == null || value === '' ? '—' : value}
+      </div>
+    </div>
+  );
+}
+
+function TagChips({ tags }) {
+  if (!tags || tags.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {tags.map((t, i) => (
+        <span key={i} style={{ background: C.card, color: C.muted, padding: '2px 8px', borderRadius: 10, fontSize: 11, fontFamily: 'monospace' }}>
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function PortfolioDetailPanel({ contactId, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -28,6 +61,8 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
 
   if (!contactId) return null;
 
+  const c = data?.contact;
+
   return (
     <div style={{
       position: 'fixed', top: 0, right: 0, height: '100vh', width: 480, background: C.surface,
@@ -39,20 +74,36 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
         <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 18 }}>✕</button>
       </div>
       {loading && <div style={{ color: C.muted }}>Loading...</div>}
-      {data?.contact && (
+      {c && (
         <>
-          <h2 style={{ fontSize: 22, margin: '0 0 4px 0' }}>
-            {(data.contact.firstName || '') + ' ' + (data.contact.lastName || '')}
+          <h2 style={{ fontSize: 22, margin: '0 0 16px 0' }}>
+            {(c.firstName || '') + ' ' + (c.lastName || '')}
           </h2>
-          <div style={{ color: C.muted, fontSize: 13, marginBottom: 16 }}>
-            {data.contact.phone} {data.contact.email ? '• ' + data.contact.email : ''}
+
+          {/* Section 1: Contact Details */}
+          <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.3 }}>
+            Contact Details
           </div>
-          <div style={{ color: C.muted, fontSize: 13, marginBottom: 24 }}>
-            {[data.contact.address1, data.contact.city, data.contact.state, data.contact.postalCode].filter(Boolean).join(', ') || '(no address)'}
+          <div style={{ background: C.card, padding: 16, borderRadius: 6, marginBottom: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+            <Field label="Phone" value={c.phone} />
+            <Field label="Email" value={c.email} />
+            <Field label="Date of Birth" value={fmtDate(c.dateOfBirth)} />
+            <Field label="Gender" value={c.gender} />
+            <Field label="Address" value={c.address1} />
+            <Field label="City" value={c.city} />
+            <Field label="State" value={c.state} />
+            <Field label="Zip" value={c.postalCode} />
+            <Field label="Country" value={c.country} />
+            <Field label="First Seen" value={fmtDate(c.firstSeenAt, true)} />
+            <Field label="Source" value={c.source} />
+            <Field label="Total Calls" value={c.totalCalls} />
+            {c.tags && c.tags.length > 0 && (
+              <Field label="Tags" value={<TagChips tags={c.tags} />} span="full" />
+            )}
           </div>
 
-          {/* Policies */}
-          <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', marginBottom: 8 }}>
+          {/* Section 2: Policies */}
+          <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.3 }}>
             Policies ({data.policies.length})
           </div>
           {data.policies.length === 0 && <div style={{ color: C.muted, fontSize: 13, marginBottom: 24 }}>No policies on file.</div>}
@@ -72,8 +123,8 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
             </div>
           ))}
 
-          {/* Calls */}
-          <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', margin: '24px 0 8px 0' }}>
+          {/* Section 3: Recent Calls */}
+          <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase', margin: '24px 0 8px 0', letterSpacing: 0.3 }}>
             Recent Calls ({data.calls.length})
           </div>
           {data.calls.slice(0, 20).map(ca => (
