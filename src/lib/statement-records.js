@@ -23,3 +23,19 @@ export const VARIANCE_THRESHOLDS = { green: 10, yellow: 50 };
 
 // Suffixes stripped during name normalization.
 const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+
+function normalizeNamePart(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, '')   // strip punctuation including apostrophes, hyphens, periods
+    .trim()
+    .split(/\s+/)
+    .filter(tok => tok.length > 1 && !NAME_SUFFIXES.has(tok))  // drop initials (single chars) and suffixes
+    .join('');
+}
+
+export function buildHolderKey(firstName, lastName) {
+  const first = normalizeNamePart(firstName);
+  const last = normalizeNamePart(lastName);
+  return `${last}|${first}`;
+}
