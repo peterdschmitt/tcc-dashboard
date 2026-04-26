@@ -23,6 +23,12 @@
     },
     "src/app/api/cron/backfill-snapshots/route.js": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/db-sync/route.js": {
+      "maxDuration": 60
+    },
+    "src/app/api/db-backfill/route.js": {
+      "maxDuration": 60
     }
   },
   "crons": [{
@@ -31,5 +37,8 @@
   }, {
     "path": "/api/cron/daily-summary",
     "schedule": "0 12 * * *"
+  }, {
+    "path": "/api/cron/db-sync",
+    "schedule": "*/30 * * * *"
   }]
 }
