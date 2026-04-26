@@ -84,7 +84,13 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
   }
 
   function normalizePhone(p) {
-    return (p ?? '').toString().replace(/\D/g, '');
+    // Strip non-digits, then drop leading "1" for 11-digit US numbers so
+    // "+14302873295" (GHL's stored format) and "4302873295" (raw row)
+    // compare equal. Otherwise we'd mis-treat them as different phones
+    // and try to append the row's phone to additionalPhones unnecessarily.
+    let s = (p ?? '').toString().replace(/\D/g, '');
+    if (s.length === 11 && s.startsWith('1')) s = s.slice(1);
+    return s;
   }
 
   async function searchByPhone(phone) {
@@ -133,7 +139,23 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
       customFields: buildCustomFieldsArray(customFields),
       tags: tags ?? [],
     };
-    const data = await request('POST', '/contacts/', body);
+    let data;
+    try {
+      data = await request('POST', '/contacts/', body);
+    } catch (err) {
+      // GHL native phone-dedup catches duplicates we missed (eventual
+      // consistency: our Tier 1 search runs at T+0 but GHL's index
+      // hasn't reflected a contact created seconds earlier in the same
+      // batch). Recover by re-fetching the existing contact and flag it
+      // so the caller can apply Tier 1 logic on top.
+      if (err.status === 400 && err.body?.meta?.contactId) {
+        const existing = await request('GET', `/contacts/${err.body.meta.contactId}`);
+        const contact = existing.contact ?? existing;
+        contact._dedupedExisting = true;
+        return contact;
+      }
+      throw err;
+    }
     if (data.dryRun) return { id: `dry-run-${Date.now()}`, dryRun: true };
     return data.contact ?? data;
   }
@@ -171,8 +193,16 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     const body = {
       customFields: buildCustomFieldsArray(customFields),
       tags: [...existingTags],
-      additionalPhones,
     };
+    // Only include additionalPhones if we actually have a new entry to
+    // append. Sending the existing list back is unnecessary, and GHL is
+    // strict about its element shape (rejects strings; expects objects)
+    // — so we avoid touching it unless we have to. When/if we need to
+    // append a genuinely-new phone, that path will need its own fix.
+    const existingCount = currentContact?.additionalPhones?.length ?? 0;
+    if (additionalPhones.length > existingCount) {
+      body.additionalPhones = additionalPhones;
+    }
 
     const data = await request('PUT', `/contacts/${contactId}`, body);
     if (data.dryRun) return { id: contactId, dryRun: true };
@@ -180,7 +210,9 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
   }
 
   async function addNote(contactId, body) {
-    const data = await request('POST', `/contacts/${contactId}/notes`, { body, contactId });
+    // GHL rejects extra `contactId` in the body for this endpoint
+    // (it's already in the URL): "property contactId should not exist".
+    const data = await request('POST', `/contacts/${contactId}/notes`, { body });
     return data;
   }
 

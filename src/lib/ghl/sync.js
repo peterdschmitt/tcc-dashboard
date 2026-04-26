@@ -71,12 +71,31 @@ export async function processSingleRow(row, deps) {
       });
 
     } else {
-      // Tier 3: net-new
-      const patch = buildContactPatch(row, { isNewContact: true });
-      const created = await client.createContact(patch);
-      await client.addNote(created.id, note);
-      contactId = created.id;
-      action = 'created';
+      // Tier 3: attempt to create. GHL native phone-dedup may catch a
+      // race condition (we created another contact with the same phone
+      // in this same batch and GHL's search index hadn't yet reflected
+      // it when we ran Tier 1). createContact recovers by returning
+      // the existing contact with `_dedupedExisting` flagged; in that
+      // case we fall through to Tier 1 logic.
+      const newPatch = buildContactPatch(row, { isNewContact: true });
+      const created = await client.createContact(newPatch);
+
+      if (created._dedupedExisting) {
+        const t1Patch = buildContactPatch(row, { isNewContact: false });
+        const updated = await client.updateContact(created.id, {
+          customFields: t1Patch.customFields,
+          tags: t1Patch.tags,
+          removeTag: t1Patch.callableNegationTag,
+          additionalPhone: row['Phone'],
+        }, created);
+        await client.addNote(created.id, note);
+        contactId = updated.id;
+        action = 'attached'; // dedup recovery → semantically Tier 1
+      } else {
+        await client.addNote(created.id, note);
+        contactId = created.id;
+        action = 'created';
+      }
     }
 
     await appendSyncLog({ ...baseLogEntry, 'Tier': String(match.tier), 'Action': action, 'GHL Contact ID': contactId, 'Error': '' });

@@ -83,14 +83,19 @@ const LAST_SOURCE_COLUMNS = {
 export function buildContactPatch(row, { isNewContact }) {
   const v = (k) => (row[k] ?? '').toString().trim();
 
-  const native = isNewContact ? {
-    firstName: v('First'),
-    lastName: v('Last'),
-    phone: v('Phone'),
-    state: v('State'),
-    country: v('Country'),
-    source: v('Inbound Source'),
-  } : {};
+  // Build native fields, skipping blanks. GHL rejects empty values on
+  // strict fields (e.g., 422 "country must be valid" when country is "").
+  // Country defaults to 'US' since this is a US-based call center; all
+  // existing Call Log rows have blank Country.
+  const native = {};
+  if (isNewContact) {
+    if (v('First')) native.firstName = v('First');
+    if (v('Last')) native.lastName = v('Last');
+    if (v('Phone')) native.phone = v('Phone');
+    if (v('State')) native.state = v('State');
+    native.country = v('Country') || 'US';
+    if (v('Inbound Source')) native.source = v('Inbound Source');
+  }
 
   const customFields = {};
 
