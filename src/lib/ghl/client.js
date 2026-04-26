@@ -168,16 +168,26 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     for (const t of tags) existingTags.add(t);
     if (removeTag) existingTags.delete(removeTag);
 
-    // Additional phones: append if not already present (normalized comparison)
-    let additionalPhones = currentContact?.additionalPhones ?? [];
-    if (additionalPhone) {
-      const target = normalizePhone(additionalPhone);
-      const primary = normalizePhone(currentContact?.phone ?? '');
-      const have = additionalPhones.map(normalizePhone);
-      if (target && target !== primary && !have.includes(target)) {
-        additionalPhones = [...additionalPhones, additionalPhone];
-      }
-    }
+    // Additional phones append disabled.
+    //
+    // The brainstorm spec said "if a row has a phone different from
+    // existing primary, append to additionalPhones." Implementation
+    // tries to PUT additionalPhones as an array of strings, but GHL's
+    // v2 API rejects that with HTTP 422 ("each value in nested property
+    // additionalPhones must be either object or array"). The correct
+    // GHL request shape for this field isn't documented clearly and
+    // we've observed inconsistencies in how GHL's GET response formats
+    // it back.
+    //
+    // Practical observation: the call log dataset is one-phone-per-row,
+    // so we never actually have a true secondary phone to capture from
+    // a single row. Cross-row variants are usually format differences
+    // that normalizePhone now handles via Tier 1 match.
+    //
+    // V3 follow-up: figure out GHL's exact additionalPhones object
+    // shape, then re-enable. Until then, we don't touch the field on
+    // update — preserves whatever GHL has.
+    const additionalPhones = currentContact?.additionalPhones ?? [];
 
     // totalCallAttempts: read existing from currentContact.customFields, increment
     let totalAttempts = 1;
@@ -194,15 +204,9 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
       customFields: buildCustomFieldsArray(customFields),
       tags: [...existingTags],
     };
-    // Only include additionalPhones if we actually have a new entry to
-    // append. Sending the existing list back is unnecessary, and GHL is
-    // strict about its element shape (rejects strings; expects objects)
-    // — so we avoid touching it unless we have to. When/if we need to
-    // append a genuinely-new phone, that path will need its own fix.
-    const existingCount = currentContact?.additionalPhones?.length ?? 0;
-    if (additionalPhones.length > existingCount) {
-      body.additionalPhones = additionalPhones;
-    }
+    // additionalPhones is intentionally never sent on update (see comment
+    // in the additionalPhones declaration above). GHL preserves its
+    // current value when the field isn't included.
 
     const data = await request('PUT', `/contacts/${contactId}`, body);
     if (data.dryRun) return { id: contactId, dryRun: true };
