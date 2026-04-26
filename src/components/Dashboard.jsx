@@ -6,6 +6,8 @@ import BusinessHealthTab from './tabs/BusinessHealthTab';
 import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
+import StatementRecordDrawer from './StatementRecordDrawer';
+import { StatementRecordDrawerProvider } from '@/contexts/StatementRecordDrawerContext';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import CommissionReconciliationTab from './tabs/CommissionReconciliationTab';
 import AiAnalystPane from './AiAnalystPane';
@@ -3598,6 +3600,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
   }, [voicePanelWidth]);
 
   return (
+    <StatementRecordDrawerProvider>
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: C.sans, marginRight: voicePanelWidth + (commSidebarOpen ? 520 : 0), transition: 'margin-right 0.2s ease' }}>
       {/* Voice-triggered tile modal */}
       {voiceTileTarget && MODAL_CONFIGS_KEYS.includes(voiceTileTarget) && (
@@ -3689,5 +3692,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         rightOffset={commSidebarOpen ? 536 : 0}
       />
     </div>
+    <StatementRecordDrawer />
+    </StatementRecordDrawerProvider>
   );
 }
