@@ -5,10 +5,15 @@ import { ALL_CUSTOM_FIELDS } from './field-mapping.js';
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-07-28';
 // GHL's sustained rate limit is 100 requests per 10 seconds (= 10 req/sec)
-// per location. 50ms (= 20/sec) overshoots and triggers 429 cascades after
-// ~1 min of sustained traffic. 150ms (= 6.6/sec) leaves headroom.
-const INTER_CALL_DELAY_MS = 150;
-const MAX_RETRIES = 5; // 1s, 2s, 4s, 8s, 16s = 31s max backoff — survives most GHL 429 windows
+// per location. We observed that exceeding even briefly triggers a
+// multi-minute extended cool-down (anti-abuse). 250ms (= 4 req/sec)
+// leaves substantial headroom and stays comfortably under any
+// burst threshold across the full backfill duration.
+const INTER_CALL_DELAY_MS = 250;
+// 1s, 2s, 4s, 8s, 16s, 32s, 64s = 127s max backoff. After observing GHL
+// hold a hard rate-limit for several minutes when we've previously
+// abused the burst budget, longer retries are safer than fast failure.
+const MAX_RETRIES = 7;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
