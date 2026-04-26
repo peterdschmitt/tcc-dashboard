@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { C, fmtDollar } from '../shared/theme';
+import { useStatementRecordDrawer } from '@/contexts/StatementRecordDrawerContext';
 
 function compare(a, b, key) {
   const va = a?.[key], vb = b?.[key];
@@ -46,6 +47,7 @@ function downloadCSV(filename, headers, rows) {
 }
 
 export default function CommissionReconciliationTab({ dateRange }) {
+  const { openDrawer } = useStatementRecordDrawer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -205,6 +207,7 @@ export default function CommissionReconciliationTab({ dateRange }) {
                 <SortTh label="CB Date"     field="chargeBackDate" sortKey={sortKey} sortDir={sortDir} onSort={toggle} align="right" />
                 <SortTh label="Net"         field="netReceived"    sortKey={sortKey} sortDir={sortDir} onSort={toggle} align="right" />
                 <SortTh label="Variance"    field="variance"       sortKey={sortKey} sortDir={sortDir} onSort={toggle} align="right" />
+                <th title="View carrier statement records for this customer" style={{ padding: 8, textAlign: 'center' }}>📄</th>
               </tr>
             </thead>
             <tbody>
@@ -233,6 +236,9 @@ export default function CommissionReconciliationTab({ dateRange }) {
                   </td>
                   <td style={{ padding: '6px 10px', color: r.ledgerEntries === 0 ? C.muted : (r.variance >= 0 ? C.green : C.red), textAlign: 'right', fontWeight: 700 }}>
                     {r.ledgerEntries > 0 ? fmtDollar(r.variance, 2) : '—'}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button onClick={(e) => { e.stopPropagation(); openDrawer({ holderName: r.client, policyNumber: r.policyNumber }); }} title="View carrier statements" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📄</button>
                   </td>
                 </tr>
               ))}

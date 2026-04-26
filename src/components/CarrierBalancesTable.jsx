@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import { useStatementRecordDrawer } from '@/contexts/StatementRecordDrawerContext';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -45,6 +46,7 @@ function KPICard({ label, value, color, subtitle }) {
 }
 
 export default function CarrierBalancesTable() {
+  const { openDrawer } = useStatementRecordDrawer();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedCarrier, setExpandedCarrier] = useState(null);
@@ -362,6 +364,7 @@ export default function CarrierBalancesTable() {
                     <SortTh label="Recovery" field="recoveryAmount" align="right" />
                     <SortTh label="Issue Date" field="issueDate" />
                     <SortTh label="Stmt Date" field="statementDate" />
+                    <th title="View carrier statement records for this customer" style={{ padding: 8, textAlign: 'center' }}>📄</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -389,6 +392,9 @@ export default function CarrierBalancesTable() {
                         <td style={{ ...tdRight, color: (p.recoveryAmount || 0) > 0 ? C.orange : C.muted }}>{(p.recoveryAmount || 0) > 0 ? fmtDollar(p.recoveryAmount) : '—'}</td>
                         <td style={{ ...tdStyle, fontFamily: C.mono, fontSize: 9 }}>{p.issueDate || '—'}</td>
                         <td style={{ ...tdStyle, fontFamily: C.mono, fontSize: 9 }}>{p.statementDate || '—'}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button onClick={(e) => { e.stopPropagation(); openDrawer({ holderName: p.insuredName, policyNumber: p.policyNumber }); }} title="View carrier statements" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📄</button>
+                        </td>
                       </tr>
                     );
                   })}

@@ -7,7 +7,7 @@ import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
 import StatementRecordDrawer from './StatementRecordDrawer';
-import { StatementRecordDrawerProvider } from '@/contexts/StatementRecordDrawerContext';
+import { StatementRecordDrawerProvider, useStatementRecordDrawer } from '@/contexts/StatementRecordDrawerContext';
 import CombinedPoliciesTab from './tabs/CombinedPoliciesTab';
 import CommissionReconciliationTab from './tabs/CommissionReconciliationTab';
 import AiAnalystPane from './AiAnalystPane';
@@ -1833,6 +1833,7 @@ function VirtualAgentDrilldown({ calls, label, onClose }) {
 
 // ─── DAILY ACTIVITY TAB ────────────────────────────
 function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolicies, vaData }) {
+  const { openDrawer } = useStatementRecordDrawer();
   const [drillDay, setDrillDay] = useState(null);
   const [overrides, setOverrides] = useState({}); // rowIndex → 'N' | 'Y' | ''
   const [flagging, setFlagging] = useState(null); // rowIndex currently being saved
@@ -1952,6 +1953,9 @@ function DailyActivityTab({ policies, calls, pnl, goals, dateRange, allTimePolic
                   { key: 'commission', label: 'Agent Comm', render: r => fmtDollar(r.commission), color: () => C.accent },
                   { key: 'placed', label: 'Status', align: 'left', mono: false, color: r => isPlaced(r) ? C.green : r.placed === 'Declined' ? C.red : C.yellow },
                   { key: 'state', label: 'State' },
+                  { key: '_stmtBtn', label: '📄', sortable: false, align: 'center', mono: false, render: r => (
+                    <button onClick={(e) => { e.stopPropagation(); openDrawer({ holderName: `${r.firstName} ${r.lastName}`.trim(), policyNumber: r.policyNumber }); }} title="View carrier statements" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📄</button>
+                  )},
                 ]} rows={dayPolicies} />
               </Section>
             )}

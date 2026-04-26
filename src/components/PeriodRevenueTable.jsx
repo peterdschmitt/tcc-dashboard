@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import { useStatementRecordDrawer } from '@/contexts/StatementRecordDrawerContext';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -76,6 +77,7 @@ function KPICard({ label, value, color, subtitle }) {
 }
 
 export default function PeriodRevenueTable() {
+  const { openDrawer } = useStatementRecordDrawer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [drillPeriod, setDrillPeriod] = useState(null);
@@ -215,6 +217,7 @@ export default function PeriodRevenueTable() {
                   <SortTh label="Net Recv" field="netReceived" align="right" detail />
                   <SortTh label="Balance" field="balance" align="right" detail />
                   <th style={{ ...thStyle, textAlign: 'center' }}>Paid?</th>
+                  <th title="View carrier statement records for this customer" style={{ padding: 8, textAlign: 'center' }}>📄</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,6 +243,9 @@ export default function PeriodRevenueTable() {
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'center' }}>
                         <span style={{ color: p.carrierPaid ? C.green : C.red, fontWeight: 700, fontSize: 11 }}>{p.carrierPaid ? '✓' : '✗'}</span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button onClick={(e) => { e.stopPropagation(); openDrawer({ holderName: p.insuredName, policyNumber: p.policyNumber }); }} title="View carrier statements" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📄</button>
                       </td>
                     </tr>
                   );

@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { C, fmt, fmtDollar, fmtPct } from '../shared/theme';
+import { useStatementRecordDrawer } from '@/contexts/StatementRecordDrawerContext';
 import CommissionStatementsTab from './CommissionStatementsTab';
 
 function compareValues(a, b, key) {
@@ -630,6 +631,7 @@ function PolicyStatusView({ policies, loading, error }) {
 }
 
 export default function CombinedPoliciesTab() {
+  const { openDrawer } = useStatementRecordDrawer();
   const [subTab, setSubTab] = useState('combined');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -774,6 +776,9 @@ export default function CombinedPoliciesTab() {
         <td style={tdStyle}>
           <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 700, background: statusBg(p.status), color: statusColor(p.status) }}>{p.status || '—'}</span>
         </td>
+        <td style={{ textAlign: 'center' }}>
+          <button onClick={(e) => { e.stopPropagation(); openDrawer({ holderName: p.insuredName, policyNumber: p.policyNumber }); }} title="View carrier statements" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📄</button>
+        </td>
       </tr>
     );
 
@@ -864,12 +869,12 @@ export default function CombinedPoliciesTab() {
     ) : (
       <tr key={`nodata-${i}`} style={{ background: subBg }}>
         <td style={subTd}></td>
-        <td colSpan={17} style={{ ...subTd, color: '#facc15', fontStyle: 'italic', textAlign: 'center', padding: '10px' }}>No carrier commission activity yet</td>
+        <td colSpan={18} style={{ ...subTd, color: '#facc15', fontStyle: 'italic', textAlign: 'center', padding: '10px' }}>No carrier commission activity yet</td>
       </tr>
     );
 
     return <>{mainRow}{cashFlowLoading ? (
-      <tr key={`loading-${i}`} style={{ background: subBg }}><td colSpan={18} style={{ ...subTd, color: C.muted, textAlign: 'center', padding: 10 }}>Loading carrier data...</td></tr>
+      <tr key={`loading-${i}`} style={{ background: subBg }}><td colSpan={19} style={{ ...subTd, color: C.muted, textAlign: 'center', padding: 10 }}>Loading carrier data...</td></tr>
     ) : <>{saleRow}{entryRows}{totalRow}</>}</>;
   };
 
@@ -892,6 +897,7 @@ export default function CombinedPoliciesTab() {
         <SortTh label="Net Banked Cash" field="netReceived" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
         <th style={thStyle}>Source</th>
         <SortTh label="Status" field="status" {...mainSort} onSort={mainSort.toggle} style={thStyle} />
+        <th title="View carrier statement records for this customer" style={{ padding: 8, textAlign: 'center' }}>📄</th>
       </tr>
     </thead>
   );
