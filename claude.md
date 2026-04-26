@@ -486,3 +486,46 @@ Defined in `src/lib/portfolio/filters.js`:
 - **Export CSV** — general columns (name, phone, status, premium, etc.)
 - **Push to Dialer (CSV)** — ChaseData import format (Phone, FirstName, LastName, State)
 - **Trigger Workflow** — V2 (placeholder in UI)
+
+---
+
+## GoHighLevel Call Log Sync (Apr 2026)
+
+One-way sync from `CALLLOGS_SHEET_ID` into GoHighLevel contacts. Sheets remains the source of truth; GHL is a downstream destination for workflow automation (welcome SMS, retention, follow-up sequences). See spec at `docs/superpowers/specs/2026-04-25-ghl-call-log-sync-design.md` and plan at `docs/superpowers/plans/2026-04-25-ghl-call-log-sync.md`.
+
+### Env vars
+- `GHL_API_TOKEN` — Private Integration Token (GHL Settings → Private Integrations)
+- `GHL_LOCATION_ID` — sub-account location ID
+- `GHL_SYNC_ENABLED=true|false` — kill switch (must be `true` to run; any other value = skip)
+- `GHL_SYNC_DRY_RUN=true|false` — when `true`, log actions without writing to GHL
+
+### Cron + endpoints
+- `/api/cron/ghl-sync` runs every 10 min (configured in `vercel.json`)
+- Backfill via `GET /api/ghl-backfill?start=YYYY-MM-DD&end=YYYY-MM-DD` (gated by `CRON_SECRET`)
+
+### Sheet tabs (in `GOALS_SHEET_ID`)
+- `GHL Sync Log` — every processed row, success or failure. Column L row 2 holds the high-water-mark `Import Date`.
+- `GHL Possible Merges` — Tier 2 fuzzy matches needing manual review
+- `GHL Excluded Campaigns` — campaign codes to skip (configurable; empty by default)
+
+### Matching ladder (`src/lib/ghl/matcher.js`)
+1. Phone exact → attach activity to existing contact
+2. First+Last (Levenshtein ≤1 each) + State exact → create new contact + log to Possible Merges
+3. No match → create new contact
+
+### Field mapping
+Every Call Log column lands somewhere in GHL: 6 native fields + 28 custom fields (9 "First *" set-once on creation, 18 "Last *" overwritten on each call, 1 computed `Total Call Attempts`) + tags (`publisher:X`, `state:X`, `callable:yes|no`) + a per-call activity note. Canonical field list in `src/lib/ghl/field-mapping.js`.
+
+### One-time setup commands
+```bash
+node --env-file=.env.local scripts/ghl-init-tabs.js              # creates the 3 tabs in Goals sheet
+node --env-file=.env.local scripts/ghl-bootstrap-fields.js       # creates 28 custom fields in GHL
+```
+
+### Module layout (`src/lib/ghl/`)
+- Pure utilities: `levenshtein.js`, `row-hash.js`, `filter.js`, `note-formatter.js`, `field-mapping.js`, `matcher.js`
+- I/O: `client.js` (GHL REST wrapper with auth, retry, rate limit, dry-run), `sheet-state.js` (Sync Log + Possible Merges + watermark)
+- Orchestration: `sync.js` (`processSingleRow`, `processBatch`)
+
+### Debugging
+Start at the `GHL Sync Log` tab — every row's outcome is logged with action, contact ID, tier, and error message. Errored rows can be retried by deleting their Sync Log entry; the row-hash dedup prevents duplicates on success.
