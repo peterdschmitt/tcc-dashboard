@@ -130,3 +130,56 @@ test('deriveStatus: variance when |variance| > yellow threshold', () => {
 test('deriveStatus: healthy when all clean and matched', () => {
   assert.equal(deriveStatus({ chargebacks: 0, outstanding: 0, variance: 5, hasMatch: true }), 'healthy');
 });
+
+import { buildPeriodRows } from './statement-records.js';
+
+const multiLineStatement = [
+  { insuredName: 'Jane Doe', policyNumber: 'A1', carrier: 'AIG', statementFile: 'aig-feb.pdf',
+    statementDate: '2026-02-15', statementFileId: 'drive-abc',
+    premium: 89, advanceAmount: 200, commissionAmount: 0, chargebackAmount: 0, recoveryAmount: 0,
+    outstandingBalance: 200, notes: 'first-half' },
+  { insuredName: 'Jane Doe', policyNumber: 'A1', carrier: 'AIG', statementFile: 'aig-feb.pdf',
+    statementDate: '2026-02-15', statementFileId: 'drive-abc',
+    premium: 89, advanceAmount: 200, commissionAmount: 0, chargebackAmount: 0, recoveryAmount: 0,
+    outstandingBalance: 400, notes: 'second-half' },
+  { insuredName: 'Jane Doe', policyNumber: 'A1', carrier: 'AIG', statementFile: 'aig-apr.pdf',
+    statementDate: '2026-04-15', statementFileId: 'drive-def',
+    premium: 89, advanceAmount: 0, commissionAmount: 0, chargebackAmount: 400, recoveryAmount: 0,
+    outstandingBalance: 0, notes: 'lapse' },
+];
+
+test('buildPeriodRows: collapses multiple lines from one statement into one row per (file × policy)', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  assert.equal(rows.length, 2); // aig-feb.pdf + aig-apr.pdf
+});
+
+test('buildPeriodRows: sums per-line amounts within one statement', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  const feb = rows.find(r => r['Statement File'] === 'aig-feb.pdf');
+  assert.equal(feb['Advance Amount'], 400); // 200 + 200
+  assert.equal(feb['Line Item Count'], 2);
+});
+
+test('buildPeriodRows: outstanding balance from latest line within statement', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  const feb = rows.find(r => r['Statement File'] === 'aig-feb.pdf');
+  assert.equal(feb['Outstanding Balance'], 400); // last line's value, not sum
+});
+
+test('buildPeriodRows: row key is holderKey|file|policy', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  const feb = rows.find(r => r['Statement File'] === 'aig-feb.pdf');
+  assert.equal(feb['Row Key'], 'doe|jane|aig-feb.pdf|A1');
+});
+
+test('buildPeriodRows: notes concatenated unique', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  const feb = rows.find(r => r['Statement File'] === 'aig-feb.pdf');
+  assert.equal(feb.Notes, 'first-half; second-half');
+});
+
+test('buildPeriodRows: net impact = adv + comm − chgbk + rec', () => {
+  const rows = buildPeriodRows('doe|jane', multiLineStatement);
+  const apr = rows.find(r => r['Statement File'] === 'aig-apr.pdf');
+  assert.equal(apr['Net Impact'], -400);
+});

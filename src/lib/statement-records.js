@@ -89,6 +89,52 @@ export function deriveStatus({ chargebacks, outstanding, variance, hasMatch }) {
   return 'healthy';
 }
 
+export function buildPeriodRows(holderKey, ledgerRows) {
+  // Group ledger rows by (statementFile, policyNumber).
+  const groups = new Map();
+  for (const r of ledgerRows) {
+    const file = r.statementFile || '';
+    const policy = r.policyNumber || '';
+    const key = `${file}||${policy}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+
+  const rows = [];
+  for (const [, lines] of groups) {
+    const sample = lines[0];
+    const last = lines[lines.length - 1];
+    const sum = (field) => lines.reduce((s, l) => s + (parseFloat(l[field]) || 0), 0);
+    const advance = sum('advanceAmount');
+    const commission = sum('commissionAmount');
+    const chargeback = sum('chargebackAmount');
+    const recovery = sum('recoveryAmount');
+    const noteList = [...new Set(lines.map(l => String(l.notes || '').trim()).filter(Boolean))];
+
+    rows.push({
+      'Row Key': `${holderKey}|${sample.statementFile || ''}|${sample.policyNumber || ''}`,
+      'Holder Key': holderKey,
+      'Insured Name': sample.insuredName || '',
+      'Policy #': sample.policyNumber || '',
+      'Carrier': sample.carrier || '',
+      'Statement Period': periodFromDate(sample.statementDate),
+      'Statement Date': sample.statementDate || '',
+      'Statement File': sample.statementFile || '',
+      'Statement File ID': sample.statementFileId || '',
+      'Premium': sum('premium'),
+      'Advance Amount': advance,
+      'Commission Amount': commission,
+      'Chargeback Amount': chargeback,
+      'Recovery Amount': recovery,
+      'Net Impact': advance + commission - chargeback + recovery,
+      'Outstanding Balance': parseFloat(last.outstandingBalance) || 0,
+      'Line Item Count': lines.length,
+      'Notes': noteList.join('; '),
+    });
+  }
+  return rows;
+}
+
 export function buildHolderRow(holderKey, ledgerRows, salesRows, lastRebuiltIso) {
   const insuredName = ledgerRows[0]?.insuredName || '';
   const policies = [...new Set(ledgerRows.map(r => r.policyNumber).filter(Boolean))];
