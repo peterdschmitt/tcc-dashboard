@@ -46,9 +46,20 @@ function TagChips({ tags }) {
   );
 }
 
+const MIN_WIDTH = 360;
+const MAX_WIDTH = 900;
+const DEFAULT_WIDTH = 480;
+
+function clampWidth(n) {
+  if (typeof n !== 'number' || isNaN(n)) return DEFAULT_WIDTH;
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
+}
+
 export default function PortfolioDetailPanel({ contactId, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [hoverHandle, setHoverHandle] = useState(false);
 
   useEffect(() => {
     if (!contactId) return;
@@ -59,16 +70,46 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
       .catch(() => setLoading(false));
   }, [contactId]);
 
+  function startDrag(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    const onMove = (ev) => {
+      // Panel is right-anchored; dragging LEFT (smaller clientX) grows width.
+      const next = clampWidth(startWidth - (ev.clientX - startX));
+      setWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
   if (!contactId) return null;
 
   const c = data?.contact;
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, height: '100vh', width: 480, background: C.surface,
+      position: 'fixed', top: 0, right: 0, height: '100vh', width, background: C.surface,
       borderLeft: `1px solid ${C.border}`, padding: 24, overflowY: 'auto', zIndex: 100, color: C.text,
       boxShadow: '-4px 0 24px rgba(0,0,0,0.5)',
     }}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={startDrag}
+        onMouseEnter={() => setHoverHandle(true)}
+        onMouseLeave={() => setHoverHandle(false)}
+        style={{
+          position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
+          cursor: 'ew-resize',
+          background: hoverHandle ? C.accent : 'transparent',
+          transition: 'background 120ms ease',
+        }}
+        title="Drag to resize"
+      />
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ color: C.muted, fontSize: 11, textTransform: 'uppercase' }}>Contact Detail</div>
         <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 18 }}>✕</button>
