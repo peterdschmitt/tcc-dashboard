@@ -1,13 +1,18 @@
 // scripts/db-migrate.mjs
 // Run:
-//   node --env-file=.env.local scripts/db-migrate.mjs            # apply pending (default 'up')
-//   node --env-file=.env.local scripts/db-migrate.mjs status     # list applied + pending
+//   node scripts/db-migrate.mjs            # apply pending (default 'up')
+//   node scripts/db-migrate.mjs status     # list applied + pending
+//
+// Reads .env.local via scripts/load-env.mjs (more lenient than Node's
+// --env-file flag — preserves \\n escapes inside the GOOGLE_SERVICE_ACCOUNT_KEY
+// JSON value).
 //
 // Migrations are .sql files in migrations/, applied alphabetically.
 // Applied filenames are tracked in the _migrations table; subsequent
 // runs skip files already applied. No rollback in V1 — write a new
 // forward migration to fix issues.
 
+import './load-env.mjs';
 import { sql, closeDb, rawClient } from '../src/lib/db.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
