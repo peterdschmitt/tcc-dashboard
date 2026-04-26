@@ -1,6 +1,6 @@
 // src/components/portfolio/PortfolioDetailPanel.jsx
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const C = { bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538', text: '#f0f3f9', muted: '#8fa3be', accent: '#5b9fff', green: '#4ade80', yellow: '#facc15', red: '#f87171' };
 
@@ -60,6 +60,8 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
   const [loading, setLoading] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [hoverHandle, setHoverHandle] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragCleanupRef = useRef(null);
 
   useEffect(() => {
     if (!contactId) return;
@@ -70,21 +72,29 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
       .catch(() => setLoading(false));
   }, [contactId]);
 
+  // Clean up any in-flight drag if the panel unmounts mid-drag.
+  useEffect(() => () => { dragCleanupRef.current?.(); }, []);
+
   function startDrag(e) {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
     const onMove = (ev) => {
       // Panel is right-anchored; dragging LEFT (smaller clientX) grows width.
-      const next = clampWidth(startWidth - (ev.clientX - startX));
-      setWidth(next);
+      setWidth(clampWidth(startWidth - (ev.clientX - startX)));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      setDragging(false);
+      dragCleanupRef.current = null;
     };
+    dragCleanupRef.current = onUp;
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    setDragging(true);
   }
 
   if (!contactId) return null;
@@ -105,7 +115,7 @@ export default function PortfolioDetailPanel({ contactId, onClose }) {
         style={{
           position: 'absolute', top: 0, left: 0, width: 4, height: '100%',
           cursor: 'ew-resize',
-          background: hoverHandle ? C.accent : 'transparent',
+          background: (hoverHandle || dragging) ? C.accent : 'transparent',
           transition: 'background 120ms ease',
         }}
         title="Drag to resize"
