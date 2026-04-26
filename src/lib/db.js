@@ -1,62 +1,54 @@
-// Neon Postgres connection helper.
-//
-// Uses @neondatabase/serverless's tagged-template `sql` for one-shot queries
-// (HTTP fetch under the hood — works in Edge, Vercel functions, and local node).
-// For multi-statement transactions or session-scoped state, use `getPool()`.
-//
-// Env vars (set automatically by the Vercel ↔ Neon integration):
-//   DATABASE_URL           — pooled connection string (default for HTTP queries)
-//   DATABASE_URL_UNPOOLED  — direct connection string (use for migrations / long txns)
-//
-// Usage:
-//   import { sql } from '@/lib/db';
-//   const rows = await sql`SELECT now() AS now`;
-//
-//   import { getPool } from '@/lib/db';
-//   const pool = getPool();
-//   const client = await pool.connect();
-//   try {
-//     await client.query('BEGIN');
-//     // ... multiple statements ...
-//     await client.query('COMMIT');
-//   } finally {
-//     client.release();
-//   }
+// src/lib/db.js
+import postgres from 'postgres';
 
-import { neon, Pool } from '@neondatabase/serverless';
-
-function getConnectionString() {
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!url) {
-    throw new Error(
-      'DATABASE_URL (or POSTGRES_URL) is not set. ' +
-      'Run `vercel env pull .env.local` or configure Neon in Vercel.'
-    );
-  }
-  return url;
-}
-
-// Lazily-initialized HTTP-style query function. Use for one-shot queries.
 let _sql = null;
-export function sql(...args) {
-  if (!_sql) _sql = neon(getConnectionString());
-  return _sql(...args);
+
+/**
+ * Lazily initialize the postgres client. Importing this module does NOT
+ * open a connection; the first query does. Subsequent calls reuse the
+ * same connection pool.
+ *
+ * Pool size 10 is appropriate for Vercel's serverless model — each
+ * function invocation gets its own pool, and 10 is comfortable on
+ * Neon's free tier (~100 concurrent connections allowed).
+ *
+ * `transform: postgres.camel` returns column values with camelCase keys
+ * (firstName instead of first_name) to match the existing JS code style.
+ */
+function getSql() {
+  if (_sql) return _sql;
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL not set');
+  _sql = postgres(url, {
+    max: 10,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    transform: postgres.camel,
+  });
+  return _sql;
 }
 
-// Lazily-initialized connection pool. Use for transactions or repeated queries
-// inside a single request handler. Pool is reused across handler invocations
-// in the same warm Vercel function.
-let _pool = null;
-export function getPool() {
-  if (!_pool) {
-    _pool = new Pool({ connectionString: getConnectionString() });
+/**
+ * Tagged-template helper for parameterized queries.
+ *   const rows = await sql`SELECT * FROM contacts WHERE phone = ${phone}`;
+ *
+ * Postgres.js handles parameter binding automatically (no SQL injection
+ * risk), and returns an array of row objects.
+ */
+export const sql = (...args) => getSql()(...args);
+
+/**
+ * Close the connection pool. Used by scripts that need to exit cleanly.
+ */
+export async function closeDb() {
+  if (_sql) {
+    await _sql.end();
+    _sql = null;
   }
-  return _pool;
 }
 
-// Health check helper — returns true if the database is reachable.
-// Useful for /api/health endpoints and smoke tests.
-export async function pingDatabase() {
-  const rows = await sql`SELECT 1 AS ok`;
-  return rows[0]?.ok === 1;
-}
+/**
+ * Direct access to the underlying postgres.js client for advanced use
+ * cases like .unsafe() (multi-statement DDL execution).
+ */
+export const rawClient = () => getSql();

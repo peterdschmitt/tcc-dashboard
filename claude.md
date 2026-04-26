@@ -398,3 +398,88 @@ Headers: Date, Policy #, Carrier Policy #, Insured Name, Agent, Field Changed, O
 
 ### Reverting to Original Data
 To temporarily use original agent-submitted data: change `SALES_TAB_NAME=Sheet1` in `.env.local` and restart. All economics APIs will read from the unmodified Sheet1.
+
+---
+
+## TCC Database (Postgres on Neon)
+
+Replaced Sheets-as-database for the Portfolio UI and future features.
+
+### Connection
+
+- Provider: Neon (10GB free tier, branchable serverless Postgres)
+- Library: `postgres` (postgres.js, no ORM, raw SQL via tagged-template literals)
+- Module: `src/lib/db.js` exports `sql` (tagged template), `closeDb()`, `rawClient()`
+- Env: `DATABASE_URL` in `.env.local` and Vercel env
+
+### Schema
+
+7 entity tables + `_migrations`:
+
+- `contacts` (phone-keyed, parent of calls + policies)
+- `calls` (FK contact, campaign, agent; row_hash for idempotent sync)
+- `policies` (FK contact, carrier, product, campaign, agent; source_row_hash for idempotent sync)
+- `campaigns`, `carriers`, `products`, `agents` (reference data)
+
+### Usage
+
+```javascript
+import { sql } from '@/lib/db';
+const contacts = await sql`SELECT id, first_name, last_name FROM contacts WHERE state = ${state} LIMIT 50`;
+// returns array with camelCase keys (firstName, lastName)
+```
+
+### Migrations
+
+```bash
+node --env-file=.env.local scripts/db-migrate.mjs status   # list
+node --env-file=.env.local scripts/db-migrate.mjs up       # apply pending
+```
+
+V1 has no rollback — write a forward migration to fix issues.
+
+---
+
+## TCC Portfolio (DB-backed unified view)
+
+Replaces the old Lead CRM + Retention Dashboard + Business Health tabs
+with a single Portfolio tab. Reads from Postgres for sub-second response.
+
+### Components (`src/components/portfolio/`)
+
+- `PortfolioTab.jsx` — main shell, hosts state + wires children
+- `PortfolioFilterSidebar.jsx` — saved smart-list selector
+- `PortfolioGrid.jsx` — sortable selectable contact table
+- `PortfolioGroupBySelector.jsx` + `PortfolioGroupView.jsx` — pivot grouping
+- `PortfolioBulkActionBar.jsx` — appears when rows selected; export, dialer
+- `PortfolioDetailPanel.jsx` — slide-in contact detail (replaces old modals)
+
+### API endpoints (`src/app/api/portfolio/`)
+
+- `GET /contacts?filters=...&groupBy=...&page=...&sortBy=...&sortDir=...`
+  Returns `{ rows, total, page, pageSize }` for flat view, or
+  `{ groups, groupBy }` when groupBy is set
+- `GET /contact/[id]` — full contact record with policies + calls
+- `GET /export?filters=...` — general CSV export
+- `GET /dialer-export?filters=...` — ChaseData-format CSV
+
+### Saved smart lists (hardcoded for V1; user-defined deferred)
+
+Defined in `src/lib/portfolio/filters.js`:
+
+- `all_submitted` — `application_date IS NOT NULL`
+- `pending` — submitted + status contains pending/submitted/awaiting
+- `active_policies` — submitted + status contains active/in force/advance
+- `recently_lapsed` — submitted + status contains lapsed/canceled
+- `declined` — submitted + status contains declined
+- `high_value` — active + monthly premium > $100
+
+### Group-by dimensions
+
+`none`, `placed_status`, `carrier`, `agent`, `campaign`, `state`, `month`
+
+### Bulk actions
+
+- **Export CSV** — general columns (name, phone, status, premium, etc.)
+- **Push to Dialer (CSV)** — ChaseData import format (Phone, FirstName, LastName, State)
+- **Trigger Workflow** — V2 (placeholder in UI)

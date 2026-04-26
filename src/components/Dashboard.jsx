@@ -1,8 +1,6 @@
 'use client';
 import { useState, useMemo, useEffect } from 'react';
-import LeadCRMTab from './tabs/LeadCRMTab';
-import RetentionDashboardTab from './tabs/RetentionDashboardTab';
-import BusinessHealthTab from './tabs/BusinessHealthTab';
+import PortfolioTab from './portfolio/PortfolioTab';
 import CarrierSyncTab from './tabs/CarrierSyncTab';
 import DataDiffTab from './tabs/DataDiffTab';
 import CommissionStatementsTab from './tabs/CommissionStatementsTab';
@@ -38,7 +36,7 @@ const TABS = [
   { id: 'combined-policies', label: 'Combined Policies' },
   { id: 'commission-recon', label: 'Commission Recon' },
   { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },
-  { id: 'leads-crm', label: 'Lead CRM' },  { id: 'retention', label: 'Retention' },  { id: 'business-health', label: 'Business Health' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'period-revenue', label: 'Period Revenue' },  { id: 'carrier-balances', label: 'Carrier Balances' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+  { id: 'portfolio', label: 'Portfolio' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'period-revenue', label: 'Period Revenue' },  { id: 'carrier-balances', label: 'Carrier Balances' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
 ];
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -3666,9 +3664,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'agents' && <AgentsTab policies={policies} calls={calls} goals={goals} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
         {activeTab === 'carriers' && <CarriersTab policies={policies} goals={goals} calls={calls} dateRange={dateRange} pnl={pnl} allTimePolicies={allTimePolicies || []} vaData={vaData} voiceDrillTarget={voiceDrillTarget} clearVoiceDrill={() => setVoiceDrillTarget(null)} />}
         {activeTab === 'policies-detail' && <PoliciesTab policies={policies} />}        {activeTab === 'policy-status' && <PolicyStatusTab policies={policies} calls={calls} />}        {activeTab === 'agent-perf' && <AgentPerformanceTab dateRange={dateRange} calls={calls} policies={policies} />}        {activeTab === 'pnl' && <PnlTab pnl={pnl} policies={policies} calls={calls} goals={goals} dateRange={dateRange} allTimePolicies={allTimePolicies || []} vaData={vaData} />}        {activeTab === 'commissions' && <CommissionsTab policies={policies} />}
-        {activeTab === 'leads-crm' && <LeadCRMTab dateRange={dateRange} />}
-        {activeTab === 'retention' && <RetentionDashboardTab dateRange={dateRange} dataSource={dataSource} />}
-        {activeTab === 'business-health' && <BusinessHealthTab dateRange={dateRange} />}
+        {activeTab === 'portfolio' && <PortfolioTab />}
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
         {activeTab === 'commission-status' && <CommissionStatusTable />}
