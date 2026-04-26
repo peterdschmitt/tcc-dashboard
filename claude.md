@@ -437,3 +437,49 @@ node --env-file=.env.local scripts/db-migrate.mjs up       # apply pending
 ```
 
 V1 has no rollback — write a forward migration to fix issues.
+
+---
+
+## TCC Portfolio (DB-backed unified view)
+
+Replaces the old Lead CRM + Retention Dashboard + Business Health tabs
+with a single Portfolio tab. Reads from Postgres for sub-second response.
+
+### Components (`src/components/portfolio/`)
+
+- `PortfolioTab.jsx` — main shell, hosts state + wires children
+- `PortfolioFilterSidebar.jsx` — saved smart-list selector
+- `PortfolioGrid.jsx` — sortable selectable contact table
+- `PortfolioGroupBySelector.jsx` + `PortfolioGroupView.jsx` — pivot grouping
+- `PortfolioBulkActionBar.jsx` — appears when rows selected; export, dialer
+- `PortfolioDetailPanel.jsx` — slide-in contact detail (replaces old modals)
+
+### API endpoints (`src/app/api/portfolio/`)
+
+- `GET /contacts?filters=...&groupBy=...&page=...&sortBy=...&sortDir=...`
+  Returns `{ rows, total, page, pageSize }` for flat view, or
+  `{ groups, groupBy }` when groupBy is set
+- `GET /contact/[id]` — full contact record with policies + calls
+- `GET /export?filters=...` — general CSV export
+- `GET /dialer-export?filters=...` — ChaseData-format CSV
+
+### Saved smart lists (hardcoded for V1; user-defined deferred)
+
+Defined in `src/lib/portfolio/filters.js`:
+
+- `all_submitted` — `application_date IS NOT NULL`
+- `pending` — submitted + status contains pending/submitted/awaiting
+- `active_policies` — submitted + status contains active/in force/advance
+- `recently_lapsed` — submitted + status contains lapsed/canceled
+- `declined` — submitted + status contains declined
+- `high_value` — active + monthly premium > $100
+
+### Group-by dimensions
+
+`none`, `placed_status`, `carrier`, `agent`, `campaign`, `state`, `month`
+
+### Bulk actions
+
+- **Export CSV** — general columns (name, phone, status, premium, etc.)
+- **Push to Dialer (CSV)** — ChaseData import format (Phone, FirstName, LastName, State)
+- **Trigger Workflow** — V2 (placeholder in UI)
