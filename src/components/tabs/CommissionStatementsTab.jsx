@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import HolderRecordsView from '@/components/HolderRecordsView';
 import { C, fmt, fmtDollar, fmtPct } from '../shared/theme';
 
 /** Generic sort comparator — handles strings, numbers, dates */
@@ -75,6 +76,7 @@ function KPICard({ label, value, color, subtitle, tooltip }) {
 }
 
 const SUB_TABS = [
+  { id: 'holders', label: 'Holder Records' },
   { id: 'upload', label: 'Upload' },
   { id: 'history', label: 'History' },
   { id: 'reconciliation', label: 'Reconciliation' },
@@ -84,7 +86,7 @@ const SUB_TABS = [
 ];
 
 export default function CommissionStatementsTab() {
-  const [subTab, setSubTab] = useState('upload');
+  const [subTab, setSubTab] = useState('holders');
   const [file, setFile] = useState(null);
   const [carrier, setCarrier] = useState('auto');
   const [uploading, setUploading] = useState(false);
@@ -348,6 +350,9 @@ export default function CommissionStatementsTab() {
           </button>
         ))}
       </div>
+
+      {/* ═══════════════ HOLDER RECORDS VIEW ═══════════════ */}
+      {subTab === 'holders' && <HolderRecordsView />}
 
       {/* ═══════════════ UPLOAD VIEW ═══════════════ */}
       {subTab === 'upload' && (
