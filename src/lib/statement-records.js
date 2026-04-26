@@ -39,3 +39,26 @@ export function buildHolderKey(firstName, lastName) {
   const last = normalizeNamePart(lastName);
   return `${last}|${first}`;
 }
+
+function splitInsuredName(insuredName) {
+  const s = String(insuredName || '').trim();
+  if (!s) return { first: '', last: '' };
+  if (s.includes(',')) {
+    const [last, first] = s.split(',').map(p => p.trim());
+    return { first: first || '', last: last || '' };
+  }
+  const parts = s.split(/\s+/);
+  if (parts.length === 1) return { first: '', last: parts[0] };
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
+
+export function groupLedgerByHolder(ledgerRows) {
+  const map = new Map();
+  for (const row of ledgerRows) {
+    const { first, last } = splitInsuredName(row.insuredName);
+    const key = buildHolderKey(first, last);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return map;
+}
