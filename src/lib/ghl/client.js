@@ -11,6 +11,7 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
   if (!locationId) throw new Error('GHL client: locationId is required');
 
   let lastCallAt = 0;
+  let customFieldCache = null; // Map<displayName, fieldId>
 
   async function rateLimit() {
     const since = Date.now() - lastCallAt;
@@ -61,10 +62,30 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     throw lastErr;
   }
 
+  async function resolveCustomFields() {
+    if (customFieldCache) return customFieldCache;
+    const data = await request('GET', `/locations/${locationId}/customFields`);
+    const list = data.customFields ?? [];
+    customFieldCache = new Map(list.map(f => [f.name, f.id]));
+    return customFieldCache;
+  }
+
+  function getCustomFieldId(internalName, allFields) {
+    const entry = allFields.find(([k]) => k === internalName);
+    if (!entry) throw new Error(`Unknown internal field name: ${internalName}`);
+    const displayName = entry[1];
+    if (!customFieldCache) throw new Error('Call resolveCustomFields() before getCustomFieldId()');
+    const id = customFieldCache.get(displayName);
+    if (!id) throw new Error(`GHL custom field "${displayName}" not found — run scripts/ghl-bootstrap-fields.js`);
+    return id;
+  }
+
   return {
     request,
     locationId,
     dryRun,
+    resolveCustomFields,
+    getCustomFieldId,
     // methods added in subsequent tasks
   };
 }
