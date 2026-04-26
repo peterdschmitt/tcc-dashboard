@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createGhlClient } from '@/lib/ghl/client';
 import { readRawSheet } from '@/lib/sheets';
 import { processBatch } from '@/lib/ghl/sync';
+import { parseCallLogDate } from '@/lib/ghl/sheet-state';
 
 export const maxDuration = 60;
 
@@ -40,9 +41,17 @@ export async function GET(req) {
     const sheetId = process.env.CALLLOGS_SHEET_ID;
     const tab = process.env.CALLLOGS_TAB_NAME || 'Report';
     const { data } = await readRawSheet(sheetId, tab);
+
+    // Build start/end timestamps from YYYY-MM-DD inputs.
+    // start = beginning of `start` day (UTC), end = end of `end` day (UTC).
+    const startTs = Date.parse(`${start}T00:00:00Z`);
+    const endTs = Date.parse(`${end}T23:59:59.999Z`);
+    if (isNaN(startTs) || isNaN(endTs)) {
+      return NextResponse.json({ error: 'start and end must be valid YYYY-MM-DD dates' }, { status: 400 });
+    }
     const rows = data.filter(r => {
-      const d = (r['Date'] ?? '').slice(0, 10);
-      return d >= start && d <= end;
+      const ts = parseCallLogDate(r['Date']);
+      return ts >= startTs && ts <= endTs;
     });
 
     const summary = await processBatch({ rows, client, dryRun, advanceWatermark: false });

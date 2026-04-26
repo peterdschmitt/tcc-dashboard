@@ -4,7 +4,7 @@ import { matchContact } from './matcher.js';
 import { buildContactPatch } from './field-mapping.js';
 import { formatNote } from './note-formatter.js';
 import { rowHash } from './row-hash.js';
-import { appendSyncLog, appendPossibleMerge, readExcludedCampaigns, readSyncedHashes, writeWatermark } from './sheet-state.js';
+import { appendSyncLog, appendPossibleMerge, readExcludedCampaigns, readSyncedHashes, writeWatermark, parseCallLogDate } from './sheet-state.js';
 
 export async function processSingleRow(row, deps) {
   const { client, excludedCampaigns, syncedHashes } = deps;
@@ -94,7 +94,10 @@ export async function processBatch({ rows, client, dryRun = false, advanceWaterm
   const syncedHashes = await readSyncedHashes();
 
   const summary = { total: rows.length, created: 0, attached: 0, possibleMerges: 0, skipped: 0, errors: 0 };
-  let maxImportDate = '';
+  // Track watermark as both a timestamp (for comparison) and the original
+  // Date string (for human-readable storage in the sheet).
+  let maxDateTs = 0;
+  let maxDateStr = '';
 
   for (const row of rows) {
     const result = await processSingleRow(row, { client, excludedCampaigns, syncedHashes, dryRun });
@@ -104,10 +107,16 @@ export async function processBatch({ rows, client, dryRun = false, advanceWaterm
     else if (result.action.startsWith('skipped:')) summary.skipped++;
     else if (result.action === 'error') summary.errors++;
 
-    // Track watermark on non-error outcomes
+    // Track watermark on non-error outcomes — uses `Date` (the call's
+    // actual time), parsed as a timestamp because Call Logs use a
+    // non-sortable MM/DD/YYYY format.
     if (result.action !== 'error') {
-      const importDate = row['Import Date'] ?? '';
-      if (importDate > maxImportDate) maxImportDate = importDate;
+      const dateStr = row['Date'] ?? '';
+      const ts = parseCallLogDate(dateStr);
+      if (ts > maxDateTs) {
+        maxDateTs = ts;
+        maxDateStr = dateStr;
+      }
     }
 
     // Add this row's hash to in-memory set so a duplicate row inside the same batch
@@ -115,8 +124,8 @@ export async function processBatch({ rows, client, dryRun = false, advanceWaterm
     syncedHashes.add(rowHash(row));
   }
 
-  if (maxImportDate && !dryRun && advanceWatermark) {
-    await writeWatermark(maxImportDate);
+  if (maxDateStr && !dryRun && advanceWatermark) {
+    await writeWatermark(maxDateStr);
   }
 
   return summary;

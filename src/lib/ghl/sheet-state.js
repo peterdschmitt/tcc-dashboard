@@ -49,8 +49,32 @@ export async function appendPossibleMerge(entry) {
   await appendRow(GOALS_SHEET(), POSSIBLE_MERGES_TAB, POSSIBLE_MERGES_HEADERS, entry);
 }
 
+/**
+ * Parse a Call Log date string (e.g. "04/24/2026 9:17:02 AM") into a
+ * Unix timestamp (ms). Returns 0 for empty/unparseable input.
+ *
+ * Why this exists: Call Logs use MM/DD/YYYY h:mm[:ss] AM/PM format,
+ * which doesn't sort correctly as a string. We parse to timestamp
+ * for any date comparison (watermark, backfill range filtering).
+ */
+export function parseCallLogDate(s) {
+  if (!s) return 0;
+  const t = Date.parse(s);
+  return isNaN(t) ? 0 : t;
+}
+
+/**
+ * Returns rows from the Call Logs sheet whose `Date` column parses to
+ * a timestamp strictly greater than the watermark (also parsed). Empty
+ * watermark returns all rows.
+ *
+ * Note: we use `Date` (the actual call timestamp), not `Import Date`,
+ * because Import Date can be ancient (the dialer's "first imported"
+ * date for a lead can be years old even when the row was just added).
+ */
 export async function readNewCallLogRows(watermark) {
   const { data } = await readRawSheet(CALLLOGS_SHEET(), CALLLOGS_TAB());
-  if (!watermark) return data;
-  return data.filter(r => (r['Import Date'] ?? '') > watermark);
+  const wmTs = parseCallLogDate(watermark);
+  if (!wmTs) return data;
+  return data.filter(r => parseCallLogDate(r['Date']) > wmTs);
 }
