@@ -35,6 +35,12 @@
     },
     "src/app/api/db-backfill/route.js": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/ghl-sync/route.js": {
+      "maxDuration": 60
+    },
+    "src/app/api/ghl-backfill/route.js": {
+      "maxDuration": 60
     }
   },
   "crons": [{
@@ -52,5 +58,8 @@
   }, {
     "path": "/api/cron/db-sync",
     "schedule": "*/30 * * * *"
+  }, {
+    "path": "/api/cron/ghl-sync",
+    "schedule": "*/10 * * * *"
   }]
 }
