@@ -80,12 +80,30 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     return id;
   }
 
+  function normalizePhone(p) {
+    return (p ?? '').toString().replace(/\D/g, '');
+  }
+
+  async function searchByPhone(phone) {
+    const target = normalizePhone(phone);
+    if (!target) return null;
+    const data = await request('GET', `/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(phone)}`);
+    const contacts = data.contacts ?? [];
+    for (const c of contacts) {
+      const candidates = [c.phone, ...(c.additionalPhones ?? [])].map(normalizePhone);
+      if (candidates.includes(target)) return c;
+    }
+    return null;
+  }
+
   return {
     request,
     locationId,
     dryRun,
     resolveCustomFields,
     getCustomFieldId,
+    normalizePhone,
+    searchByPhone,
     // methods added in subsequent tasks
   };
 }
