@@ -398,3 +398,42 @@ Headers: Date, Policy #, Carrier Policy #, Insured Name, Agent, Field Changed, O
 
 ### Reverting to Original Data
 To temporarily use original agent-submitted data: change `SALES_TAB_NAME=Sheet1` in `.env.local` and restart. All economics APIs will read from the unmodified Sheet1.
+
+---
+
+## TCC Database (Postgres on Neon)
+
+Replaced Sheets-as-database for the Portfolio UI and future features.
+
+### Connection
+
+- Provider: Neon (10GB free tier, branchable serverless Postgres)
+- Library: `postgres` (postgres.js, no ORM, raw SQL via tagged-template literals)
+- Module: `src/lib/db.js` exports `sql` (tagged template), `closeDb()`, `rawClient()`
+- Env: `DATABASE_URL` in `.env.local` and Vercel env
+
+### Schema
+
+7 entity tables + `_migrations`:
+
+- `contacts` (phone-keyed, parent of calls + policies)
+- `calls` (FK contact, campaign, agent; row_hash for idempotent sync)
+- `policies` (FK contact, carrier, product, campaign, agent; source_row_hash for idempotent sync)
+- `campaigns`, `carriers`, `products`, `agents` (reference data)
+
+### Usage
+
+```javascript
+import { sql } from '@/lib/db';
+const contacts = await sql`SELECT id, first_name, last_name FROM contacts WHERE state = ${state} LIMIT 50`;
+// returns array with camelCase keys (firstName, lastName)
+```
+
+### Migrations
+
+```bash
+node --env-file=.env.local scripts/db-migrate.mjs status   # list
+node --env-file=.env.local scripts/db-migrate.mjs up       # apply pending
+```
+
+V1 has no rollback — write a forward migration to fix issues.
