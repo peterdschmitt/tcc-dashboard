@@ -136,7 +136,12 @@ export async function processSingleSale(salesRecord, deps) {
       // Native enrichment via direct PUT (updateContact only handles
       // custom fields + tags + phones; we sometimes need to set first
       // name, last name, email, address from sales when call log was sparse).
+      //
+      // GHL's PUT /contacts/:id rejects `gender` ("property gender should
+      // not exist") even though POST /contacts/ accepts it. So we strip it
+      // from update payloads — gender is set on creation and never updated.
       const nativeNeedsUpdate = Object.keys(policyPatch.nativeEnrichment).filter(k => {
+        if (k === 'gender') return false;
         const incoming = policyPatch.nativeEnrichment[k];
         const current = fullExisting[k];
         return incoming && incoming !== current;
@@ -196,18 +201,33 @@ export async function processSingleSale(salesRecord, deps) {
     });
 
     if (created._dedupedExisting) {
-      // GHL native dedup found a contact we missed (race or stale index).
-      // Fall through to update path on the recovered contact.
-      const detail = await client.request('GET', `/contacts/${created.id}`);
-      const fullExisting = detail.contact ?? detail;
-      await client.updateContact(created.id, {
-        customFields: policyPatch.customFields,
-        tags: [],
-        additionalPhone: undefined,
-      }, fullExisting);
+      // GHL native dedup matched an existing contact. Verify it's actually
+      // the same person by comparing phones — if not, GHL deduped on email
+      // (often a shared placeholder like na@na.com) and updating would
+      // overwrite an unrelated customer's policy data with this record's.
+      const existingPhone = (created.phone ?? '').replace(/\D/g, '').replace(/^1/, '');
+      if (existingPhone === normalizedPhone) {
+        // Real same-phone duplicate (e.g., household). Fall through to update.
+        const detail = await client.request('GET', `/contacts/${created.id}`);
+        const fullExisting = detail.contact ?? detail;
+        await client.updateContact(created.id, {
+          customFields: policyPatch.customFields,
+          tags: [],
+          additionalPhone: undefined,
+        }, fullExisting);
+        return {
+          result: { action: 'updated', contactId: created.id, error: null, notesAdded: 0 },
+          logEntry: { ...baseLog, 'Action': 'updated', 'GHL Contact ID': created.id, 'Notes Added': 0, 'Error': '' },
+        };
+      }
+      // GHL deduped onto a contact with a different phone — this is the
+      // placeholder-email collision case. Refuse the overwrite and report
+      // an error so the row can be inspected. With placeholder-email
+      // stripping in place this branch should rarely fire.
+      const errMsg = `GHL dedup mismatch: tried to create contact for phone ${normalizedPhone}, GHL returned existing cid=${created.id} with phone ${existingPhone}. Skipped to avoid cross-customer data pollution.`;
       return {
-        result: { action: 'updated', contactId: created.id, error: null, notesAdded: 0 },
-        logEntry: { ...baseLog, 'Action': 'updated', 'GHL Contact ID': created.id, 'Notes Added': 0, 'Error': '' },
+        result: { action: 'error', contactId: null, error: errMsg, notesAdded: 0 },
+        logEntry: { ...baseLog, 'Action': 'error', 'GHL Contact ID': '', 'Notes Added': 0, 'Error': errMsg },
       };
     }
 

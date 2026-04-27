@@ -40,16 +40,36 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await rateLimit();
       const url = path.startsWith('http') ? path : `${GHL_BASE}${path}`;
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Version': VERSION,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      // Hard timeout per request. Without this, a dropped connection from
+      // GHL hangs fetch() forever (Node has no default fetch timeout) and
+      // the entire backfill stalls silently. 60s is generous; healthy GHL
+      // calls return in <1s.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60_000);
+      let res;
+      try {
+        res = await fetch(url, {
+          method,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Version': VERSION,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+      } catch (e) {
+        clearTimeout(timeoutId);
+        // AbortError or network error — treat as retryable
+        lastErr = new Error(`GHL ${method} ${path} → ${e.name}: ${e.message}`);
+        if (attempt < MAX_RETRIES) {
+          await sleep(1000 * Math.pow(2, attempt));
+          continue;
+        }
+        throw lastErr;
+      }
+      clearTimeout(timeoutId);
 
       if (res.status === 429 || res.status >= 500) {
         lastErr = new Error(`GHL ${method} ${path} → ${res.status}`);
@@ -104,7 +124,11 @@ export function createGhlClient({ token, locationId, dryRun = false }) {
   async function searchByPhone(phone) {
     const target = normalizePhone(phone);
     if (!target) return null;
-    const data = await request('GET', `/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(phone)}`);
+    // Query by normalized 10-digit digits, not the raw formatted phone.
+    // Raw formats like "(859) 336-4459" trigger GHL's full-text fuzzy
+    // search across multiple fields and can return unrelated contacts;
+    // a digits-only query targets the phone index more reliably.
+    const data = await request('GET', `/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(target)}`);
     const contacts = data.contacts ?? [];
     for (const c of contacts) {
       const candidates = [c.phone, ...(c.additionalPhones ?? [])].map(normalizePhone);

@@ -9,6 +9,30 @@
 // resolves internalName → displayName → GHL field ID at runtime.
 
 /**
+ * Detect placeholder emails that agents type when a customer doesn't
+ * have one (na@na.com, no@no.com, email@email.com, na@fake.com, etc.).
+ * GHL dedups contacts by exact email match — sending the same placeholder
+ * email across many records collapses them all onto one GHL contact and
+ * cross-pollutes their policy data.
+ */
+export function isPlaceholderEmail(email) {
+  if (!email) return false;
+  const m = email.toLowerCase().trim().match(/^([^@]+)@(.+)$/);
+  if (!m) return false;
+  const local = m[1];
+  const domainRoot = m[2].split('.')[0];
+  const placeholderTokens = new Set([
+    'na', 'n/a', 'no', 'none', 'nil', 'null',
+    'email', 'noemail', 'nomail',
+    'fake', 'dummy', 'test', 'placeholder',
+  ]);
+  if (placeholderTokens.has(local)) return true;
+  if (placeholderTokens.has(domainRoot)) return true;
+  if (local === domainRoot) return true; // na@na.com, email@email.com style
+  return false;
+}
+
+/**
  * Policy custom fields. These extend ALL_CUSTOM_FIELDS in field-mapping.js
  * so the bootstrap script creates them in GHL alongside the call-log fields.
  */
@@ -123,12 +147,21 @@ export function buildPolicyPatch(salesRecord) {
   // fields whose names collide with its standard contact schema.
   //
   // Validation: GHL rejects malformed email with HTTP 422
-  // ("email must be an email"). Skip the field if it doesn't look like
-  // a basic name@domain.tld pattern — better to miss a field than to
-  // fail the whole contact create.
+  // ("email must be an email"). The TLD must be alphabetic — agents
+  // often type junk like "noemail@email.com000" when the customer
+  // had no email; the loose /\S+@\S+\.\S+/ pattern lets those through
+  // and GHL rejects them, failing the whole contact create.
+  //
+  // Also strip placeholder emails like na@na.com, email@email.com,
+  // no@no.com, na@fake.com. GHL dedups contacts by exact email match,
+  // so multiple sales records sharing a placeholder email all collapse
+  // onto a single GHL contact and overwrite each other's policy data.
+  // Better to send no email than a placeholder one.
   const nativeEnrichment = {};
   const email = v('Email Address');
-  if (email && /^\S+@\S+\.\S+$/.test(email)) nativeEnrichment.email = email;
+  if (email && /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !isPlaceholderEmail(email)) {
+    nativeEnrichment.email = email;
+  }
   if (v('Street Address')) nativeEnrichment.address1 = v('Street Address');
   if (v('City')) nativeEnrichment.city = v('City');
   if (v('Zip Code')) nativeEnrichment.postalCode = v('Zip Code');
