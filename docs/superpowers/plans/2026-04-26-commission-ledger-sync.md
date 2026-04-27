@@ -427,6 +427,20 @@ test('parseDate: ISO YYYY-MM-DD → Date', () => {
   assert.ok(d instanceof Date);
 });
 
+test('parseDate: MM/DD/YY (2-digit year) expands to 20YY', () => {
+  const d = parseDate('04/03/26');
+  assert.ok(d instanceof Date);
+  assert.equal(d.getUTCFullYear(), 2026);
+  assert.equal(d.getUTCMonth(), 3); // April
+  assert.equal(d.getUTCDate(), 3);
+});
+
+test('parseDate: MM-DD-YY (2-digit year, dashes) expands to 20YY', () => {
+  const d = parseDate('04-03-26');
+  assert.ok(d instanceof Date);
+  assert.equal(d.getUTCFullYear(), 2026);
+});
+
 test('parseDate: empty/garbage → null', () => {
   assert.equal(parseDate(''), null);
   assert.equal(parseDate(null), null);
@@ -503,12 +517,19 @@ export function rowHash(row) {
 
 /**
  * Parse a date string into a JS Date (UTC midnight). Handles MM/DD/YYYY,
- * MM-DD-YYYY, and ISO YYYY-MM-DD. Returns null for empty/invalid input.
+ * MM-DD-YYYY, ISO YYYY-MM-DD, and MM/DD/YY (2-digit year — assumes 20YY
+ * since this is forward-looking commission data, not historical archives).
+ * Returns null for empty/invalid input.
  */
 export function parseDate(s) {
   if (!s) return null;
-  const cleaned = s.toString().trim();
+  let cleaned = s.toString().trim();
   if (!cleaned) return null;
+  // Expand 2-digit year MM/DD/YY → MM/DD/20YY (handles ledger Issue Date format)
+  const twoDigitYear = cleaned.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$/);
+  if (twoDigitYear) {
+    cleaned = `${twoDigitYear[1]}/${twoDigitYear[2]}/20${twoDigitYear[3]}`;
+  }
   // Try ISO first
   let t = Date.parse(cleaned);
   if (!isNaN(t)) return new Date(t);
@@ -571,7 +592,7 @@ export function normalizeText(s) {
 node --test src/lib/db-sync/commission-ledger-helpers.test.mjs 2>&1 | tail -10
 ```
 
-Expected: `pass` count matches the test count (12), `fail 0`.
+Expected: `pass` count matches the test count (14), `fail 0`.
 
 - [ ] **Step 5:** Commit:
 
@@ -612,9 +633,12 @@ import { rowHash, parseDate, parseMoney, parsePct, normalizeText } from './commi
  * to 4 decimal places before insert.
  */
 export async function syncCommissionLedger() {
-  const sheetId = process.env.COMMISSION_SHEET_ID;
-  const tab = process.env.COMMISSION_TAB_NAME || 'Sheet1';
-  if (!sheetId) throw new Error('COMMISSION_SHEET_ID not set');
+  // Commission Ledger is a tab WITHIN the Sales Tracker sheet (not the
+  // standalone Commission rate-table sheet). The COMMISSION_SHEET_ID env
+  // var points at the rate table; the ledger lives in SALES_SHEET_ID.
+  const sheetId = process.env.SALES_SHEET_ID;
+  const tab = process.env.COMMISSION_LEDGER_TAB || 'Commission Ledger';
+  if (!sheetId) throw new Error('SALES_SHEET_ID not set');
 
   // Pre-load FK lookup maps
   const policiesByNumber = new Map();
