@@ -60,3 +60,34 @@ export const rawClient = () => getSql();
  * portfolio registry which is populated from schema introspection).
  */
 export const sqlUnsafe = (expr) => getSql().unsafe(expr);
+
+// ── Read-only client for user-supplied raw-SQL views ──────────────────
+//
+// Used by /api/portfolio/contacts when a view's raw_where is set. The
+// underlying Neon role `tcc_dashboard_readonly` has SELECT-only privileges.
+// Even if the keyword blocklist in raw-sql-safety.js misses something,
+// the DB itself rejects writes/DDL — defense in depth.
+
+let _sqlReadonly = null;
+
+function getReadonlySql() {
+  if (_sqlReadonly) return _sqlReadonly;
+  const url = process.env.DATABASE_URL_READONLY;
+  if (!url) throw new Error('DATABASE_URL_READONLY not set — required for raw-SQL views');
+  _sqlReadonly = postgres(url, {
+    max: 5,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    transform: postgres.camel,
+  });
+  return _sqlReadonly;
+}
+
+export const sqlReadonly = (...args) => getReadonlySql()(...args);
+
+export async function closeReadonlyDb() {
+  if (_sqlReadonly) {
+    await _sqlReadonly.end();
+    _sqlReadonly = null;
+  }
+}
