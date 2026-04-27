@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test 'src/lib/**/*.test.mjs'"
+    "test": "node --import ./scripts/load-env.mjs --test 'src/lib/**/*.test.mjs'"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
