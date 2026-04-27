@@ -3689,7 +3689,7 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <DatePicker value={dateRange.start} onChange={v => setCustomRange('start', v)} />
               <span style={{ color: C.muted, fontSize: 12, fontWeight: 600 }}>to</span>
-              <DatePicker value={dateRange.end} onChange={v => setCustomRange('end', v)} />
+              <DatePicker value={dateRange.end} onChange={v => setCustomRange('end', v)} align="right" />
             </div>
           </div>
         </div>
