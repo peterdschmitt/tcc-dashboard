@@ -27,17 +27,47 @@ const C = {
   sans: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
 };
 
-const TABS = [
-  { id: 'daily', label: 'Daily Activity' },
-  { id: 'daily-brief', label: 'Daily Brief' },
-  { id: 'publishers', label: 'Publishers' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'carriers', label: 'Carriers' },
-  { id: 'combined-policies', label: 'Combined Policies' },
-  { id: 'commission-recon', label: 'Commission Recon' },
-  { id: 'pnl', label: 'P&L Report' },  { id: 'agent-perf', label: 'Agent Performance' },  { id: 'policies-detail', label: 'Policies' },  { id: 'policy-status', label: 'Policy Status' },
-  { id: 'portfolio', label: 'Portfolio' },  { id: 'commission-status', label: 'Commission Status' },  { id: 'period-revenue', label: 'Period Revenue' },  { id: 'carrier-balances', label: 'Carrier Balances' },  { id: 'commission-statements', label: 'Commission Statements' },  { id: 'data-diff', label: 'Data Diff' },  { id: 'carrier-sync', label: 'Carrier Sync' },
+// Top-level navigation: one standalone "Daily Brief" pill + 5 grouped dropdowns.
+// Commission Status, Period Revenue, Carrier Balances, and Commission Recon
+// were absorbed as sub-tabs of Commission Statements (Stage A consolidation).
+const TAB_GROUPS = [
+  { id: 'daily-brief', kind: 'standalone', label: 'Daily Brief' },
+  {
+    id: 'operations', kind: 'group', label: 'Operations',
+    items: [
+      { id: 'daily', label: 'Daily Activity' },
+      { id: 'publishers', label: 'Publishers' },
+      { id: 'agents', label: 'Agents' },
+      { id: 'carriers', label: 'Carriers' },
+    ],
+  },
+  {
+    id: 'sales', kind: 'group', label: 'Sales',
+    items: [
+      { id: 'combined-policies', label: 'Combined Policies' },
+      { id: 'policies-detail', label: 'Policies' },
+      { id: 'policy-status', label: 'Policy Status' },
+      { id: 'agent-perf', label: 'Agent Performance' },
+      { id: 'pnl', label: 'P&L Report' },
+      { id: 'portfolio', label: 'Portfolio' },
+    ],
+  },
+  { id: 'commission-statements', kind: 'standalone', label: 'Commission' },
+  {
+    id: 'admin', kind: 'group', label: 'Admin',
+    items: [
+      { id: 'data-diff', label: 'Data Diff' },
+      { id: 'carrier-sync', label: 'Carrier Sync' },
+    ],
+  },
 ];
+
+// Flat list (still used by code that needs to iterate every tab — voice
+// targets, deep-link handling, etc.).
+const TABS = TAB_GROUPS.flatMap(g => g.kind === 'standalone'
+  ? [{ id: g.id, label: g.label }]
+  : g.items
+);
 
 function fmt(n, d = 0) { if (n == null || isNaN(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
 function fmtDollar(n, d = 0) { if (n == null || isNaN(n)) return '—'; return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -3581,6 +3611,30 @@ function AgentDeepDivePanel({ agents }) {
 
 // ─── MAIN DASHBOARD ──────────────────────────────────
 export default function Dashboard({ data, allTimePolicies, goals, vaData, loading, dateRange, applyPreset, setCustomRange, dataSource, setDataSource, activeTab, setActiveTab, voiceDrillTarget, setVoiceDrillTarget, aiPaneOpen, setAiPaneOpen, voiceTileTarget, setVoiceTileTarget, voicePanelOpen }) {
+  // ALL HOOKS MUST GO BEFORE the early-return below — React rules of hooks
+  // require the same hooks to be called in the same order on every render.
+  // Originally `commSidebarOpen` lived after the early return; that was a
+  // latent bug that became visible once more hooks (openNavDropdown +
+  // useEffect) were added in the same spot.
+  const voicePanelWidth = voicePanelOpen ? 380 : 0;
+  const [commSidebarOpen, setCommSidebarOpen] = useState(true);
+  // Which top-nav dropdown is currently open (null = none).
+  const [openNavDropdown, setOpenNavDropdown] = useState(null);
+  // Close dropdown when user clicks outside the nav region or presses Escape.
+  useEffect(() => {
+    if (!openNavDropdown) return;
+    const onClick = (e) => { if (!e.target.closest('[data-nav-dropdown]')) setOpenNavDropdown(null); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpenNavDropdown(null); };
+    document.addEventListener('click', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('click', onClick); document.removeEventListener('keydown', onKey); };
+  }, [openNavDropdown]);
+  // Set CSS custom property so TileModal can read it (also moved above the
+  // early return — same hooks-order rule).
+  useEffect(() => {
+    document.documentElement.style.setProperty('--voice-panel-width', `${voicePanelWidth}px`);
+  }, [voicePanelWidth]);
+
   if (loading || !data) {
     return (
       <div style={{ background: C.bg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.text, fontFamily: C.sans }}>
@@ -3593,13 +3647,6 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
     );
   }
   const { policies = [], calls = [], pnl = [] } = data || {};
-  const voicePanelWidth = voicePanelOpen ? 380 : 0;
-  const [commSidebarOpen, setCommSidebarOpen] = useState(true);
-
-  // Set CSS custom property so TileModal can read it
-  useEffect(() => {
-    document.documentElement.style.setProperty('--voice-panel-width', `${voicePanelWidth}px`);
-  }, [voicePanelWidth]);
 
   return (
     <StatementRecordDrawerProvider>
@@ -3649,12 +3696,60 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
       </div>
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', gap: 0, padding: '0 24px' }}>
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              padding: '10px 20px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', background: 'transparent',
-              borderBottom: `2px solid ${activeTab === tab.id ? C.accent : 'transparent'}`, color: activeTab === tab.id ? C.text : C.muted, transition: 'all 0.15s ease',
-            }}>{tab.label}</button>
-          ))}
+          {TAB_GROUPS.map(group => {
+            if (group.kind === 'standalone') {
+              const isActive = activeTab === group.id;
+              return (
+                <button key={group.id} onClick={() => setActiveTab(group.id)} style={{
+                  padding: '10px 20px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', background: 'transparent',
+                  borderBottom: `2px solid ${isActive ? C.accent : 'transparent'}`, color: isActive ? C.text : C.muted, transition: 'all 0.15s ease',
+                }}>{group.label}</button>
+              );
+            }
+            // group.kind === 'group' → dropdown
+            const childIds = group.items.map(i => i.id);
+            const groupActive = childIds.includes(activeTab);
+            const isOpen = openNavDropdown === group.id;
+            const activeChild = group.items.find(i => i.id === activeTab);
+            return (
+              <div key={group.id} data-nav-dropdown style={{ position: 'relative' }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setOpenNavDropdown(isOpen ? null : group.id); }}
+                  style={{
+                    padding: '10px 20px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', background: 'transparent',
+                    borderBottom: `2px solid ${groupActive ? C.accent : 'transparent'}`, color: groupActive ? C.text : C.muted, transition: 'all 0.15s ease',
+                  }}>
+                  {group.label}{activeChild ? ` · ${activeChild.label}` : ''} {isOpen ? '▴' : '▾'}
+                </button>
+                {isOpen && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, zIndex: 50, minWidth: 200,
+                    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)', padding: '4px 0', marginTop: 2,
+                  }}>
+                    {group.items.map(item => {
+                      const isItemActive = activeTab === item.id;
+                      return (
+                        <button key={item.id}
+                          onClick={() => { setActiveTab(item.id); setOpenNavDropdown(null); }}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left',
+                            padding: '8px 16px', fontSize: 12, fontWeight: 500,
+                            border: 'none', cursor: 'pointer',
+                            background: isItemActive ? `${C.accent}22` : 'transparent',
+                            color: isItemActive ? C.accent : C.text,
+                          }}
+                          onMouseEnter={(e) => { if (!isItemActive) e.currentTarget.style.background = `${C.border}88`; }}
+                          onMouseLeave={(e) => { if (!isItemActive) e.currentTarget.style.background = 'transparent'; }}>
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 24px' }}>
@@ -3667,12 +3762,8 @@ export default function Dashboard({ data, allTimePolicies, goals, vaData, loadin
         {activeTab === 'portfolio' && <PortfolioTab />}
         {activeTab === 'data-diff' && <DataDiffTab />}
         {activeTab === 'carrier-sync' && <CarrierSyncTab />}
-        {activeTab === 'commission-status' && <CommissionStatusTable />}
-        {activeTab === 'period-revenue' && <PeriodRevenueTable />}
-        {activeTab === 'carrier-balances' && <CarrierBalancesTable />}
-        {activeTab === 'commission-statements' && <CommissionStatementsTab />}
+        {activeTab === 'commission-statements' && <CommissionStatementsTab dateRange={dateRange} />}
         {activeTab === 'combined-policies' && <CombinedPoliciesTab />}
-        {activeTab === 'commission-recon' && <CommissionReconciliationTab dateRange={dateRange} />}
       </div>
       <CommissionSidebar open={commSidebarOpen} onClose={() => setCommSidebarOpen(false)} onNavigateTab={setActiveTab} />
       <AiAnalystPane

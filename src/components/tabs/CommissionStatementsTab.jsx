@@ -1,6 +1,10 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import HolderRecordsView from '@/components/HolderRecordsView';
+import CommissionStatusTable from '@/components/CommissionStatusTable';
+import PeriodRevenueTable from '@/components/PeriodRevenueTable';
+import CarrierBalancesTable from '@/components/CarrierBalancesTable';
+import CommissionReconciliationTab from '@/components/tabs/CommissionReconciliationTab';
 import { C, fmt, fmtDollar, fmtPct } from '../shared/theme';
 
 /** Generic sort comparator — handles strings, numbers, dates */
@@ -77,15 +81,19 @@ function KPICard({ label, value, color, subtitle, tooltip }) {
 
 const SUB_TABS = [
   { id: 'holders', label: 'Holder Records' },
+  { id: 'status', label: 'Status' },
+  { id: 'balances', label: 'Carrier Balances' },
+  { id: 'period-revenue', label: 'Period Revenue' },
+  { id: 'recon', label: 'Recon Detail' },
+  { id: 'reconciliation', label: 'Statement Match' },
+  { id: 'waterfall', label: 'Statement Waterfall' },
   { id: 'upload', label: 'Upload' },
   { id: 'history', label: 'History' },
-  { id: 'reconciliation', label: 'Reconciliation' },
-  { id: 'waterfall', label: 'Period Revenue' },
   { id: 'anticipated', label: 'Anticipated Payments' },
   { id: 'organize', label: 'Organize Files' },
 ];
 
-export default function CommissionStatementsTab() {
+export default function CommissionStatementsTab({ dateRange } = {}) {
   const [subTab, setSubTab] = useState('holders');
   const [file, setFile] = useState(null);
   const [carrier, setCarrier] = useState('auto');
@@ -353,6 +361,12 @@ export default function CommissionStatementsTab() {
 
       {/* ═══════════════ HOLDER RECORDS VIEW ═══════════════ */}
       {subTab === 'holders' && <HolderRecordsView />}
+
+      {/* ═══════════════ ABSORBED FROM TOP-LEVEL TABS ═══════════════ */}
+      {subTab === 'status' && <CommissionStatusTable />}
+      {subTab === 'balances' && <CarrierBalancesTable />}
+      {subTab === 'period-revenue' && <PeriodRevenueTable />}
+      {subTab === 'recon' && <CommissionReconciliationTab dateRange={dateRange} />}
 
       {/* ═══════════════ UPLOAD VIEW ═══════════════ */}
       {subTab === 'upload' && (
