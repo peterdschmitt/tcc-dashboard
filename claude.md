@@ -466,16 +466,50 @@ with a single Portfolio tab. Reads from Postgres for sub-second response.
 - `GET /export?filters=...` — general CSV export
 - `GET /dialer-export?filters=...` — ChaseData-format CSV
 
-### Saved smart lists (hardcoded for V1; user-defined deferred)
+### Smart Views (DB-backed, user-creatable)
 
-Defined in `src/lib/portfolio/filters.js`:
+Sidebar smart lists are full views in the `portfolio_views` Postgres table.
+Each view saves filters (visual AND/OR builder OR raw SQL escape hatch),
+columns (subset of 42 columns from the column registry), default sort, default
+group-by, pin state, and display order.
 
-- `all_submitted` — `application_date IS NOT NULL`
-- `pending` — submitted + status contains pending/submitted/awaiting
-- `active_policies` — submitted + status contains active/in force/advance
-- `recently_lapsed` — submitted + status contains lapsed/canceled
-- `declined` — submitted + status contains declined
-- `high_value` — active + monthly premium > $100
+Six system views are seeded with `is_system=true` and a `seed_json` snapshot so
+they can be Reset to defaults: All Submitted Apps, Pending Applications, Active
+Policies, Recently Lapsed, Declined, High-Value Active. Filtering uses the
+`policy_status_bucket` derived column (Performing / Unknown / Canceled / Declined),
+mirroring the bucket grouping in `src/components/CommissionSidebar.jsx`. Active
+Policies returns ~137 (the Performing bucket) instead of the previously matched
+~17 from the messy free-form `placed_status`.
+
+Raw SQL views connect via `DATABASE_URL_READONLY` (a Neon role
+`tcc_dashboard_readonly` with SELECT-only privileges) for defense-in-depth
+alongside a keyword blocklist (`src/lib/portfolio/raw-sql-safety.js`).
+
+#### API endpoints (`src/app/api/portfolio/views`)
+
+- `GET    /` — list all (sorted: pinned → display_order → name)
+- `POST   /` — create
+- `GET    /[id]` — load one (full filters + columns + sort/group)
+- `PATCH  /[id]` — update
+- `DELETE /[id]` — delete (system views return 403)
+- `POST   /[id]/reset` — reset system view to seed_json
+- `GET /api/portfolio/contacts?viewId=N` — list contacts using saved view config
+
+#### Key supporting files
+
+- `src/lib/portfolio/views.js` — CRUD + payload validation
+- `src/lib/portfolio/filter-tree.js` — JSON tree → postgres.js fragment compiler (13 ops, AND/OR groups)
+- `src/lib/portfolio/column-registry.js` — single source of truth for the 42 selectable columns
+- `src/lib/portfolio/policy-status-buckets.js` — 4-bucket grouping (Performing/Unknown/Canceled/Declined)
+- `src/lib/portfolio/raw-sql-safety.js` — blocklist for raw-WHERE expressions
+
+#### UI components (`src/components/portfolio/`)
+
+- `PortfolioFilterSidebar.jsx` — loads views from API, per-row ⋮ menu (Edit/Duplicate/Pin/Delete or Reset)
+- `PortfolioSaveViewPopover.jsx` — toolbar quick-save popover
+- `PortfolioViewEditor.jsx` — slide-in full editor (filters + columns + sort + group + Visual ↔ Raw SQL toggle)
+- `PortfolioFilterBuilder.jsx` — recursive AND/OR builder
+- `PortfolioColumnPicker.jsx` — two-pane categorized picker (drag + ↑/↓ reorder)
 
 ### Group-by dimensions
 
