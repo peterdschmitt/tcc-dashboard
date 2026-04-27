@@ -39,7 +39,11 @@ function fmtValue(v, formatter) {
 }
 
 export default function PortfolioGrid({ rows, columns, selectedIds, onToggleSelect, onRowClick, sortBy, sortDir, onSort }) {
-  const cols = (columns ?? []).map(key => ({ key, ...COLUMN_REGISTRY[key] })).filter(c => c.label);
+  // postgres.js's `transform: postgres.camel` returns columns as camelCase,
+  // but the registry uses snake_case keys. Map each registry key to its
+  // camelCase counterpart for row lookups (e.g. monthly_premium → monthlyPremium).
+  const toCamel = (k) => k.replace(/_([a-z])/g, (_, ch) => ch.toUpperCase());
+  const cols = (columns ?? []).map(key => ({ key, rowKey: toCamel(key), ...COLUMN_REGISTRY[key] })).filter(c => c.label);
   const allSelected = rows.length > 0 && rows.every(r => selectedIds.has(r.id));
 
   return (
@@ -90,7 +94,7 @@ export default function PortfolioGrid({ rows, columns, selectedIds, onToggleSele
                 />
               </td>
               {cols.map(c => {
-                const v = r[c.key];
+                const v = r[c.rowKey];
                 const color = c.formatter === 'status_color' ? statusColor(v) : C.text;
                 return (
                   <td key={c.key} style={{ padding: '10px 12px', textAlign: c.alignment ?? 'left', color, whiteSpace: 'nowrap' }}>
