@@ -6,6 +6,7 @@ import { syncAgents } from './agents.js';
 import { syncContacts } from './contacts.js';
 import { syncPolicies } from './policies.js';
 import { syncCalls } from './calls.js';
+import { syncCommissionLedger } from './commission-ledger.js';
 import { refreshContactDenorms } from './refresh-denorms.js';
 
 /**
@@ -24,6 +25,7 @@ export async function runFullSync() {
     ['contacts', syncContacts],
     ['policies', syncPolicies],
     ['calls', syncCalls],
+    ['commission_ledger', syncCommissionLedger],
     ['refresh_denorms', refreshContactDenorms],
   ]) {
     const t0 = Date.now();
