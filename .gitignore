@@ -3,10 +3,10 @@ node_modules/
 .next.bak/
 *.xlsx
 .env.local
+.env.local.*
 .env*.local
 *.tsbuildinfo
 env.vercel
-.env.local
 .vercel
 
 # Superpowers brainstorm artifacts (ephemeral per-session)
