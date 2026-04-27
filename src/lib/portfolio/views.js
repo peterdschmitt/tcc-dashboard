@@ -82,7 +82,7 @@ export async function createView(p) {
   const v = normalizeViewForDb(p);
   const [row] = await sql`
     INSERT INTO portfolio_views (name, description, filters_json, raw_where, columns, sort_by, sort_dir, group_by, pinned, display_order)
-    VALUES (${v.name}, ${v.description}, ${v.filtersJson}, ${v.rawWhere}, ${JSON.stringify(v.columns)}::jsonb, ${v.sortBy}, ${v.sortDir}, ${v.groupBy}, ${v.pinned}, ${v.displayOrder})
+    VALUES (${v.name}, ${v.description}, ${v.filtersJson}, ${v.rawWhere}, ${v.columns}, ${v.sortBy}, ${v.sortDir}, ${v.groupBy}, ${v.pinned}, ${v.displayOrder})
     RETURNING id
   `;
   return row.id;
@@ -99,7 +99,7 @@ export async function updateView(id, p) {
       description = ${v.description},
       filters_json = ${v.filtersJson},
       raw_where = ${v.rawWhere},
-      columns = ${JSON.stringify(v.columns)}::jsonb,
+      columns = ${v.columns},
       sort_by = ${v.sortBy},
       sort_dir = ${v.sortDir},
       group_by = ${v.groupBy},
@@ -134,7 +134,7 @@ export async function resetSystemView(id) {
     UPDATE portfolio_views SET
       filters_json = ${s.filters_json ?? null},
       raw_where = ${s.raw_where ?? null},
-      columns = ${JSON.stringify(s.columns ?? [])}::jsonb,
+      columns = ${s.columns ?? []},
       sort_by = ${s.sort_by ?? null},
       sort_dir = ${s.sort_dir ?? 'desc'},
       group_by = ${s.group_by ?? 'none'},
