@@ -4,6 +4,20 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useVoiceMode } from '@/hooks/useVoiceMode';
 import InsightHero from './InsightHero';
 import DeepDiveCard from './shared/DeepDiveCard';
+import DatePicker from './shared/DatePicker';
+
+const fmtDate = (d) => d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+function presetToRange(preset) {
+  const today = new Date();
+  if (preset === 'yesterday') { const y = new Date(); y.setDate(y.getDate() - 1); return { start: fmtDate(y), end: fmtDate(y), preset }; }
+  if (preset === 'today') return { start: fmtDate(today), end: fmtDate(today), preset };
+  if (preset === 'last7') { const s = new Date(); s.setDate(s.getDate() - 6); return { start: fmtDate(s), end: fmtDate(today), preset }; }
+  if (preset === 'last30') { const s = new Date(); s.setDate(s.getDate() - 29); return { start: fmtDate(s), end: fmtDate(today), preset }; }
+  if (preset === 'wtd') { const day = today.getDay(); const s = new Date(today); s.setDate(today.getDate() - (day === 0 ? 6 : day - 1)); return { start: fmtDate(s), end: fmtDate(today), preset }; }
+  if (preset === 'mtd') return { start: fmtDate(new Date(today.getFullYear(), today.getMonth(), 1)), end: fmtDate(today), preset };
+  if (preset === 'all') return { start: '2020-01-01', end: fmtDate(today), preset };
+  return null;
+}
 
 const isPlacedPolicy = p => ['Advance Released', 'Active - In Force', 'Submitted - Pending'].includes(p.placed);
 
@@ -298,9 +312,13 @@ function Fmt({ text, lineKey }) {
 function classifyLine(trimmed, prevType) {
   if (!trimmed) return 'blank';
 
-  // Markdown ATX headers: # → h1, ## or ### → h2
-  if (/^#\s+/.test(trimmed)) return 'h1-md';
-  if (/^#{2,3}\s+/.test(trimmed)) return 'h2-md';
+  // Markdown ATX headers: #/## → h1 (top-level section), ### → h2 (subsection)
+  if (/^#{1,2}\s+/.test(trimmed)) return 'h1-md';
+  if (/^#{3,4}\s+/.test(trimmed)) return 'h2-md';
+
+  // Numbered + bold pattern (no markdown #): "1. **Executive Summary**" or "10. **Follow-Up Data Needed**"
+  // Used by Funnel Analyzer / Lead Quality reports for top-level sections.
+  if (/^\d+\.\s+\*\*[^*]+\*\*\s*$/.test(trimmed)) return 'h1-num';
 
   // H1: Major sections — longer descriptive titles, often with parens qualifier
   // e.g. "Campaign performance (4 rows: Lead Performance by Campaign)"
@@ -361,10 +379,14 @@ function buildReportContent(content) {
     prevType = type;
 
     // --- H1: Large bold section header with bottom border ---
-    if (type === 'h1' || type === 'h1-md') {
+    if (type === 'h1' || type === 'h1-md' || type === 'h1-num') {
       const id = `sec-${sectionIdx++}`;
-      const title = trimmed.replace(/^#\s+/, '').replace(/\*\*/g, '');
-      tocEntries.push({ id, title });
+      // Strip leading markdown #s, leading "1. " number, and surrounding **bold** markers
+      const title = trimmed
+        .replace(/^#{1,2}\s+/, '')
+        .replace(/^\d+\.\s+/, '')
+        .replace(/\*\*/g, '');
+      tocEntries.push({ id, title, level: 1 });
       elements.push(
         <h2 key={i} id={id} style={{
           fontSize: 22, fontWeight: 700, color: C.text, fontFamily: C.sans,
@@ -380,11 +402,13 @@ function buildReportContent(content) {
 
     // --- H2: Bold sub-heading, numbered or plain ---
     if (type === 'h2' || type === 'h2-md') {
-      const stripped = trimmed.replace(/^#{2,3}\s+/, '');
+      const id = `sec-${sectionIdx++}`;
+      const stripped = trimmed.replace(/^#{2,4}\s+/, '').replace(/\*\*/g, '');
       const numMatch = stripped.match(/^(\d+)\)\s+(.+)/);
       const display = numMatch ? `${numMatch[1]}) ${numMatch[2]}` : stripped;
+      tocEntries.push({ id, title: stripped, level: 2 });
       elements.push(
-        <h3 key={i} style={{
+        <h3 key={i} id={id} style={{
           fontSize: 18, fontWeight: 700, color: C.text, fontFamily: C.sans,
           marginTop: 28, marginBottom: 12, lineHeight: 1.35,
         }}>
@@ -484,18 +508,21 @@ function buildReportContent(content) {
 export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, applyPreset, setCustomRange, dataSource, setDataSource, dateRange, setVoiceDrillTarget, policies: dashPolicies, calls: dashCalls, pnl: dashPnl, goals: dashGoals, onOpenChange, rightOffset = 0 }) {
   const liveDataContext = useMemo(() => buildLiveDataContext(dashPolicies, dashCalls, dashPnl, dateRange), [dashPolicies, dashCalls, dashPnl, dateRange]);
   const [open, setOpen] = useState(false);
-  const [paneHeight, setPaneHeight] = useState(0);
+  const [paneHeight, setPaneHeight] = useState(() => {
+    if (typeof window === 'undefined') return 600;
+    return Math.min(window.innerHeight * 0.7, 700);
+  });
   const [splitRatio, setSplitRatio] = useState(DEFAULT_SPLIT);
 
   // Data state
   const [reports, setReports] = useState([]);
-  const [availableDates, setAvailableDates] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [range, setRange] = useState(() => presetToRange('yesterday'));
   const [reportContent, setReportContent] = useState(null);
   const [reportSections, setReportSections] = useState([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
+  const [insightSections, setInsightSections] = useState([]);
 
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -582,27 +609,27 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
   // Set pane height based on window
   useEffect(() => {
     if (!open) return;
-    const h = Math.min(window.innerHeight * 0.7, 700);
+    const wH = typeof window !== 'undefined' ? window.innerHeight : 0;
+    const h = wH > 0 ? Math.min(wH * 0.7, 700) : 600;
     setPaneHeight(h);
   }, [open]);
 
-  // Fetch report list when pane opens
+  // Fetch report list when pane opens or date range changes
   useEffect(() => {
     if (!open) return;
-    loadReportList();
-  }, [open]);
+    loadReportList(range.start, range.end);
+  }, [open, range.start, range.end]);
 
-  const loadReportList = async () => {
+  const loadReportList = async (startDate, endDate) => {
     setListLoading(true);
     try {
-      const res = await fetch('/api/ai-analyst?action=list-reports');
+      const params = new URLSearchParams({ action: 'list-reports' });
+      if (startDate) params.set('start', startDate);
+      if (endDate) params.set('end', endDate);
+      const res = await fetch(`/api/ai-analyst?${params}`);
       if (res.ok) {
         const data = await res.json();
         setReports(data.reports || []);
-        setAvailableDates(data.dates || []);
-        if (data.dates?.length > 0 && !selectedDate) {
-          setSelectedDate(data.dates[0]);
-        }
       }
     } catch (e) {
       console.error('Failed to load reports:', e);
@@ -611,15 +638,15 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
     }
   };
 
-  // Load report content when category + date selected
+  // Load report content when category changes or new range produces a new report list
   useEffect(() => {
     if (!selectedCategory || !open) return;
     loadReport();
-  }, [selectedCategory, selectedDate]);
+  }, [selectedCategory, reports]);
 
   const loadReport = async () => {
-    // Find matching report
-    const match = reports.find(r => r.type === selectedCategory && (!selectedDate || r.date === selectedDate));
+    // Reports are already date-filtered server-side; first match by type wins.
+    const match = reports.find(r => r.type === selectedCategory);
     if (!match) {
       setReportContent(null);
       setReportSections([]);
@@ -772,10 +799,11 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
     }
   };
 
-  // Get reports for selected date and category counts
-  const reportsForDate = reports.filter(r => !selectedDate || r.date === selectedDate);
+  // Reports are already filtered server-side by date range; just count per category.
   const categoryCounts = {};
-  reportsForDate.forEach(r => { categoryCounts[r.type] = (categoryCounts[r.type] || 0) + 1; });
+  reports.forEach(r => { categoryCounts[r.type] = (categoryCounts[r.type] || 0) + 1; });
+  const matchedReport = selectedCategory ? reports.find(r => r.type === selectedCategory) : null;
+  const matchedReportDate = matchedReport?.date || matchedReport?.runDate || null;
 
   // Build rendered report content + TOC entries from raw content
   const { renderedElements, tocEntries } = useMemo(() => {
@@ -852,6 +880,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
         {/* Header bar */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', rowGap: 6, columnGap: 12,
           padding: '8px 16px', borderBottom: `1px solid ${C.border}`, flexShrink: 0, minHeight: 46,
         }}>
           {/* Left: category buttons */}
@@ -867,32 +896,37 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
                     if (active) { setReportContent(null); setReportSections([]); }
                   }}
                   style={{
-                    background: active ? C.accent : hasReport ? C.card : C.bg,
-                    border: `1px solid ${active ? C.accent : hasReport ? C.border : '#0d1117'}`,
-                    color: active ? '#fff' : hasReport ? C.text : C.muted,
-                    opacity: hasReport ? 1 : 0.45,
+                    background: active ? C.accent : C.card,
+                    border: `1px solid ${active ? C.accent : C.border}`,
+                    color: active ? '#fff' : C.text,
                     borderRadius: 6,
                     padding: '5px 12px',
                     fontSize: 11,
                     fontWeight: 600,
                     fontFamily: C.sans,
                     letterSpacing: -0.2,
-                    cursor: hasReport ? 'pointer' : 'default',
-                    display: 'flex', alignItems: 'center', gap: 4,
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6,
                     transition: 'all 0.15s',
                     whiteSpace: 'nowrap',
                   }}
-                  disabled={!hasReport}
-                  title={hasReport ? cat.label : `${cat.label} — no report for this date`}
+                  title={hasReport ? cat.label : `${cat.label} — no report for this date range`}
                 >
                   {cat.label}
+                  {!hasReport && (
+                    <span style={{
+                      width: 6, height: 6, borderRadius: '50%',
+                      background: active ? '#ffffff66' : C.muted,
+                      opacity: 0.5,
+                    }} title="No report for this date range" />
+                  )}
                 </button>
               );
             })}
           </div>
 
           {/* Right: date picker + close */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', rowGap: 6, marginLeft: 'auto' }}>
             <a
               href="https://daa.converselyai.com/"
               target="_blank"
@@ -908,25 +942,49 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
             >
               Conversely ↗
             </a>
-            {availableDates.length > 0 && (
-              <select
-                value={selectedDate || ''}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setReportContent(null);
-                  setReportSections([]);
-                }}
-                style={{
-                  background: C.bg, border: `1px solid ${C.border}`, color: C.text,
-                  borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: C.mono,
-                  cursor: 'pointer', outline: 'none',
-                }}
-              >
-                {availableDates.map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 1, background: C.card, borderRadius: 6, padding: 2, border: `1px solid ${C.border}` }}>
+              {[
+                { id: 'yesterday', label: 'Yest' },
+                { id: 'today', label: 'Today' },
+                { id: 'last7', label: '7D' },
+                { id: 'last30', label: '30D' },
+                { id: 'mtd', label: 'MTD' },
+                { id: 'wtd', label: 'WTD' },
+                { id: 'all', label: 'All' },
+              ].map(p => {
+                const active = range.preset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      const r = presetToRange(p.id);
+                      if (r) {
+                        setRange(r);
+                        setReportContent(null);
+                        setReportSections([]);
+                      }
+                    }}
+                    style={{
+                      padding: '4px 8px', borderRadius: 4, border: 'none', fontSize: 10,
+                      fontWeight: 600, cursor: 'pointer',
+                      background: active ? C.accent : 'transparent',
+                      color: active ? '#fff' : C.muted,
+                    }}
+                  >{p.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', rowGap: 4 }}>
+              <DatePicker
+                value={range.start}
+                onChange={v => { setRange(r => ({ ...r, start: v, preset: 'custom' })); setReportContent(null); setReportSections([]); }}
+              />
+              <span style={{ color: C.muted, fontSize: 11, fontWeight: 600 }}>to</span>
+              <DatePicker
+                value={range.end}
+                onChange={v => { setRange(r => ({ ...r, end: v, preset: 'custom' })); setReportContent(null); setReportSections([]); }}
+              />
+            </div>
             <button
               onClick={() => { setOpen(false); if (onOpenChange) onOpenChange(false); }}
               style={{
@@ -948,27 +1006,37 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
             flexShrink: 0,
           }}
         >
-          {/* Section nav sidebar (when report is loaded) */}
-          {selectedCategory !== 'agent_deep_dive' && reportContent && tocEntries.length > 0 && (
+          {/* Section nav sidebar — prefer AI-synthesized buckets, fall back to raw markdown sections */}
+          {(() => {
+            const useInsight = insightSections.length > 0;
+            const sidebarEntries = useInsight ? insightSections : tocEntries;
+            if (selectedCategory === 'agent_deep_dive' || !reportContent || sidebarEntries.length === 0) return null;
+            return (
             <div style={{
-              width: 200, minWidth: 200, borderRight: `1px solid ${C.border}`,
-              overflow: 'auto', padding: '12px 8px', flexShrink: 0,
+              width: 240, minWidth: 240, borderRight: `1px solid ${C.border}`,
+              overflow: 'auto', padding: '14px 10px', flexShrink: 0,
             }}>
               <div style={{
-                fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase',
-                letterSpacing: 1, marginBottom: 8, fontFamily: C.mono,
+                fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase',
+                letterSpacing: 1, marginBottom: 10, fontFamily: C.mono,
               }}>
-                Sections
+                {useInsight ? 'AI Sections' : 'Sections'}
               </div>
-              {tocEntries.map(s => (
+              {sidebarEntries.map(s => (
                 <button
                   key={s.id}
                   onClick={() => scrollToSection(s.id)}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left',
-                    background: 'none', border: 'none', color: C.accent,
-                    fontSize: 10, fontFamily: C.mono, padding: '4px 6px',
-                    cursor: 'pointer', borderRadius: 4, marginBottom: 2,
+                    background: 'none', border: 'none',
+                    color: s.level === 2 ? C.muted : C.accent,
+                    fontSize: s.level === 2 ? 12 : 13,
+                    fontWeight: s.level === 2 ? 500 : 700,
+                    fontFamily: C.sans,
+                    lineHeight: 1.35,
+                    padding: s.level === 2 ? '5px 6px 5px 20px' : '7px 6px',
+                    marginTop: s.level === 1 ? 8 : 0,
+                    cursor: 'pointer', borderRadius: 4, marginBottom: 1,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     transition: 'background 0.15s',
                   }}
@@ -980,7 +1048,8 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
                 </button>
               ))}
             </div>
-          )}
+            );
+          })()}
 
           {/* Report content area */}
           <div ref={contentScrollRef} style={{ flex: 1, overflow: 'auto', padding: '20px 28px', fontFamily: C.sans }}>
@@ -1006,7 +1075,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
                 justifyContent: 'center', height: '100%', color: C.muted,
                 fontSize: 12, fontFamily: C.mono, textAlign: 'center',
               }}>
-                No report found for {CATEGORIES.find(c => c.id === selectedCategory)?.label} on {selectedDate || 'this date'}
+                No report found for {CATEGORIES.find(c => c.id === selectedCategory)?.label} between {range.start} and {range.end}
               </div>
             )}
 
@@ -1016,7 +1085,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
 
             {selectedCategory && selectedCategory !== 'agent_deep_dive' && !reportLoading && reportContent && renderedElements && (
               <>
-                <InsightHero category={selectedCategory} date={selectedDate} />
+                <InsightHero category={selectedCategory} date={matchedReportDate} onSectionsChange={setInsightSections} />
                 {renderedElements}
               </>
             )}

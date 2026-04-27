@@ -599,11 +599,11 @@ async function fetchFileListFromDrive() {
 }
 
 /** Dispatch: Conversely API when enabled, else Drive folder. */
-async function fetchFileList() {
+async function fetchFileList(opts = {}) {
   if (isConverselyEnabled()) {
     try {
       const [reports, deepDive] = await Promise.all([
-        fetchAllLatestReports(),
+        fetchAllLatestReports(opts),
         fetchAgentDeepDive().catch(() => null),
       ]);
       const files = reports.map(r => ({ id: r.id, name: r.title, modifiedTime: r.modifiedTime }));
@@ -844,7 +844,9 @@ export async function GET(request) {
 
     // --- Action: list-reports ---
     if (action === 'list-reports') {
-      const files = await fetchFileList();
+      const startDate = searchParams.get('start') || undefined;
+      const endDate = searchParams.get('end') || undefined;
+      const files = await fetchFileList({ startDate, endDate });
 
       const reports = files.map((file) => {
         const type = classifyReport(file.name);

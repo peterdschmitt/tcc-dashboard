@@ -74,10 +74,10 @@ function Skeleton() {
   );
 }
 
-function Bucket({ title, items, render }) {
+function Bucket({ id, title, items, render }) {
   if (!items || items.length === 0) return null;
   return (
-    <div>
+    <div id={id}>
       <div style={T.sectionHeading}>{title}</div>
       <div>
         {items.map((it, i) => <div key={i} style={T.item}>{render(it)}</div>)}
@@ -86,7 +86,7 @@ function Bucket({ title, items, render }) {
   );
 }
 
-export default function InsightHero({ category, date }) {
+export default function InsightHero({ category, date, onSectionsChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -108,6 +108,28 @@ export default function InsightHero({ category, date }) {
       .finally(() => setLoading(false));
   }, [category, date]);
 
+  // Build the section list from non-empty buckets and emit upward for the TOC sidebar.
+  useEffect(() => {
+    if (!onSectionsChange) return;
+    if (!data || !data.headline) { onSectionsChange([]); return; }
+    const sections = [{ id: 'hero-headline', title: 'Headline', level: 1 }];
+    if ((data.kpis && data.kpis.length) || data.topAction) sections.push({ id: 'hero-kpis', title: 'Key Metrics', level: 1 });
+    if (data.anomalies?.length) sections.push({ id: 'hero-anomalies', title: 'Anomalies', level: 1 });
+    if (data.breaches?.length) sections.push({ id: 'hero-breaches', title: 'Threshold Breaches', level: 1 });
+    if (data.topProblems?.length) sections.push({ id: 'hero-top-problems', title: 'Top Problems', level: 1 });
+    if (data.topOpportunities?.length) sections.push({ id: 'hero-top-opportunities', title: 'Top Opportunities', level: 1 });
+    if (data.actions?.length) sections.push({ id: 'hero-actions', title: 'Actions', level: 1 });
+    if (data.nextWeekActions?.length) sections.push({ id: 'hero-next-week', title: 'Next Week Actions', level: 1 });
+    if (data.followUpDataNeeded?.length) sections.push({ id: 'hero-follow-up', title: 'Follow-Up Data Needed', level: 1 });
+    if (data.themes?.length) sections.push({ id: 'hero-themes', title: 'Sustained Themes', level: 1 });
+    if (data.wins?.length) sections.push({ id: 'hero-wins', title: 'Wins', level: 1 });
+    if (data.examples?.length) sections.push({ id: 'hero-examples', title: 'Examples & Quotes', level: 1 });
+    if (data.rawMarkdown || (data.evidenceTables && data.evidenceTables.length > 0)) {
+      sections.push({ id: 'hero-full-analysis', title: 'Full Analysis', level: 1 });
+    }
+    onSectionsChange(sections);
+  }, [data, onSectionsChange]);
+
   if (loading) return <Skeleton />;
   if (error) {
     return (
@@ -126,10 +148,10 @@ export default function InsightHero({ category, date }) {
     : 'HEADLINE';
 
   return (
-    <div style={{
+    <div id="hero-headline" style={{
       background: C.card, borderLeft: `4px solid ${sev.bar}`,
       borderRadius: 6, padding: '18px 20px', marginBottom: 16,
-      position: 'relative', fontFamily: C.sans,
+      position: 'relative', fontFamily: C.sans, scrollMarginTop: 12,
     }}>
       <div style={{ position: 'absolute', top: 14, right: 16, display: 'flex', gap: 4, alignItems: 'center' }}>
         <button title="Helpful headline" style={voteBtnStyle}>Helpful</button>
@@ -150,9 +172,10 @@ export default function InsightHero({ category, date }) {
       </div>
 
       {(data.kpis?.length > 0 || data.topAction) && (
-        <div style={{
+        <div id="hero-kpis" style={{
           display: 'flex', marginTop: 14, borderTop: `1px solid ${C.border}`,
           paddingTop: 12, alignItems: 'stretch', flexWrap: 'wrap', gap: 12,
+          scrollMarginTop: 12,
         }}>
           {(data.kpis || []).map((kpi, i) => {
             const trendColor = kpi.trend === 'up' ? C.green : kpi.trend === 'down' ? C.red : C.text;
@@ -176,7 +199,7 @@ export default function InsightHero({ category, date }) {
       )}
 
       <div>
-        <Bucket title="Anomalies" items={data.anomalies} render={(it) => (
+        <Bucket id="hero-anomalies" title="Anomalies" items={data.anomalies} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.text}
@@ -186,7 +209,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Threshold Breaches" items={data.breaches} render={(it) => (
+        <Bucket id="hero-breaches" title="Threshold Breaches" items={data.breaches} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.text}
@@ -196,7 +219,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Top Problems" items={data.topProblems} render={(it) => (
+        <Bucket id="hero-top-problems" title="Top Problems" items={data.topProblems} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.rank && <span style={T.itemRank}>{it.rank}.</span>}
@@ -207,7 +230,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Top Opportunities" items={data.topOpportunities} render={(it) => (
+        <Bucket id="hero-top-opportunities" title="Top Opportunities" items={data.topOpportunities} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.rank && <span style={T.itemRank}>{it.rank}.</span>}
@@ -218,7 +241,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Actions" items={data.actions} render={(it) => (
+        <Bucket id="hero-actions" title="Actions" items={data.actions} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.rank && <span style={T.itemRank}>{it.rank}.</span>}
@@ -228,7 +251,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Next Week Actions" items={data.nextWeekActions} render={(it) => (
+        <Bucket id="hero-next-week" title="Next Week Actions" items={data.nextWeekActions} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.rank && <span style={T.itemRank}>{it.rank}.</span>}
@@ -238,7 +261,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Follow-Up Data Needed" items={data.followUpDataNeeded} render={(it) => (
+        <Bucket id="hero-follow-up" title="Follow-Up Data Needed" items={data.followUpDataNeeded} render={(it) => (
           <>
             <div style={T.itemTitle}>{it.dataNeeded}</div>
             {it.why && <div style={T.itemSubpoint}>Why: {it.why}</div>}
@@ -246,7 +269,7 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Sustained Themes" items={data.themes} render={(it) => (
+        <Bucket id="hero-themes" title="Sustained Themes" items={data.themes} render={(it) => (
           <>
             <div style={T.itemTitle}>
               {it.text}
@@ -256,14 +279,14 @@ export default function InsightHero({ category, date }) {
           </>
         )} />
 
-        <Bucket title="Wins" items={data.wins} render={(it) => (
+        <Bucket id="hero-wins" title="Wins" items={data.wins} render={(it) => (
           <>
             <div style={{ ...T.itemTitle, color: C.green }}>{it.text}</div>
             {it.evidence && <div style={T.itemEvidence}>{it.evidence}</div>}
           </>
         )} />
 
-        <Bucket title="Examples & Quotes" items={data.examples} render={(it) => (
+        <Bucket id="hero-examples" title="Examples & Quotes" items={data.examples} render={(it) => (
           <div style={{ borderLeft: `2px solid ${C.accent}44`, paddingLeft: 10 }}>
             <div style={{ fontSize: 9, color: C.accent, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>{it.type || 'note'}</div>
             <div style={{ ...T.itemTitle, marginTop: 3 }}>{it.text}</div>
@@ -272,13 +295,15 @@ export default function InsightHero({ category, date }) {
         )} />
 
         {(data.rawMarkdown || (data.evidenceTables && data.evidenceTables.length > 0)) && (
-          <Suspense fallback={<div style={{ ...T.itemSubpoint, marginTop: 20 }}>Loading full analysis…</div>}>
-            <FullAnalysis
-              rawMarkdown={data.rawMarkdown}
-              evidenceTables={data.evidenceTables}
-              meta={data.meta}
-            />
-          </Suspense>
+          <div id="hero-full-analysis" style={{ scrollMarginTop: 12 }}>
+            <Suspense fallback={<div style={{ ...T.itemSubpoint, marginTop: 20 }}>Loading full analysis…</div>}>
+              <FullAnalysis
+                rawMarkdown={data.rawMarkdown}
+                evidenceTables={data.evidenceTables}
+                meta={data.meta}
+              />
+            </Suspense>
+          </div>
         )}
 
         {data.meta?.synthesisMs && (
