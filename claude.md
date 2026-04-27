@@ -414,12 +414,15 @@ Replaced Sheets-as-database for the Portfolio UI and future features.
 
 ### Schema
 
-7 entity tables + `_migrations`:
+8 entity tables + `_migrations` + `sync_state`:
 
 - `contacts` (phone-keyed, parent of calls + policies)
 - `calls` (FK contact, campaign, agent; row_hash for idempotent sync)
 - `policies` (FK contact, carrier, product, campaign, agent; source_row_hash for idempotent sync)
+- `commission_ledger` (FK policy, carrier, agent; per-transaction commission events synced from the Commission Ledger sheet tab inside SALES_SHEET_ID)
 - `campaigns`, `carriers`, `products`, `agents` (reference data)
+
+Plus the `policy_commission_summary` VIEW that aggregates ledger rows per policy (total advance, total commission, outstanding balance, last statement date, current status, etc.).
 
 ### Usage
 
