@@ -1,3 +1,5 @@
+import { caseExprForBucket } from './policy-status-buckets.js';
+
 /**
  * Single source of truth for "what columns can a portfolio view show or filter on?"
  * Used by:
@@ -28,6 +30,8 @@ export const COLUMN_REGISTRY = {
 
   // ── Latest Policy (12) ───────────────────────────────────
   placed_status: { label: 'Status', category: 'Latest Policy', sqlExpression: 'p.placed_status', dataType: 'string', formatter: 'status_color', alignment: 'left', joinHints: ['policies'] },
+  policy_status: { label: 'Policy Status', category: 'Latest Policy', sqlExpression: 'p.policy_status', dataType: 'string', formatter: 'status_color', alignment: 'left', joinHints: ['policies'] },
+  policy_status_bucket: { label: 'Status Bucket', category: 'Latest Policy', sqlExpression: caseExprForBucket('p.policy_status'), dataType: 'string', formatter: 'text', alignment: 'left', joinHints: ['policies'] },
   monthly_premium: { label: 'Premium', category: 'Latest Policy', sqlExpression: 'p.monthly_premium', dataType: 'numeric', formatter: 'currency', alignment: 'right', joinHints: ['policies'] },
   original_premium: { label: 'Original Premium', category: 'Latest Policy', sqlExpression: 'p.original_premium', dataType: 'numeric', formatter: 'currency', alignment: 'right', joinHints: ['policies'] },
   face_amount: { label: 'Face Amount', category: 'Latest Policy', sqlExpression: 'p.face_amount', dataType: 'numeric', formatter: 'currency', alignment: 'right', joinHints: ['policies'] },
