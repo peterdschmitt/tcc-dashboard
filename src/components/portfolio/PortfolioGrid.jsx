@@ -1,5 +1,6 @@
 // src/components/portfolio/PortfolioGrid.jsx
 'use client';
+import { COLUMN_REGISTRY } from '@/lib/portfolio/column-registry';
 
 const C = {
   bg: '#080b10', surface: '#0f1520', card: '#131b28', border: '#1a2538',
@@ -16,26 +17,37 @@ function statusColor(status) {
   return C.muted;
 }
 
-export default function PortfolioGrid({ rows, selectedIds, onToggleSelect, onRowClick, sortBy, sortDir, onSort }) {
-  const cols = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'phone', label: 'Phone' },
-    { key: 'state', label: 'State', sortable: true },
-    { key: 'placed_status', label: 'Status' },
-    { key: 'monthly_premium', label: 'Premium', sortable: true, align: 'right' },
-    { key: 'application_date', label: 'Submitted', sortable: true },
-    { key: 'sales_agent', label: 'Agent' },
-    { key: 'last_seen_at', label: 'Last Call', sortable: true },
-  ];
+function fmtValue(v, formatter) {
+  if (v == null || v === '') return '—';
+  switch (formatter) {
+    case 'date':
+      return new Date(v).toLocaleDateString();
+    case 'datetime':
+      return new Date(v).toLocaleString();
+    case 'currency':
+      return `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    case 'integer':
+      return Number(v).toLocaleString();
+    case 'tags':
+      if (!Array.isArray(v) || v.length === 0) return '—';
+      return v.map((t, i) => (
+        <span key={i} style={{ background: C.surface, color: C.muted, padding: '1px 6px', borderRadius: 8, fontSize: 10, marginRight: 4 }}>{t}</span>
+      ));
+    default:
+      return String(v);
+  }
+}
 
+export default function PortfolioGrid({ rows, columns, selectedIds, onToggleSelect, onRowClick, sortBy, sortDir, onSort }) {
+  const cols = (columns ?? []).map(key => ({ key, ...COLUMN_REGISTRY[key] })).filter(c => c.label);
   const allSelected = rows.length > 0 && rows.every(r => selectedIds.has(r.id));
 
   return (
-    <div style={{ background: C.card, borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ background: C.card, borderRadius: 8, overflow: 'auto', maxWidth: '100%' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 13 }}>
         <thead>
           <tr style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
-            <th style={{ padding: '10px 12px', textAlign: 'left', width: 36 }}>
+            <th style={{ padding: '10px 12px', textAlign: 'left', width: 36, position: 'sticky', left: 0, background: C.surface }}>
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -45,15 +57,16 @@ export default function PortfolioGrid({ rows, selectedIds, onToggleSelect, onRow
             {cols.map(c => (
               <th
                 key={c.key}
-                onClick={() => c.sortable && onSort(c.key)}
+                onClick={() => onSort && onSort(c.key)}
                 style={{
                   padding: '10px 12px',
-                  textAlign: c.align ?? 'left',
+                  textAlign: c.alignment ?? 'left',
                   color: C.muted,
                   textTransform: 'uppercase',
                   fontSize: 11,
-                  cursor: c.sortable ? 'pointer' : 'default',
+                  cursor: onSort ? 'pointer' : 'default',
                   userSelect: 'none',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {c.label}{sortBy === c.key && (sortDir === 'asc' ? ' ↑' : ' ↓')}
@@ -62,43 +75,35 @@ export default function PortfolioGrid({ rows, selectedIds, onToggleSelect, onRow
           </tr>
         </thead>
         <tbody>
-          {rows.map(r => {
-            const name = `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim() || '(no name)';
-            return (
-              <tr
-                key={r.id}
-                onClick={() => onRowClick(r.id)}
-                style={{ borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
-              >
-                <td style={{ padding: '10px 12px' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(r.id)}
-                    onClick={e => e.stopPropagation()}
-                    onChange={e => onToggleSelect(r.id, e.target.checked)}
-                  />
-                </td>
-                <td style={{ padding: '10px 12px', color: C.text }}>{name}</td>
-                <td style={{ padding: '10px 12px', color: C.muted }}>{r.phone}</td>
-                <td style={{ padding: '10px 12px', color: C.text }}>{r.state ?? ''}</td>
-                <td style={{ padding: '10px 12px', color: statusColor(r.placedStatus) }}>{r.placedStatus ?? '—'}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: C.text }}>
-                  {r.monthlyPremium != null ? `$${Number(r.monthlyPremium).toFixed(2)}` : '—'}
-                </td>
-                <td style={{ padding: '10px 12px', color: C.muted }}>
-                  {r.applicationDate ? new Date(r.applicationDate).toLocaleDateString() : '—'}
-                </td>
-                <td style={{ padding: '10px 12px', color: C.muted }}>{r.salesAgent ?? '—'}</td>
-                <td style={{ padding: '10px 12px', color: C.muted }}>
-                  {r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleDateString() : '—'}
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map(r => (
+            <tr
+              key={r.id}
+              onClick={() => onRowClick(r.id)}
+              style={{ borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
+            >
+              <td style={{ padding: '10px 12px', position: 'sticky', left: 0, background: C.card }}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(r.id)}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => onToggleSelect(r.id, e.target.checked)}
+                />
+              </td>
+              {cols.map(c => {
+                const v = r[c.key];
+                const color = c.formatter === 'status_color' ? statusColor(v) : C.text;
+                return (
+                  <td key={c.key} style={{ padding: '10px 12px', textAlign: c.alignment ?? 'left', color, whiteSpace: 'nowrap' }}>
+                    {c.formatter === 'status_color' ? (v ?? '—') : fmtValue(v, c.formatter)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
           {rows.length === 0 && (
             <tr>
               <td colSpan={cols.length + 1} style={{ padding: 32, textAlign: 'center', color: C.muted }}>
-                No contacts match the current filters.
+                No contacts match the current view.
               </td>
             </tr>
           )}

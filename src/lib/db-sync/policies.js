@@ -84,7 +84,7 @@ export async function syncPolicies() {
         contact_id, carrier_id, product_id, sales_lead_source_campaign_id, agent_id,
         policy_number, carrier_product_raw,
         monthly_premium, face_amount, term_length,
-        placed_status, outcome_at_application,
+        placed_status, policy_status, outcome_at_application,
         application_date, effective_date,
         sales_lead_source_raw, sales_agent_raw, sales_notes,
         payment_type, payment_frequency, draft_day, ssn_billing_match,
@@ -94,7 +94,7 @@ export async function syncPolicies() {
         ${contactId}, ${carrierId}, ${productId}, ${campaignId}, ${agentId},
         ${row['Policy #'] || null}, ${carrierProductRaw || null},
         ${parseNumeric(row['Monthly Premium'])}, ${parseNumeric(row['Face Amount'])}, ${row['Term Length'] || null},
-        ${row['Placed?'] || null}, ${row['Outcome at Application Submission'] || null},
+        ${row['Placed?'] || null}, ${row['Policy Status'] || null}, ${row['Outcome at Application Submission'] || null},
         ${parseSalesDate(row['Application Submitted Date'])}, ${parseSalesDate(row['Effective Date'])},
         ${leadSource || null}, ${agentName || null}, ${row['Sales Notes'] || null},
         ${row['Payment Type'] || null}, ${row['Payment Frequency'] || null}, ${row['Draft Day'] || null}, ${row['Social Security Billing Match'] || null},
@@ -103,6 +103,7 @@ export async function syncPolicies() {
       )
       ON CONFLICT (source_row_hash) DO UPDATE SET
         placed_status = EXCLUDED.placed_status,
+        policy_status = EXCLUDED.policy_status,
         monthly_premium = EXCLUDED.monthly_premium,
         effective_date = EXCLUDED.effective_date,
         sales_notes = EXCLUDED.sales_notes,
