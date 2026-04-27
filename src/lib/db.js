@@ -52,3 +52,11 @@ export async function closeDb() {
  * cases like .unsafe() (multi-statement DDL execution).
  */
 export const rawClient = () => getSql();
+
+/**
+ * Helper to create an unsafe SQL fragment (e.g., for column references that
+ * cannot be parameterized). This must be called only when the caller is
+ * certain the input is safe and comes from trusted sources (like the
+ * portfolio registry which is populated from schema introspection).
+ */
+export const sqlUnsafe = (expr) => getSql().unsafe(expr);

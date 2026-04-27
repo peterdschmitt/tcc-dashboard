@@ -1,9 +1,5 @@
 // src/lib/portfolio/filter-tree.js
-import postgres from 'postgres';
-
-// Create a dummy postgres instance for safe fragment operations.
-// Does not open a real connection; tagging templates and unsafe() are pure.
-const _sql = postgres();
+import { sql, sqlUnsafe } from '../db.js';
 
 const VALID_GROUP_OPS = new Set(['AND', 'OR']);
 const VALID_LEAF_OPS = new Set([
@@ -53,21 +49,23 @@ export function validateNode(node, registry) {
 
 function compileLeaf(leaf, registry) {
   const col = registry[leaf.field];
-  const expr = _sql.unsafe(col.sqlExpression);
+  // sqlUnsafe() creates a fragment from the real db.js client; fragments
+  // created here compose correctly with other sql fragments in WHERE clauses.
+  const expr = sqlUnsafe(col.sqlExpression);
   switch (leaf.op) {
-    case 'eq': return _sql`${expr} = ${leaf.value}`;
-    case 'neq': return _sql`${expr} != ${leaf.value}`;
-    case 'in': return _sql`${expr} = ANY(${leaf.value})`;
-    case 'not_in': return _sql`NOT (${expr} = ANY(${leaf.value}))`;
-    case 'contains': return _sql`LOWER(${expr}::text) LIKE ${'%' + String(leaf.value).toLowerCase() + '%'}`;
-    case 'not_contains': return _sql`LOWER(${expr}::text) NOT LIKE ${'%' + String(leaf.value).toLowerCase() + '%'}`;
-    case 'gt': return _sql`${expr} > ${leaf.value}`;
-    case 'gte': return _sql`${expr} >= ${leaf.value}`;
-    case 'lt': return _sql`${expr} < ${leaf.value}`;
-    case 'lte': return _sql`${expr} <= ${leaf.value}`;
-    case 'between': return _sql`${expr} BETWEEN ${leaf.value[0]} AND ${leaf.value[1]}`;
-    case 'is_null': return _sql`${expr} IS NULL`;
-    case 'is_not_null': return _sql`${expr} IS NOT NULL`;
+    case 'eq': return sql`${expr} = ${leaf.value}`;
+    case 'neq': return sql`${expr} != ${leaf.value}`;
+    case 'in': return sql`${expr} = ANY(${leaf.value})`;
+    case 'not_in': return sql`NOT (${expr} = ANY(${leaf.value}))`;
+    case 'contains': return sql`LOWER(${expr}::text) LIKE ${'%' + String(leaf.value).toLowerCase() + '%'}`;
+    case 'not_contains': return sql`LOWER(${expr}::text) NOT LIKE ${'%' + String(leaf.value).toLowerCase() + '%'}`;
+    case 'gt': return sql`${expr} > ${leaf.value}`;
+    case 'gte': return sql`${expr} >= ${leaf.value}`;
+    case 'lt': return sql`${expr} < ${leaf.value}`;
+    case 'lte': return sql`${expr} <= ${leaf.value}`;
+    case 'between': return sql`${expr} BETWEEN ${leaf.value[0]} AND ${leaf.value[1]}`;
+    case 'is_null': return sql`${expr} IS NULL`;
+    case 'is_not_null': return sql`${expr} IS NOT NULL`;
     default: throw new Error(`Unknown op: ${leaf.op}`);
   }
 }
@@ -80,18 +78,18 @@ function compileLeaf(leaf, registry) {
  *   const where = compileFilterTree(view.filters_json, registry);
  *   const rows = await sql`SELECT ... FROM contacts c LEFT JOIN policies p ... WHERE ${where} ...`;
  *
- * Empty/null tree → returns _sql`TRUE` (no-op WHERE that composes safely).
+ * Empty/null tree → returns sql`TRUE` (no-op WHERE that composes safely).
  */
 export function compileFilterTree(node, registry) {
-  if (!node) return _sql`TRUE`;
+  if (!node) return sql`TRUE`;
   validateNode(node, registry);
   if (isGroup(node)) {
-    if (node.rules.length === 0) return _sql`TRUE`;
+    if (node.rules.length === 0) return sql`TRUE`;
     if (node.rules.length === 1) return compileFilterTree(node.rules[0], registry);
     const parts = node.rules.map(r => compileFilterTree(r, registry));
-    const joiner = node.op === 'OR' ? _sql` OR ` : _sql` AND `;
+    const joiner = node.op === 'OR' ? sql` OR ` : sql` AND `;
     const composed = parts.flatMap((p, i) => i === 0 ? [p] : [joiner, p]);
-    return _sql`(${composed})`;
+    return sql`(${composed})`;
   }
   return compileLeaf(node, registry);
 }
