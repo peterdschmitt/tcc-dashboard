@@ -804,6 +804,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
   reports.forEach(r => { categoryCounts[r.type] = (categoryCounts[r.type] || 0) + 1; });
   const matchedReport = selectedCategory ? reports.find(r => r.type === selectedCategory) : null;
   const matchedReportDate = matchedReport?.date || matchedReport?.runDate || null;
+  const useInsightSidebar = insightSections.length > 0;
 
   // Build rendered report content + TOC entries from raw content
   const { renderedElements, tocEntries } = useMemo(() => {
@@ -811,6 +812,9 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
     const result = buildReportContent(reportContent);
     return { renderedElements: result.elements, tocEntries: result.tocEntries };
   }, [reportContent]);
+
+  // Sidebar entries: prefer AI-synthesized buckets, fall back to raw markdown headings.
+  const sidebarEntries = useInsightSidebar ? insightSections : tocEntries;
 
   // ---------- TOGGLE BUTTON (top-right, always visible) ----------
   const toggleButton = (
@@ -983,6 +987,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
               <DatePicker
                 value={range.end}
                 onChange={v => { setRange(r => ({ ...r, end: v, preset: 'custom' })); setReportContent(null); setReportSections([]); }}
+                align="right"
               />
             </div>
             <button
@@ -1007,11 +1012,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
           }}
         >
           {/* Section nav sidebar — prefer AI-synthesized buckets, fall back to raw markdown sections */}
-          {(() => {
-            const useInsight = insightSections.length > 0;
-            const sidebarEntries = useInsight ? insightSections : tocEntries;
-            if (selectedCategory === 'agent_deep_dive' || !reportContent || sidebarEntries.length === 0) return null;
-            return (
+          {selectedCategory !== 'agent_deep_dive' && reportContent && sidebarEntries.length > 0 && (
             <div style={{
               width: 240, minWidth: 240, borderRight: `1px solid ${C.border}`,
               overflow: 'auto', padding: '14px 10px', flexShrink: 0,
@@ -1020,7 +1021,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
                 fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase',
                 letterSpacing: 1, marginBottom: 10, fontFamily: C.mono,
               }}>
-                {useInsight ? 'AI Sections' : 'Sections'}
+                {useInsightSidebar ? 'AI Sections' : 'Sections'}
               </div>
               {sidebarEntries.map(s => (
                 <button
@@ -1048,8 +1049,7 @@ export default function AiAnalystPane({ activeTab, activeEntity, setActiveTab, a
                 </button>
               ))}
             </div>
-            );
-          })()}
+          )}
 
           {/* Report content area */}
           <div ref={contentScrollRef} style={{ flex: 1, overflow: 'auto', padding: '20px 28px', fontFamily: C.sans }}>
