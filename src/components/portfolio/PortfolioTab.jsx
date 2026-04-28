@@ -124,8 +124,9 @@ export default function PortfolioTab() {
           >
             + Save view
           </button>
-          <div style={{ marginLeft: 'auto', color: C.muted, fontSize: 12 }}>
-            {loading ? 'Loading...' : ''}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ color: C.muted, fontSize: 12 }}>{loading ? 'Loading...' : ''}</span>
+            <ExportMenu activeViewId={activeViewId} />
           </div>
           {showSavePopover && (
             <PortfolioSaveViewPopover
@@ -177,3 +178,87 @@ const pagBtn = (disabled) => ({
   background: '#131b28', color: '#f0f3f9', border: '1px solid #1a2538',
   padding: '6px 12px', borderRadius: 4, cursor: disabled ? 'default' : 'pointer',
 });
+
+const FORMATS = [
+  { id: 'csv',    label: 'CSV',                     ext: '.csv',   note: 'comma-separated, opens in Excel/Sheets' },
+  { id: 'xlsx',   label: 'Excel (.xlsx)',           ext: '.xlsx',  note: 'native Excel workbook' },
+  { id: 'json',   label: 'JSON',                    ext: '.json',  note: 'raw API rows + view metadata' },
+  { id: 'dialer', label: 'Dialer CSV (ChaseData)',  ext: '.csv',   note: 'phone, first/last name, state' },
+];
+
+function ExportMenu({ activeViewId }) {
+  const [open, setOpen] = useState(false);
+  const [exporting, setExporting] = useState(null);
+
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (!e.target.closest('[data-export-menu]')) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const doExport = async (format) => {
+    if (!activeViewId) return;
+    setExporting(format);
+    try {
+      const url = `/api/portfolio/export-view?viewId=${activeViewId}&format=${format}`;
+      // Trigger browser download by temporarily creating an anchor
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ''; // server's Content-Disposition supplies the filename
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setTimeout(() => setExporting(null), 600);
+      setOpen(false);
+    }
+  };
+
+  const C = { card: '#131b28', surface: '#0f1520', border: '#1a2538', text: '#f0f3f9', muted: '#8fa3be', accent: '#5b9fff' };
+
+  return (
+    <div data-export-menu style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={!activeViewId}
+        style={{
+          background: 'transparent', color: activeViewId ? C.text : C.muted,
+          border: `1px solid ${C.border}`, padding: '6px 12px', borderRadius: 4,
+          cursor: activeViewId ? 'pointer' : 'default', fontSize: 12, fontWeight: 600,
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}
+      >
+        ⬇ Export <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 32, right: 0, zIndex: 50,
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
+          minWidth: 260, boxShadow: '0 4px 12px rgba(0,0,0,0.5)', overflow: 'hidden',
+        }}>
+          <div style={{ color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 12px 4px' }}>Export current view</div>
+          {FORMATS.map(f => (
+            <div
+              key={f.id}
+              onClick={() => doExport(f.id)}
+              style={{
+                padding: '8px 12px', cursor: 'pointer', fontSize: 12, color: C.text,
+                borderTop: `1px solid ${C.border}`,
+                opacity: exporting === f.id ? 0.5 : 1,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = C.card}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ fontWeight: 600 }}>{f.label} {exporting === f.id ? '…' : ''}</div>
+              <div style={{ color: C.muted, fontSize: 11, marginTop: 1 }}>{f.note}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
