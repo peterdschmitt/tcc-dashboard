@@ -17,6 +17,21 @@ export default function PortfolioFilterSidebar({ activeViewId, onSelect, onEdit,
       .catch(() => setLoading(false));
   }, [refreshKey]);
 
+  // Close the action menu on any outside click / Escape press
+  useEffect(() => {
+    if (openMenuId == null) return;
+    const onDocClick = (e) => {
+      if (!e.target.closest('[data-view-menu]')) setOpenMenuId(null);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpenMenuId(null); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openMenuId]);
+
   const refreshList = () => {
     fetch('/api/portfolio/views').then(r => r.json()).then(d => setViews(d.views ?? []));
   };
@@ -73,12 +88,13 @@ export default function PortfolioFilterSidebar({ activeViewId, onSelect, onEdit,
               {v.isSystem && <span style={{ color: C.accent, fontSize: 10, marginLeft: 4 }}>★</span>}
             </span>
             <button
+              data-view-menu
               onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === v.id ? null : v.id); }}
               style={{ background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer' }}
               title="View actions"
             >⋮</button>
             {openMenuId === v.id && (
-              <div style={{ position: 'absolute', right: 0, top: 30, background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, zIndex: 30, minWidth: 140 }}>
+              <div data-view-menu style={{ position: 'absolute', right: 0, top: 30, background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, zIndex: 30, minWidth: 140 }}>
                 <MenuItem onClick={() => { onEdit(v.id); setOpenMenuId(null); }}>Edit</MenuItem>
                 <MenuItem onClick={() => { onDuplicate(v.id); setOpenMenuId(null); }}>Duplicate</MenuItem>
                 <MenuItem onClick={() => togglePin(v)}>{v.pinned ? 'Unpin' : 'Pin'}</MenuItem>

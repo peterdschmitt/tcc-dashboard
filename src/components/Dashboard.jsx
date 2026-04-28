@@ -41,6 +41,7 @@ const TAB_GROUPS = [
       { id: 'carriers', label: 'Carriers' },
     ],
   },
+  { id: 'portfolio', kind: 'standalone', label: 'Portfolio' },
   {
     id: 'sales', kind: 'group', label: 'Sales',
     items: [
@@ -49,7 +50,6 @@ const TAB_GROUPS = [
       { id: 'policy-status', label: 'Policy Status' },
       { id: 'agent-perf', label: 'Agent Performance' },
       { id: 'pnl', label: 'P&L Report' },
-      { id: 'portfolio', label: 'Portfolio' },
     ],
   },
   { id: 'commission-statements', kind: 'standalone', label: 'Commission' },

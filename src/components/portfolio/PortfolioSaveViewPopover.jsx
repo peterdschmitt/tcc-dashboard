@@ -12,20 +12,20 @@ export default function PortfolioSaveViewPopover({ currentState, onSaved, onCanc
 
   const submit = async () => {
     setSaving(true); setError(null);
+    const payload = { name: name.trim(), ...currentState, pinned };
+    console.log('[SaveView] POST /api/portfolio/views payload:', payload);
     try {
       const r = await fetch('/api/portfolio/views', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          ...currentState,
-          pinned,
-        }),
+        body: JSON.stringify(payload),
       });
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.error ?? 'Save failed');
+      const json = await r.json().catch(() => ({}));
+      console.log('[SaveView] response:', r.status, json);
+      if (!r.ok) throw new Error(json.error ?? `Save failed (${r.status})`);
       onSaved(json.id);
     } catch (e) {
+      console.error('[SaveView] error:', e);
       setError(e.message);
     } finally {
       setSaving(false);
