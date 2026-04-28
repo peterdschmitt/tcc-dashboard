@@ -23,10 +23,12 @@ function joinsFor(joinKeys) {
   return parts.length === 0 ? sql`` : parts.flatMap((p, i) => i === 0 ? [p] : [sql` `, p]);
 }
 
-// Categories that come from joined tables and must be wrapped in MAX() because
-// the query groups by c.id only (one policy/commission row per contact is fine;
-// MAX picks the latest non-null value deterministically for scalar fields).
-const AGGREGATE_CATEGORIES = new Set(['Latest Policy', 'Commission']);
+// Columns whose sqlExpression references a joined table (joinHints non-empty)
+// must be wrapped in MAX() because we GROUP BY c.id only. Contact-table columns
+// (joinHints empty) reference c.* directly and don't need aggregation.
+function needsAggregation(col) {
+  return col?.joinHints?.length > 0;
+}
 
 function buildSelectProjection(columnKeys) {
   // Always include the contact id for row-click handlers
@@ -34,8 +36,7 @@ function buildSelectProjection(columnKeys) {
   for (const key of columnKeys) {
     const col = COLUMN_REGISTRY[key];
     if (!col) continue;
-    // Columns from joined tables need MAX() since we GROUP BY c.id
-    const expr = AGGREGATE_CATEGORIES.has(col.category)
+    const expr = needsAggregation(col)
       ? `MAX(${col.sqlExpression})`
       : col.sqlExpression;
     parts.push(sql`${sqlUnsafe(expr)} AS ${sqlUnsafe('"' + key + '"')}`);
@@ -87,7 +88,7 @@ export async function listContactsForView({ viewConfig, page = 1, pageSize = 50 
   const sortKey = viewConfig.sortBy && COLUMN_REGISTRY[viewConfig.sortBy] ? viewConfig.sortBy : 'last_seen_at';
   const sortColEntry = COLUMN_REGISTRY[sortKey];
   const sortExpr = sortColEntry
-    ? (AGGREGATE_CATEGORIES.has(sortColEntry.category)
+    ? (needsAggregation(sortColEntry)
         ? `MAX(${sortColEntry.sqlExpression})`
         : sortColEntry.sqlExpression)
     : 'c.last_seen_at';
